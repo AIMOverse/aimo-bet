@@ -5,10 +5,10 @@ import type { ProviderConfig } from "@/types/models";
  */
 export const PROVIDERS: ProviderConfig[] = [
   {
-    id: "openai",
-    name: "OpenAI",
-    baseUrl: "https://api.openai.com/v1",
-    modelsEndpoint: "/models",
+    id: "aimo-node",
+    name: "aimo-network",
+    baseUrl: "https://devnet.aimo.network/api/v1",
+    modelsEndpoint: "/v1/models",
     envKey: "OPENAI_API_KEY",
   },
   // Future providers can be added here:

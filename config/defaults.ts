@@ -6,7 +6,7 @@
 export const DEFAULT_MODEL_ID = process.env.DEFAULT_MODEL ?? "gpt-4o";
 
 /** Default provider */
-export const DEFAULT_PROVIDER_ID = "openai";
+export const DEFAULT_PROVIDER_ID = "aimo-network";
 
 /** Default title for new chat sessions */
 export const DEFAULT_SESSION_TITLE = "New Chat";

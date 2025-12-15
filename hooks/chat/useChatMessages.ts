@@ -1,7 +1,7 @@
 "use client";
 
 import { useChat as useAIChat } from "@ai-sdk/react";
-import { TextStreamChatTransport } from "ai";
+import { DefaultChatTransport } from "ai";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { UIMessage } from "ai";
 import type { AppUIMessage } from "@/types/chat";
@@ -56,14 +56,14 @@ export function useChatMessages({
   // Create transport with model in body
   const transport = useMemo(
     () =>
-      new TextStreamChatTransport({
+      new DefaultChatTransport({
         api: "/api/chat",
         body: {
           model: selectedModelId,
           sessionId,
         },
       }),
-    [selectedModelId, sessionId]
+    [selectedModelId, sessionId],
   );
 
   // Load messages when session changes
@@ -116,7 +116,7 @@ export function useChatMessages({
           await storage.addMessage(
             sessionId,
             message as AppUIMessage,
-            selectedModelId
+            selectedModelId,
           );
         } catch (err) {
           console.error("Failed to persist message:", err);
@@ -177,7 +177,7 @@ export function useChatMessages({
       // Send to AI using the AI SDK sendMessage
       aiSendMessage({ parts: [{ type: "text", text: content }] });
     },
-    [sessionId, onCreateSession, storage, aiSendMessage, setStoreError]
+    [sessionId, onCreateSession, storage, aiSendMessage, setStoreError],
   );
 
   // Append message locally (for manual additions)
@@ -185,10 +185,11 @@ export function useChatMessages({
     (message: UIMessage) => {
       setMessages((prev) => [...prev, message]);
     },
-    [setMessages]
+    [setMessages],
   );
 
-  const isLoading = status === "streaming" || status === "submitted" || isLoadingHistory;
+  const isLoading =
+    status === "streaming" || status === "submitted" || isLoadingHistory;
 
   return {
     messages: isLoadingHistory ? [] : messages,
