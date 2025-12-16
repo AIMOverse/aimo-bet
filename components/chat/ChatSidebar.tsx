@@ -8,8 +8,10 @@ import {
   MessageSquarePlusIcon,
   TrashIcon,
   MessageSquareIcon,
+  StoreIcon,
 } from "lucide-react";
 import { memo } from "react";
+import Link from "next/link";
 
 interface ChatSidebarProps {
   sessions: ChatSession[];
@@ -67,6 +69,16 @@ export const ChatSidebar = memo(function ChatSidebar({
           )}
         </div>
       </ScrollArea>
+
+      {/* Footer with Store link */}
+      <div className="border-t p-2">
+        <Link href="/store">
+          <Button variant="ghost" className="w-full justify-start gap-2">
+            <StoreIcon className="size-4" />
+            <span>Store</span>
+          </Button>
+        </Link>
+      </div>
     </div>
   );
 });

@@ -9,6 +9,7 @@ import { toUIMessage } from "@/types/chat";
 import { getStorageAdapter } from "@/lib/storage";
 import { useChatStore } from "@/store/chatStore";
 import { useModelStore } from "@/store/modelStore";
+import { useToolStore } from "@/store/toolStore";
 
 interface UseChatMessagesOptions {
   /** Session ID to load messages for */
@@ -48,12 +49,13 @@ export function useChatMessages({
   const hasLoadedRef = useRef<string | null>(null);
 
   const selectedModelId = useModelStore((s) => s.selectedModelId);
+  const globalEnabledTools = useToolStore((s) => s.globalEnabledTools);
   const setIsGenerating = useChatStore((s) => s.setIsGenerating);
   const setStoreError = useChatStore((s) => s.setError);
 
   const storage = getStorageAdapter();
 
-  // Create transport with model in body
+  // Create transport with model and tools in body
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
@@ -61,9 +63,10 @@ export function useChatMessages({
         body: {
           model: selectedModelId,
           sessionId,
+          enabledTools: globalEnabledTools,
         },
       }),
-    [selectedModelId, sessionId],
+    [selectedModelId, sessionId, globalEnabledTools],
   );
 
   // Load messages when session changes
