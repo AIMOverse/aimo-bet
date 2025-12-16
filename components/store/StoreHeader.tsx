@@ -3,7 +3,7 @@
 /**
  * StoreHeader Component
  *
- * Header for the store page with tabs, search, and view mode toggle.
+ * Header for the store page with tabs, search, filters, and view mode toggle.
  */
 
 import { memo } from "react";
@@ -17,20 +17,17 @@ import {
   BotIcon,
   WrenchIcon,
   SparklesIcon,
+  XIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-export type StoreTab = "model" | "agent" | "tool";
-export type ViewMode = "grid" | "list";
+import { useStoreFiltersStore } from "@/store/storeFiltersStore";
+import { ProviderFilter, CategoryFilter } from "./filters";
+import type { StoreTab, ViewMode } from "@/types/filters";
 
 interface StoreHeaderProps {
-  activeTab: StoreTab;
-  onTabChange: (tab: StoreTab) => void;
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
-  search: string;
-  onSearchChange: (search: string) => void;
-  counts?: {
+  counts: {
     models: number;
     agents: number;
     tools: number;
@@ -44,14 +41,22 @@ const tabs: Array<{ id: StoreTab; label: string; icon: React.ReactNode }> = [
 ];
 
 export const StoreHeader = memo(function StoreHeader({
-  activeTab,
-  onTabChange,
   viewMode,
   onViewModeChange,
-  search,
-  onSearchChange,
   counts,
 }: StoreHeaderProps) {
+  const {
+    search,
+    setSearch,
+    tab,
+    setTab,
+    providers,
+    categories,
+    clearFilters,
+  } = useStoreFiltersStore();
+
+  const hasActiveFilters = search || providers.length > 0 || categories.length > 0;
+
   return (
     <div className="flex flex-col gap-4 pb-4 border-b">
       {/* Title and view mode */}
@@ -79,38 +84,55 @@ export const StoreHeader = memo(function StoreHeader({
 
       {/* Tabs */}
       <div className="flex items-center gap-1">
-        {tabs.map((tab) => (
+        {tabs.map((tabItem) => (
           <Button
-            key={tab.id}
-            variant={activeTab === tab.id ? "secondary" : "ghost"}
+            key={tabItem.id}
+            variant={tab === tabItem.id ? "secondary" : "ghost"}
             size="sm"
-            onClick={() => onTabChange(tab.id)}
+            onClick={() => setTab(tabItem.id)}
             className={cn(
               "gap-2",
-              activeTab === tab.id && "bg-secondary"
+              tab === tabItem.id && "bg-secondary"
             )}
           >
-            {tab.icon}
-            <span>{tab.label}</span>
-            {counts && (
-              <span className="text-xs text-muted-foreground ml-1">
-                ({counts[tab.id === "model" ? "models" : tab.id === "agent" ? "agents" : "tools"]})
-              </span>
-            )}
+            {tabItem.icon}
+            <span>{tabItem.label}</span>
+            <span className="text-xs text-muted-foreground ml-1">
+              ({counts[tabItem.id === "model" ? "models" : tabItem.id === "agent" ? "agents" : "tools"]})
+            </span>
           </Button>
         ))}
       </div>
 
-      {/* Search */}
-      <div className="relative">
-        <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder={`Search ${activeTab}s...`}
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          className="pl-9"
-        />
+      {/* Search & Filters */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
+          <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder={`Search ${tab}s...`}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+
+        {/* Show provider filter for models tab */}
+        {tab === "model" && <ProviderFilter />}
+
+        {/* Show category filter for tools tab */}
+        {tab === "tool" && <CategoryFilter />}
+
+        {/* Clear filters button */}
+        {hasActiveFilters && (
+          <Button variant="ghost" size="sm" onClick={clearFilters}>
+            <XIcon className="h-4 w-4 mr-1" />
+            Clear
+          </Button>
+        )}
       </div>
     </div>
   );
 });
+
+// Re-export types for backwards compatibility
+export type { StoreTab, ViewMode } from "@/types/filters";

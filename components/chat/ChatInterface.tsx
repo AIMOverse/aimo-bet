@@ -19,6 +19,7 @@ import {
   PromptInputAttachment,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { ChatModelSelector } from "./ChatModelSelector";
 import { ChatAgentSelector } from "./ChatAgentSelector";
 import { ChatToolSelector } from "./ChatToolSelector";
@@ -29,10 +30,12 @@ import { Separator } from "@/components/ui/separator";
 
 interface ChatInterfaceProps {
   sessionId: string | null;
+  sessionTitle?: string;
 }
 
 export const ChatInterface = memo(function ChatInterface({
   sessionId,
+  sessionTitle,
 }: ChatInterfaceProps) {
   const { createSession } = useSessions();
 
@@ -60,6 +63,16 @@ export const ChatInterface = memo(function ChatInterface({
 
   return (
     <div className="flex h-full flex-col">
+      {/* Header */}
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+        <SidebarTrigger className="-ml-1" />
+        <Separator orientation="vertical" className="h-4" />
+        <h1 className="text-sm font-medium truncate flex-1">
+          {sessionTitle || "New Chat"}
+        </h1>
+        <ChatModelSelector />
+      </header>
+
       {/* Messages Area */}
       <Conversation className="flex-1">
         {messages.length === 0 ? (
@@ -94,8 +107,6 @@ export const ChatInterface = memo(function ChatInterface({
         />
         <PromptInputFooter>
           <PromptInputTools>
-            <ChatModelSelector />
-            <Separator orientation="vertical" className="h-4" />
             <ChatAgentSelector />
             <ChatToolSelector />
           </PromptInputTools>
