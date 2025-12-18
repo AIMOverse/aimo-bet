@@ -1,5 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai";
-import { streamText, UIMessage, ToolSet } from "ai";
+import { streamText, UIMessage, ToolSet, createIdGenerator } from "ai";
 import { DEFAULT_SYSTEM_PROMPT } from "@/config/defaults";
 import { BUILT_IN_TOOLS } from "@/config/tools";
 import { getModelById } from "@/config/models";
@@ -8,6 +8,12 @@ import {
   getToolEndpoint,
   MCPClientWrapper,
 } from "@/lib/mcp";
+import {
+  loadMessages,
+  saveChat,
+  generateSessionId,
+  generateMessageId,
+} from "@/lib/supabase/messages";
 
 // AiMo Network API configuration
 const AIMO_BASE_URL = "https://devnet.aimo.network/api/v1";
@@ -19,8 +25,16 @@ export const maxDuration = 60;
 // ============================================================================
 
 interface ChatRequest {
-  messages: UIMessage[];
+  /** The new message from the user (text content) */
+  message: {
+    role: "user";
+    parts: Array<{ type: "text"; text: string }>;
+  };
+  /** Session ID (null for new conversations) */
+  sessionId: string | null;
+  /** Model to use */
   model?: string;
+  /** Enabled tool IDs */
   enabledTools?: string[];
 }
 
@@ -117,8 +131,8 @@ async function cleanupMCPClients(clients: MCPClientWrapper[]): Promise<void> {
     clients.map((client) =>
       client.close().catch((error) => {
         console.error("Error closing MCP client:", error);
-      }),
-    ),
+      })
+    )
   );
 }
 
@@ -131,7 +145,8 @@ export async function POST(req: Request) {
 
   try {
     const {
-      messages,
+      message,
+      sessionId: clientSessionId,
       model = "openai/gpt-4o",
       enabledTools = [],
     }: ChatRequest = await req.json();
@@ -140,17 +155,42 @@ export async function POST(req: Request) {
     if (!process.env.OPENAI_API_KEY) {
       return new Response(
         JSON.stringify({ error: "AiMo API key not configured" }),
-        { status: 500, headers: { "Content-Type": "application/json" } },
+        { status: 500, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    // Validate messages
-    if (!messages || !Array.isArray(messages)) {
-      return new Response(JSON.stringify({ error: "Messages are required" }), {
+    // Validate message
+    if (!message || !message.parts || message.parts.length === 0) {
+      return new Response(JSON.stringify({ error: "Message is required" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
     }
+
+    // Determine session ID (create new if not provided)
+    const isNewSession = !clientSessionId;
+    const sessionId = clientSessionId ?? generateSessionId();
+
+    // Load previous messages from Supabase if existing session
+    let previousMessages: UIMessage[] = [];
+    if (!isNewSession) {
+      try {
+        previousMessages = await loadMessages(sessionId);
+      } catch (error) {
+        console.error("Failed to load previous messages:", error);
+        // Continue with empty history if load fails
+      }
+    }
+
+    // Create user message with server-generated ID
+    const userMessage: UIMessage = {
+      id: generateMessageId(),
+      role: "user",
+      parts: message.parts,
+    };
+
+    // Combine previous messages with new user message
+    const messages: UIMessage[] = [...previousMessages, userMessage];
 
     // Set up tools
     const { tools, mcpClients: clients } = await setupTools(enabledTools);
@@ -193,13 +233,36 @@ export async function POST(req: Request) {
       messages: simpleMessages,
       tools: hasTools ? tools : undefined,
       providerOptions: experimentalProviderMetadata,
-      onFinish: async () => {
+    });
+
+    // Consume stream to ensure onFinish is called even on client disconnect
+    // This runs in the background - no await
+    result.consumeStream();
+
+    // Return streaming response with server-side message ID generation
+    return result.toUIMessageStreamResponse({
+      originalMessages: messages,
+      // Generate consistent server-side IDs for AI messages
+      generateMessageId: createIdGenerator({
+        prefix: "msg",
+        size: 16,
+      }),
+      onFinish: async ({ messages: finalMessages }) => {
+        try {
+          // Save all messages to Supabase
+          await saveChat({
+            sessionId,
+            messages: finalMessages,
+            modelId: model,
+          });
+        } catch (error) {
+          console.error("Failed to save chat:", error);
+        }
+
         // Clean up MCP clients when streaming completes
         await cleanupMCPClients(mcpClients);
       },
     });
-
-    return result.toUIMessageStreamResponse();
   } catch (error) {
     // Ensure MCP clients are cleaned up on error
     await cleanupMCPClients(mcpClients);
@@ -224,7 +287,7 @@ export async function POST(req: Request) {
 
     return new Response(
       JSON.stringify({ error: "Failed to process chat request" }),
-      { status: 500, headers: { "Content-Type": "application/json" } },
+      { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
 }

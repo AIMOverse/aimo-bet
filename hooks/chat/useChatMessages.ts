@@ -3,19 +3,17 @@
 import { useChat as useAIChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import type { UIMessage } from "ai";
-import type { AppUIMessage } from "@/types/chat";
-import { toUIMessage } from "@/types/chat";
-import { getStorageAdapter } from "@/lib/storage";
 import { useChatStore } from "@/store/chatStore";
 import { useModelStore } from "@/store/modelStore";
 import { useToolStore } from "@/store/toolStore";
+import { useSessionStore } from "@/store/sessionStore";
+import { getCachedMessages, setCachedMessages } from "@/lib/cache/messages";
 
 interface UseChatMessagesOptions {
-  /** Session ID to load messages for */
+  /** Session ID to load messages for (null for new chat) */
   sessionId: string | null;
-  /** Callback when a new session should be created */
-  onCreateSession?: () => Promise<string>;
 }
 
 interface UseChatMessagesReturn {
@@ -41,32 +39,47 @@ interface UseChatMessagesReturn {
 
 export function useChatMessages({
   sessionId,
-  onCreateSession,
 }: UseChatMessagesOptions): UseChatMessagesReturn {
+  const router = useRouter();
   const [initialMessages, setInitialMessages] = useState<UIMessage[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [input, setInput] = useState("");
+  // For new chats, generate a session ID client-side (UUIDs are collision-safe)
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(
+    sessionId
+  );
   const hasLoadedRef = useRef<string | null>(null);
+  const isNewChatRef = useRef(sessionId === null);
 
   const selectedModelId = useModelStore((s) => s.selectedModelId);
   const globalEnabledTools = useToolStore((s) => s.globalEnabledTools);
   const setIsGenerating = useChatStore((s) => s.setIsGenerating);
   const setStoreError = useChatStore((s) => s.setError);
+  const setStoreCurrentSession = useSessionStore((s) => s.setCurrentSession);
 
-  const storage = getStorageAdapter();
-
-  // Create transport with model and tools in body
+  // Create transport that sends only the last message
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
         api: "/api/chat",
-        body: {
-          model: selectedModelId,
-          sessionId,
-          enabledTools: globalEnabledTools,
+        // Only send the last message to reduce payload size
+        // Server will load previous messages from Supabase
+        prepareSendMessagesRequest({ messages }) {
+          const lastMessage = messages[messages.length - 1];
+          return {
+            body: {
+              message: {
+                role: lastMessage.role,
+                parts: lastMessage.parts,
+              },
+              sessionId: currentSessionId,
+              model: selectedModelId,
+              enabledTools: globalEnabledTools,
+            },
+          };
         },
       }),
-    [selectedModelId, sessionId, globalEnabledTools],
+    [currentSessionId, selectedModelId, globalEnabledTools]
   );
 
   // Load messages when session changes
@@ -76,25 +89,52 @@ export function useChatMessages({
     const loadMessages = async () => {
       setIsLoadingHistory(true);
       try {
-        const persisted = await storage.getMessages(sessionId);
-        const uiMessages = persisted.map(toUIMessage);
-        setInitialMessages(uiMessages);
+        // Try cache first for faster load
+        const cached = getCachedMessages(sessionId);
+        if (cached.length > 0) {
+          setInitialMessages(cached);
+        }
+
+        // Fetch fresh from API
+        const response = await fetch(
+          `/api/sessions/messages?id=${sessionId}`
+        );
+        if (response.ok) {
+          const messages = await response.json();
+          setInitialMessages(messages);
+          // Update cache
+          setCachedMessages(sessionId, messages);
+        } else if (cached.length === 0) {
+          // No cache and API failed - start fresh
+          setInitialMessages([]);
+        }
+
         hasLoadedRef.current = sessionId;
       } catch (err) {
         console.error("Failed to load messages:", err);
+        // Use cached messages if available
+        const cached = getCachedMessages(sessionId);
+        if (cached.length > 0) {
+          setInitialMessages(cached);
+        }
       } finally {
         setIsLoadingHistory(false);
       }
     };
 
     loadMessages();
-  }, [sessionId, storage]);
+  }, [sessionId]);
 
   // Reset when session changes
   useEffect(() => {
     if (!sessionId) {
       setInitialMessages([]);
       hasLoadedRef.current = null;
+      setCurrentSessionId(null);
+      isNewChatRef.current = true;
+    } else {
+      setCurrentSessionId(sessionId);
+      isNewChatRef.current = false;
     }
   }, [sessionId]);
 
@@ -107,24 +147,11 @@ export function useChatMessages({
     regenerate,
     setMessages,
   } = useAIChat({
-    id: sessionId ?? undefined,
+    id: currentSessionId ?? undefined,
     messages: initialMessages,
     transport,
-    onFinish: async ({ message }) => {
+    onFinish: async () => {
       setIsGenerating(false);
-
-      // Persist assistant message
-      if (sessionId && message) {
-        try {
-          await storage.addMessage(
-            sessionId,
-            message as AppUIMessage,
-            selectedModelId,
-          );
-        } catch (err) {
-          console.error("Failed to persist message:", err);
-        }
-      }
     },
     onError: (err) => {
       setIsGenerating(false);
@@ -152,35 +179,22 @@ export function useChatMessages({
     async (content: string) => {
       if (!content.trim()) return;
 
-      let activeSessionId = sessionId;
+      // For new chats, generate a session ID and navigate
+      if (isNewChatRef.current && !currentSessionId) {
+        const newSessionId = crypto.randomUUID();
+        setCurrentSessionId(newSessionId);
+        setStoreCurrentSession(newSessionId);
+        isNewChatRef.current = false;
 
-      // Create session if needed
-      if (!activeSessionId && onCreateSession) {
-        activeSessionId = await onCreateSession();
-      }
-
-      if (!activeSessionId) {
-        setStoreError("No active session");
-        return;
-      }
-
-      // Persist user message
-      const userMessage: UIMessage = {
-        id: crypto.randomUUID(),
-        role: "user",
-        parts: [{ type: "text", text: content }],
-      };
-
-      try {
-        await storage.addMessage(activeSessionId, userMessage as AppUIMessage);
-      } catch (err) {
-        console.error("Failed to persist user message:", err);
+        // Navigate to the new session URL
+        router.push(`/chat/${newSessionId}`);
       }
 
       // Send to AI using the AI SDK sendMessage
+      // The message will be persisted server-side
       aiSendMessage({ parts: [{ type: "text", text: content }] });
     },
-    [sessionId, onCreateSession, storage, aiSendMessage, setStoreError],
+    [aiSendMessage, currentSessionId, router, setStoreCurrentSession]
   );
 
   // Append message locally (for manual additions)
@@ -188,7 +202,7 @@ export function useChatMessages({
     (message: UIMessage) => {
       setMessages((prev) => [...prev, message]);
     },
-    [setMessages],
+    [setMessages]
   );
 
   const isLoading =
