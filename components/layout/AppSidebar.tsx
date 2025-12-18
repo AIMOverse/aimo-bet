@@ -14,7 +14,7 @@ import {
 import { Plus, Store, Settings } from "lucide-react";
 import { useSessions } from "@/hooks/chat";
 import { useSessionStore } from "@/store/sessionStore";
-import { ChatSidebar } from "./ChatSidebar";
+import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { useCallback } from "react";
 
 export function AppSidebar() {
@@ -38,7 +38,7 @@ export function AppSidebar() {
       router.push(href);
       if (isMobile) setOpenMobile(false);
     },
-    [router, isMobile, setOpenMobile]
+    [router, isMobile, setOpenMobile],
   );
 
   return (
