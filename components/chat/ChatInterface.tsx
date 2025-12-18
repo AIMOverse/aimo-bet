@@ -19,6 +19,14 @@ import {
   PromptInputAttachment,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
+import { Image } from "@/components/ai-elements/image";
+import {
+  Tool,
+  ToolHeader,
+  ToolContent,
+  ToolInput,
+  ToolOutput,
+} from "@/components/ai-elements/tool";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { ChatModelSelector } from "./ChatModelSelector";
 import { ChatAgentSelector } from "./ChatAgentSelector";
@@ -124,24 +132,123 @@ interface ChatMessageProps {
   message: UIMessage;
 }
 
-const ChatMessage = memo(function ChatMessage({ message }: ChatMessageProps) {
-  // Get text content from message parts
-  const textContent =
-    message.parts
-      ?.filter(
-        (part): part is { type: "text"; text: string } => part.type === "text",
-      )
-      .map((part) => part.text)
-      .join("") ?? "";
+/** Result type from generateImage tool */
+interface GenerateImageResult {
+  success: boolean;
+  image?: { base64: string; mediaType: string };
+  prompt: string;
+  revisedPrompt?: string;
+  error?: string;
+}
 
+const ChatMessage = memo(function ChatMessage({ message }: ChatMessageProps) {
   return (
     <Message from={message.role}>
       <MessageContent>
-        {message.role === "assistant" ? (
-          <Streamdown>{textContent}</Streamdown>
-        ) : (
-          <div className="whitespace-pre-wrap">{textContent}</div>
-        )}
+        {message.parts?.map((part, index) => {
+          // Text content
+          if (part.type === "text") {
+            return message.role === "assistant" ? (
+              <Streamdown key={index}>{part.text}</Streamdown>
+            ) : (
+              <div key={index} className="whitespace-pre-wrap">
+                {part.text}
+              </div>
+            );
+          }
+
+          // File/image parts (from multimodal models or response.images[])
+          if (part.type === "file" && part.mediaType?.startsWith("image/")) {
+            const filePart = part as { url: string; mediaType: string };
+            const base64 = filePart.url.replace(/^data:[^;]+;base64,/, "");
+            return (
+              <Image
+                key={index}
+                base64={base64}
+                uint8Array={new Uint8Array()}
+                mediaType={filePart.mediaType}
+                alt="Generated image"
+                className="mt-2 max-w-md"
+              />
+            );
+          }
+
+          // Tool invocations (type is "tool-{toolName}" in AI SDK v6)
+          if (part.type.startsWith("tool-")) {
+            const toolPart = part as unknown as {
+              type: string;
+              toolCallId: string;
+              state:
+                | "input-streaming"
+                | "input-available"
+                | "output-available"
+                | "output-error"
+                | "output-denied";
+              input?: unknown;
+              output?: unknown;
+              errorText?: string;
+            };
+
+            // Extract tool name from type (e.g., "tool-generateImage" -> "generateImage")
+            const toolName = toolPart.type.replace(/^tool-/, "");
+
+            // Special rendering for generateImage tool results
+            if (
+              toolName === "generateImage" &&
+              toolPart.state === "output-available"
+            ) {
+              const result = toolPart.output as GenerateImageResult;
+
+              if (result?.success && result.image) {
+                return (
+                  <div key={index} className="mt-2 space-y-2">
+                    <Image
+                      base64={result.image.base64}
+                      uint8Array={new Uint8Array()}
+                      mediaType={result.image.mediaType}
+                      alt={result.revisedPrompt || result.prompt}
+                      className="max-w-md rounded-lg"
+                    />
+                    {result.revisedPrompt &&
+                      result.revisedPrompt !== result.prompt && (
+                        <p className="text-xs text-muted-foreground">
+                          Prompt enhanced: {result.revisedPrompt}
+                        </p>
+                      )}
+                  </div>
+                );
+              }
+            }
+
+            // Default tool rendering using Tool components
+            return (
+              <Tool key={index}>
+                <ToolHeader
+                  title={toolName}
+                  type="tool-invocation"
+                  state={toolPart.state}
+                />
+                <ToolContent>
+                  <ToolInput input={toolPart.input} />
+                  {toolPart.state === "output-available" && (
+                    <ToolOutput
+                      output={toolPart.output}
+                      errorText={undefined}
+                    />
+                  )}
+                  {toolPart.state === "output-error" && (
+                    <ToolOutput
+                      output={undefined}
+                      errorText={toolPart.errorText}
+                    />
+                  )}
+                </ToolContent>
+              </Tool>
+            );
+          }
+
+          return null;
+        })}
       </MessageContent>
     </Message>
   );

@@ -38,6 +38,7 @@ const DEFAULT_ENABLED_TOOLS: string[] = [
   "base64",
   "urlEncode",
   "jsonFormat",
+  "generateImage",
 ];
 
 export const useToolStore = create<ToolState>()(
@@ -75,8 +76,8 @@ export const useToolStore = create<ToolState>()(
     }),
     {
       name: "aimo-chat-tools",
-    }
-  )
+    },
+  ),
 );
 
 // ============================================================================
@@ -93,7 +94,7 @@ export const useToolStore = create<ToolState>()(
  */
 export function mergeToolsWithSession(
   globalTools: string[],
-  sessionOverrides?: { enabled?: string[]; disabled?: string[] }
+  sessionOverrides?: { enabled?: string[]; disabled?: string[] },
 ): string[] {
   if (!sessionOverrides) {
     return globalTools;

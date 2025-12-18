@@ -3,6 +3,25 @@
 // =============================================================================
 
 /**
+ * Output modality types supported by models
+ */
+export type OutputModality = "text" | "image";
+
+/**
+ * Image generation settings for models that support image output
+ */
+export interface ImageSettings {
+  /** Supported image sizes (e.g., ["1024x1024", "1792x1024"]) */
+  supportedSizes?: string[];
+  /** Supported aspect ratios (e.g., ["1:1", "16:9", "9:16"]) */
+  supportedAspectRatios?: string[];
+  /** Maximum images per API call */
+  maxImagesPerCall?: number;
+  /** Default aspect ratio for image generation */
+  defaultAspectRatio?: string;
+}
+
+/**
  * AI model definition
  */
 export interface ModelDefinition {
@@ -21,10 +40,14 @@ export interface ModelDefinition {
   };
   /** Optional description */
   description?: string;
-  /** Whether this model supports vision/images */
+  /** Whether this model supports vision/images as input */
   supportsVision?: boolean;
   /** Whether this model supports function calling */
   supportsFunctions?: boolean;
+  /** Output modalities supported by this model (defaults to ["text"]) */
+  outputModalities?: OutputModality[];
+  /** Image generation settings (for models with image output) */
+  imageSettings?: ImageSettings;
 }
 
 /**
