@@ -1,11 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import type { ChatSession } from "@/types/chat";
-import { getStorageAdapter } from "@/lib/storage";
 import { useSessionStore } from "@/store/sessionStore";
-import { useModelStore } from "@/store/modelStore";
-import { DEFAULT_SESSION_TITLE } from "@/config/defaults";
+import { clearCachedMessages } from "@/lib/cache/messages";
 
 interface UseSessionsReturn {
   /** All chat sessions */
@@ -16,89 +15,128 @@ interface UseSessionsReturn {
   isLoading: boolean;
   /** Error state */
   error: string | null;
-  /** Create a new session */
-  createSession: (title?: string) => Promise<ChatSession>;
   /** Update a session */
-  updateSession: (id: string, data: Partial<Pick<ChatSession, "title" | "modelId">>) => Promise<void>;
+  updateSession: (
+    id: string,
+    data: Partial<Pick<ChatSession, "title" | "modelId">>
+  ) => Promise<void>;
   /** Delete a session */
   deleteSession: (id: string) => Promise<void>;
   /** Set the current session */
   setCurrentSession: (id: string | null) => void;
-  /** Refresh sessions from storage */
+  /** Refresh sessions from API */
   refresh: () => Promise<void>;
 }
 
 export function useSessions(): UseSessionsReturn {
+  const router = useRouter();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
   const setCurrentSessionId = useSessionStore((s) => s.setCurrentSession);
-  const selectedModelId = useModelStore((s) => s.selectedModelId);
 
-  const currentSession = sessions.find((s) => s.id === currentSessionId) ?? null;
+  const currentSession =
+    sessions.find((s) => s.id === currentSessionId) ?? null;
 
-  const storage = getStorageAdapter();
-
-  // Load sessions on mount
+  // Load sessions from API
   const loadSessions = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
-      const loaded = await storage.getSessions();
-      setSessions(loaded);
+
+      const response = await fetch("/api/sessions");
+      if (!response.ok) {
+        throw new Error("Failed to fetch sessions");
+      }
+
+      const data = await response.json();
+
+      // Convert date strings to Date objects
+      const sessionsWithDates: ChatSession[] = data.map(
+        (s: {
+          id: string;
+          title: string;
+          modelId: string;
+          createdAt: string;
+          updatedAt: string;
+        }) => ({
+          ...s,
+          createdAt: new Date(s.createdAt),
+          updatedAt: new Date(s.updatedAt),
+        })
+      );
+
+      setSessions(sessionsWithDates);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load sessions");
     } finally {
       setIsLoading(false);
     }
-  }, [storage]);
+  }, []);
 
+  // Load sessions on mount
   useEffect(() => {
     loadSessions();
   }, [loadSessions]);
 
-  const createSession = useCallback(
-    async (title?: string): Promise<ChatSession> => {
-      const newSession = await storage.createSession({
-        title: title ?? DEFAULT_SESSION_TITLE,
-        modelId: selectedModelId,
-      });
-
-      setSessions((prev) => [newSession, ...prev]);
-      setCurrentSessionId(newSession.id);
-
-      return newSession;
-    },
-    [storage, selectedModelId, setCurrentSessionId]
-  );
-
   const updateSession = useCallback(
-    async (id: string, data: Partial<Pick<ChatSession, "title" | "modelId">>) => {
-      await storage.updateSession(id, data);
+    async (
+      id: string,
+      data: Partial<Pick<ChatSession, "title" | "modelId">>
+    ) => {
+      try {
+        const response = await fetch(`/api/sessions?id=${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
 
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.id === id ? { ...s, ...data, updatedAt: new Date() } : s
-        )
-      );
+        if (!response.ok) {
+          throw new Error("Failed to update session");
+        }
+
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.id === id ? { ...s, ...data, updatedAt: new Date() } : s
+          )
+        );
+      } catch (err) {
+        console.error("Failed to update session:", err);
+        throw err;
+      }
     },
-    [storage]
+    []
   );
 
   const deleteSession = useCallback(
     async (id: string) => {
-      await storage.deleteSession(id);
+      try {
+        const response = await fetch(`/api/sessions?id=${id}`, {
+          method: "DELETE",
+        });
 
-      setSessions((prev) => prev.filter((s) => s.id !== id));
+        if (!response.ok) {
+          throw new Error("Failed to delete session");
+        }
 
-      // If deleting current session, clear selection
-      if (currentSessionId === id) {
-        setCurrentSessionId(null);
+        // Clear message cache for this session
+        clearCachedMessages(id);
+
+        setSessions((prev) => prev.filter((s) => s.id !== id));
+
+        // If deleting current session, navigate to new chat
+        if (currentSessionId === id) {
+          setCurrentSessionId(null);
+          router.push("/chat/new");
+        }
+      } catch (err) {
+        console.error("Failed to delete session:", err);
+        throw err;
       }
     },
-    [storage, currentSessionId, setCurrentSessionId]
+    [currentSessionId, setCurrentSessionId, router]
   );
 
   const setCurrentSession = useCallback(
@@ -113,7 +151,6 @@ export function useSessions(): UseSessionsReturn {
     currentSession,
     isLoading,
     error,
-    createSession,
     updateSession,
     deleteSession,
     setCurrentSession,

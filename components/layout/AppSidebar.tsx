@@ -12,7 +12,6 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Plus, Store, Settings } from "lucide-react";
-import { useSessions } from "@/hooks/chat";
 import { useSessionStore } from "@/store/sessionStore";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { useCallback } from "react";
@@ -21,24 +20,22 @@ export function AppSidebar() {
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
 
-  const { createSession } = useSessions();
   const setCurrentSession = useSessionStore((s) => s.setCurrentSession);
 
-  const handleNewChat = useCallback(async () => {
-    const session = await createSession();
-    if (session) {
-      setCurrentSession(session.id);
-      router.push(`/chat/${session.id}`);
-      if (isMobile) setOpenMobile(false);
-    }
-  }, [createSession, setCurrentSession, router, isMobile, setOpenMobile]);
+  // Navigate to /chat/new for new conversations
+  // Session will be created server-side on first message
+  const handleNewChat = useCallback(() => {
+    setCurrentSession(null);
+    router.push("/chat/new");
+    if (isMobile) setOpenMobile(false);
+  }, [setCurrentSession, router, isMobile, setOpenMobile]);
 
   const handleNavClick = useCallback(
     (href: string) => {
       router.push(href);
       if (isMobile) setOpenMobile(false);
     },
-    [router, isMobile, setOpenMobile],
+    [router, isMobile, setOpenMobile]
   );
 
   return (
