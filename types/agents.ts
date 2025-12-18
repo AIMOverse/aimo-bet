@@ -128,6 +128,54 @@ export interface AgentCatalogItemWithA2A extends AgentCatalogItem {
 }
 
 // ============================================================================
+// Custom Agent Types (AI SDK aligned)
+// ============================================================================
+
+/**
+ * Agent settings for AI SDK Agent class
+ */
+export interface CustomAgentSettings {
+  /** Maximum steps for agent loop (stopWhen: stepCountIs(n)) */
+  maxSteps?: number;
+  /** Model temperature (0-2) */
+  temperature?: number;
+}
+
+/**
+ * Custom agent configuration
+ * Aligned with AI SDK Agent class properties
+ */
+export interface CustomAgentConfig {
+  /** Local UUID */
+  id: string;
+  /** Agent display name */
+  name: string;
+  /** Optional description */
+  description?: string;
+
+  // Core AI SDK Agent properties
+  /** Model ID (e.g., "openai/gpt-4o") */
+  modelId: string;
+  /** Tool IDs to enable */
+  tools: string[];
+  /** System instruction/prompt */
+  systemPrompt?: string;
+
+  /** Agent settings */
+  settings?: CustomAgentSettings;
+
+  /** ISO timestamp */
+  createdAt: string;
+  /** ISO timestamp */
+  updatedAt: string;
+}
+
+/**
+ * Agent source type
+ */
+export type AgentSource = "preset" | "custom";
+
+// ============================================================================
 // API Response Types
 // ============================================================================
 

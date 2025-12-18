@@ -224,7 +224,7 @@ export default function StoreDetailPage({ params }: PageProps) {
               {agent.chat_completion && (
                 <Button
                   variant={isSelected ? "secondary" : "default"}
-                  onClick={() => setSelectedAgent(isSelected ? null : agent.agent_id)}
+                  onClick={() => setSelectedAgent(isSelected ? null : agent.agent_id, isSelected ? null : "preset")}
                 >
                   {isSelected ? "Selected" : "Select Agent"}
                 </Button>
