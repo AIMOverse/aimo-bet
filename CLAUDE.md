@@ -284,163 +284,403 @@ export const useToolStore = create<ToolState>()(
 
 Refactor UI to match aimo-web-app patterns: full sidebar, integrated chat header, unified store item page, and filters.
 
-### 3.1 AppSidebar (Full Sidebar)
+### 3.1 AppSidebar Refactor
 
-**Reference**: `aimo-web-app/src/components/layout/app/userMode/UserSidebar.tsx`
+Refactor AppSidebar to split session management into a separate ChatSidebar component with enhanced features.
 
-Create a full sidebar using shadcn/ui `<Sidebar>` components that includes:
-- Session history list (from current ChatSidebar)
-- Navigation items (Chat, Store)
-- Collapsible sections
-- Mobile-responsive with `SidebarTrigger`
+#### UI Layout (SidebarContent)
+
+```
+┌─────────────────────────────┐
+│  + New Chat                 │  ← Button (creates new session)
+│  🏪 Browse Store            │  ← Link to /store
+├─────────────────────────────┤
+│  History                    │  ← Label
+│  [🔍 Search sessions...]    │  ← Search input (filter by title)
+│                             │
+│  Today's Chat      1m ago ⋮│  ← Session item with relative time + popover
+│  Another Chat      2h ago ⋮│
+│  Old Session       3d ago ⋮│
+│  ...                        │
+└─────────────────────────────┘
+│  ⚙️ Settings                │  ← Footer (kept)
+└─────────────────────────────┘
+```
+
+#### Session Item Popover Menu
+
+Each session has a "..." (MoreHorizontal) button that opens a popover with:
+- **Rename** - Opens a dialog/modal to edit session title
+- **Delete** - Deletes the session (with confirmation optional)
+
+#### File Structure
+
+| File | Responsibility |
+|------|----------------|
+| `components/layout/AppSidebar.tsx` | Main sidebar shell: header, "New Chat" button, "Browse Store" link, ChatSidebar, footer |
+| `components/layout/ChatSidebar.tsx` | History section: search input, session list with relative time, popover actions |
+| `components/layout/RenameSessionDialog.tsx` | Dialog/modal for renaming a session |
 
 #### New Files
 
-**`components/layout/AppSidebar.tsx`**:
+**`components/layout/ChatSidebar.tsx`**:
 ```typescript
 "use client";
 
-import { useRouter, usePathname } from "next/navigation";
+import { useState, useMemo, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import {
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  useSidebar,
+} from "@/components/ui/sidebar";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { MessageSquare, MoreHorizontal, Pencil, Trash2, Search } from "lucide-react";
+import { useSessions } from "@/hooks/chat";
+import { useSessionStore } from "@/store/sessionStore";
+import { formatRelativeTime } from "@/lib/utils";
+import { RenameSessionDialog } from "./RenameSessionDialog";
+
+export function ChatSidebar() {
+  const router = useRouter();
+  const { isMobile, setOpenMobile } = useSidebar();
+
+  const { sessions, deleteSession, updateSession, isLoading } = useSessions();
+  const currentSessionId = useSessionStore((s) => s.currentSessionId);
+  const setCurrentSession = useSessionStore((s) => s.setCurrentSession);
+
+  const [search, setSearch] = useState("");
+  const [renameSession, setRenameSession] = useState<{ id: string; title: string } | null>(null);
+  const [openPopoverId, setOpenPopoverId] = useState<string | null>(null);
+
+  // Filter sessions by search query
+  const filteredSessions = useMemo(() => {
+    if (!search.trim()) return sessions;
+    const query = search.toLowerCase();
+    return sessions.filter((s) => s.title.toLowerCase().includes(query));
+  }, [sessions, search]);
+
+  const handleSelectSession = useCallback(
+    (sessionId: string) => {
+      setCurrentSession(sessionId);
+      router.push(`/chat/${sessionId}`);
+      if (isMobile) setOpenMobile(false);
+    },
+    [setCurrentSession, router, isMobile, setOpenMobile]
+  );
+
+  const handleDeleteSession = useCallback(
+    async (sessionId: string) => {
+      setOpenPopoverId(null);
+      await deleteSession(sessionId);
+      if (currentSessionId === sessionId) {
+        router.push("/");
+      }
+    },
+    [deleteSession, currentSessionId, router]
+  );
+
+  const handleRenameClick = useCallback((session: { id: string; title: string }) => {
+    setOpenPopoverId(null);
+    setRenameSession(session);
+  }, []);
+
+  const handleRenameSubmit = useCallback(
+    async (newTitle: string) => {
+      if (renameSession) {
+        await updateSession(renameSession.id, { title: newTitle });
+        setRenameSession(null);
+      }
+    },
+    [renameSession, updateSession]
+  );
+
+  return (
+    <>
+      <SidebarGroup className="flex-1">
+        <SidebarGroupLabel>History</SidebarGroupLabel>
+        <SidebarGroupContent>
+          {/* Search Input */}
+          <div className="px-2 pb-2">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search sessions..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-8 h-9"
+              />
+            </div>
+          </div>
+
+          {/* Session List */}
+          <ScrollArea className="h-[calc(100vh-320px)]">
+            <SidebarMenu>
+              {isLoading ? (
+                <div className="px-2 py-4 text-sm text-muted-foreground text-center">
+                  Loading...
+                </div>
+              ) : filteredSessions.length === 0 ? (
+                <div className="px-2 py-4 text-sm text-muted-foreground text-center">
+                  {search ? "No matching sessions" : "No conversations yet."}
+                </div>
+              ) : (
+                filteredSessions.map((session) => (
+                  <SidebarMenuItem key={session.id} className="group">
+                    <SidebarMenuButton
+                      onClick={() => handleSelectSession(session.id)}
+                      isActive={currentSessionId === session.id}
+                      className="pr-8"
+                    >
+                      <MessageSquare className="h-4 w-4 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <span className="truncate block">{session.title}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatRelativeTime(session.updatedAt || session.createdAt)}
+                        </span>
+                      </div>
+                    </SidebarMenuButton>
+
+                    {/* Popover Menu */}
+                    <Popover
+                      open={openPopoverId === session.id}
+                      onOpenChange={(open) => setOpenPopoverId(open ? session.id : null)}
+                    >
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 opacity-0 group-hover:opacity-100"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-40 p-1" align="end">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="w-full justify-start"
+                          onClick={() => handleRenameClick({ id: session.id, title: session.title })}
+                        >
+                          <Pencil className="h-4 w-4 mr-2" />
+                          Rename
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="w-full justify-start text-destructive hover:text-destructive"
+                          onClick={() => handleDeleteSession(session.id)}
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete
+                        </Button>
+                      </PopoverContent>
+                    </Popover>
+                  </SidebarMenuItem>
+                ))
+              )}
+            </SidebarMenu>
+          </ScrollArea>
+        </SidebarGroupContent>
+      </SidebarGroup>
+
+      {/* Rename Dialog */}
+      <RenameSessionDialog
+        open={!!renameSession}
+        onOpenChange={(open) => !open && setRenameSession(null)}
+        currentTitle={renameSession?.title || ""}
+        onSubmit={handleRenameSubmit}
+      />
+    </>
+  );
+}
+```
+
+**`components/layout/RenameSessionDialog.tsx`**:
+```typescript
+"use client";
+
+import { useState, useEffect } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+interface RenameSessionDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  currentTitle: string;
+  onSubmit: (newTitle: string) => Promise<void>;
+}
+
+export function RenameSessionDialog({
+  open,
+  onOpenChange,
+  currentTitle,
+  onSubmit,
+}: RenameSessionDialogProps) {
+  const [title, setTitle] = useState(currentTitle);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Reset title when dialog opens with new session
+  useEffect(() => {
+    if (open) {
+      setTitle(currentTitle);
+    }
+  }, [open, currentTitle]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim() || title === currentTitle) {
+      onOpenChange(false);
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await onSubmit(title.trim());
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[400px]">
+        <form onSubmit={handleSubmit}>
+          <DialogHeader>
+            <DialogTitle>Rename Session</DialogTitle>
+            <DialogDescription>
+              Enter a new name for this chat session.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Label htmlFor="session-title" className="sr-only">
+              Session Title
+            </Label>
+            <Input
+              id="session-title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Enter session title..."
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isSubmitting || !title.trim()}>
+              {isSubmitting ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+```
+
+#### Modified Files
+
+**`components/layout/AppSidebar.tsx`** - Simplified, delegates to ChatSidebar:
+```typescript
+"use client";
+
+import { useRouter } from "next/navigation";
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuAction,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  MessageSquare,
-  Store,
-  Plus,
-  Trash2,
-  Settings,
-} from "lucide-react";
-import { useSessions } from "@/hooks/chat/useSessions";
+import { Plus, Store, Settings } from "lucide-react";
+import { useSessions } from "@/hooks/chat";
 import { useSessionStore } from "@/store/sessionStore";
-import { cn } from "@/lib/utils";
-
-const NAV_ITEMS = [
-  { id: "chat", label: "Chat", icon: MessageSquare, href: "/" },
-  { id: "store", label: "Store", icon: Store, href: "/store" },
-];
+import { ChatSidebar } from "./ChatSidebar";
+import { useCallback } from "react";
 
 export function AppSidebar() {
   const router = useRouter();
-  const pathname = usePathname();
   const { isMobile, setOpenMobile } = useSidebar();
 
-  const { sessions, createSession, deleteSession } = useSessions();
-  const { currentSessionId, setCurrentSession } = useSessionStore();
+  const { createSession } = useSessions();
+  const setCurrentSession = useSessionStore((s) => s.setCurrentSession);
 
-  const handleNewChat = async () => {
+  const handleNewChat = useCallback(async () => {
     const session = await createSession();
     if (session) {
       setCurrentSession(session.id);
       router.push(`/chat/${session.id}`);
       if (isMobile) setOpenMobile(false);
     }
-  };
+  }, [createSession, setCurrentSession, router, isMobile, setOpenMobile]);
 
-  const handleSelectSession = (sessionId: string) => {
-    setCurrentSession(sessionId);
-    router.push(`/chat/${sessionId}`);
-    if (isMobile) setOpenMobile(false);
-  };
-
-  const handleDeleteSession = async (e: React.MouseEvent, sessionId: string) => {
-    e.stopPropagation();
-    await deleteSession(sessionId);
-    if (currentSessionId === sessionId) {
-      router.push("/");
-    }
-  };
+  const handleNavClick = useCallback(
+    (href: string) => {
+      router.push(href);
+      if (isMobile) setOpenMobile(false);
+    },
+    [router, isMobile, setOpenMobile]
+  );
 
   return (
     <Sidebar>
       <SidebarHeader className="border-b">
         <div className="flex items-center justify-between px-2 py-2">
           <span className="font-semibold text-lg">AiMo Chat</span>
-          <Button variant="ghost" size="icon" onClick={handleNewChat}>
-            <Plus className="h-4 w-4" />
-          </Button>
         </div>
       </SidebarHeader>
 
       <SidebarContent>
-        {/* Navigation */}
-        <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {NAV_ITEMS.map((item) => (
-                <SidebarMenuItem key={item.id}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={pathname === item.href || pathname.startsWith(`${item.href}/`)}
-                  >
-                    <a href={item.href}>
-                      <item.icon className="h-4 w-4" />
-                      <span>{item.label}</span>
-                    </a>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {/* Quick Actions */}
+        <SidebarMenu className="px-2 pt-2">
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={handleNewChat}>
+              <Plus className="h-4 w-4" />
+              <span>New Chat</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={() => handleNavClick("/store")}>
+              <Store className="h-4 w-4" />
+              <span>Browse Store</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
 
-        {/* Sessions */}
-        <SidebarGroup className="flex-1">
-          <SidebarGroupLabel>Sessions</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <ScrollArea className="h-[calc(100vh-280px)]">
-              <SidebarMenu>
-                {sessions.map((session) => (
-                  <SidebarMenuItem key={session.id}>
-                    <SidebarMenuButton
-                      onClick={() => handleSelectSession(session.id)}
-                      isActive={currentSessionId === session.id}
-                      className="group"
-                    >
-                      <MessageSquare className="h-4 w-4 shrink-0" />
-                      <span className="truncate">{session.title}</span>
-                    </SidebarMenuButton>
-                    <SidebarMenuAction
-                      onClick={(e) => handleDeleteSession(e, session.id)}
-                      className="opacity-0 group-hover:opacity-100"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </SidebarMenuAction>
-                  </SidebarMenuItem>
-                ))}
-                {sessions.length === 0 && (
-                  <div className="px-2 py-4 text-sm text-muted-foreground text-center">
-                    No sessions yet
-                  </div>
-                )}
-              </SidebarMenu>
-            </ScrollArea>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {/* Chat History (delegated to ChatSidebar) */}
+        <ChatSidebar />
       </SidebarContent>
 
       <SidebarFooter className="border-t">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton asChild>
-              <a href="/settings">
-                <Settings className="h-4 w-4" />
-                <span>Settings</span>
-              </a>
+            <SidebarMenuButton onClick={() => handleNavClick("/settings")}>
+              <Settings className="h-4 w-4" />
+              <span>Settings</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -450,39 +690,53 @@ export function AppSidebar() {
 }
 ```
 
-#### Modified Files
-
-**`app/layout.tsx`** - Wrap with SidebarProvider:
+**`lib/utils.ts`** - Add relative time formatter:
 ```typescript
-import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
-import { AppSidebar } from "@/components/layout/AppSidebar";
+// Add this function to lib/utils.ts
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <html lang="en">
-      <body>
-        <SidebarProvider>
-          <AppSidebar />
-          <SidebarInset>
-            {children}
-          </SidebarInset>
-        </SidebarProvider>
-      </body>
-    </html>
-  );
+export function formatRelativeTime(date: Date | string | number): string {
+  const now = new Date();
+  const then = new Date(date);
+  const diffMs = now.getTime() - then.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHour = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHour / 24);
+  const diffWeek = Math.floor(diffDay / 7);
+  const diffMonth = Math.floor(diffDay / 30);
+
+  if (diffSec < 60) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffHour < 24) return `${diffHour}h ago`;
+  if (diffDay < 7) return `${diffDay}d ago`;
+  if (diffWeek < 4) return `${diffWeek}w ago`;
+  return `${diffMonth}mo ago`;
 }
 ```
 
-#### shadcn/ui Sidebar Components Required
+#### Required Hook Update
 
-Ensure these sidebar primitives exist in `components/ui/sidebar.tsx`:
-- `Sidebar`, `SidebarProvider`, `SidebarInset`
-- `SidebarHeader`, `SidebarContent`, `SidebarFooter`
-- `SidebarGroup`, `SidebarGroupLabel`, `SidebarGroupContent`
-- `SidebarMenu`, `SidebarMenuItem`, `SidebarMenuButton`, `SidebarMenuAction`
-- `SidebarTrigger`, `useSidebar` hook
+**`hooks/chat/useSessions.ts`** - Ensure `updateSession` method exists:
+```typescript
+// The useSessions hook should expose:
+interface UseSessionsReturn {
+  sessions: Session[];
+  isLoading: boolean;
+  createSession: () => Promise<Session | null>;
+  deleteSession: (id: string) => Promise<void>;
+  updateSession: (id: string, updates: Partial<Session>) => Promise<void>; // Add if missing
+}
+```
 
-Reference: https://ui.shadcn.com/docs/components/sidebar
+#### Summary of Changes
+
+| File | Action | Description |
+|------|--------|-------------|
+| `ChatSidebar.tsx` | **Create** | History section with search, session list, relative time, popover actions |
+| `RenameSessionDialog.tsx` | **Create** | Dialog/modal for renaming sessions |
+| `AppSidebar.tsx` | **Modify** | Simplify to shell + delegate to ChatSidebar |
+| `lib/utils.ts` | **Modify** | Add `formatRelativeTime` helper |
+| `useSessions.ts` | **Modify** | Ensure `updateSession` method exists |
 
 ---
 
