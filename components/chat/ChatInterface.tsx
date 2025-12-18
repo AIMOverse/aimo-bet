@@ -75,7 +75,7 @@ export const ChatInterface = memo(function ChatInterface({
         <h1 className="text-sm font-medium truncate flex-1">
           {sessionTitle || "New Chat"}
         </h1>
-        <ChatModelSelector />
+        <ChatAgentSelector />
       </header>
 
       {/* Offline Banner */}
@@ -123,7 +123,7 @@ export const ChatInterface = memo(function ChatInterface({
         />
         <PromptInputFooter>
           <PromptInputTools>
-            <ChatAgentSelector />
+            <ChatModelSelector />
             <ChatToolSelector />
           </PromptInputTools>
           <PromptInputSubmit
