@@ -680,6 +680,1260 @@ export const useToolStore = create<ToolState>()(
 
 ---
 
+## Phase 3: UI Refactoring (CURRENT)
+
+Refactor UI to match aimo-web-app patterns: full sidebar, integrated chat header, unified store item page, and filters.
+
+### 3.1 AppSidebar Refactor
+
+Refactor AppSidebar to split session management into a separate ChatSidebar component with enhanced features.
+
+#### UI Layout (SidebarContent)
+
+```
+┌─────────────────────────────┐
+│  + New Chat                 │  ← Button (creates new session)
+│  🏪 Browse Store            │  ← Link to /store
+├─────────────────────────────┤
+│  History                    │  ← Label
+│  [🔍 Search sessions...]    │  ← Search input (filter by title)
+│                             │
+│  Today's Chat      1m ago ⋮│  ← Session item with relative time + popover
+│  Another Chat      2h ago ⋮│
+│  Old Session       3d ago ⋮│
+│  ...                        │
+└─────────────────────────────┘
+│  ⚙️ Settings                │  ← Footer (kept)
+└─────────────────────────────┘
+```
+
+#### Session Item Popover Menu
+
+Each session has a "..." (MoreHorizontal) button that opens a popover with:
+- **Rename** - Opens a dialog/modal to edit session title
+- **Delete** - Deletes the session (with confirmation optional)
+
+#### File Structure
+
+| File | Responsibility |
+|------|----------------|
+| `components/layout/AppSidebar.tsx` | Main sidebar shell: header, "New Chat" button, "Browse Store" link, ChatSidebar, footer |
+| `components/layout/ChatSidebar.tsx` | History section: search input, session list with relative time, popover actions |
+| `components/layout/RenameSessionDialog.tsx` | Dialog/modal for renaming a session |
+
+#### New Files
+
+**`components/layout/ChatSidebar.tsx`**:
+```typescript
+"use client";
+
+import { useState, useMemo, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import {
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  useSidebar,
+} from "@/components/ui/sidebar";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { MessageSquare, MoreHorizontal, Pencil, Trash2, Search } from "lucide-react";
+import { useSessions } from "@/hooks/chat";
+import { useSessionStore } from "@/store/sessionStore";
+import { formatRelativeTime } from "@/lib/utils";
+import { RenameSessionDialog } from "./RenameSessionDialog";
+
+export function ChatSidebar() {
+  const router = useRouter();
+  const { isMobile, setOpenMobile } = useSidebar();
+
+  const { sessions, deleteSession, updateSession, isLoading } = useSessions();
+  const currentSessionId = useSessionStore((s) => s.currentSessionId);
+  const setCurrentSession = useSessionStore((s) => s.setCurrentSession);
+
+  const [search, setSearch] = useState("");
+  const [renameSession, setRenameSession] = useState<{ id: string; title: string } | null>(null);
+  const [openPopoverId, setOpenPopoverId] = useState<string | null>(null);
+
+  // Filter sessions by search query
+  const filteredSessions = useMemo(() => {
+    if (!search.trim()) return sessions;
+    const query = search.toLowerCase();
+    return sessions.filter((s) => s.title.toLowerCase().includes(query));
+  }, [sessions, search]);
+
+  const handleSelectSession = useCallback(
+    (sessionId: string) => {
+      setCurrentSession(sessionId);
+      router.push(`/chat/${sessionId}`);
+      if (isMobile) setOpenMobile(false);
+    },
+    [setCurrentSession, router, isMobile, setOpenMobile]
+  );
+
+  const handleDeleteSession = useCallback(
+    async (sessionId: string) => {
+      setOpenPopoverId(null);
+      await deleteSession(sessionId);
+      if (currentSessionId === sessionId) {
+        router.push("/");
+      }
+    },
+    [deleteSession, currentSessionId, router]
+  );
+
+  const handleRenameClick = useCallback((session: { id: string; title: string }) => {
+    setOpenPopoverId(null);
+    setRenameSession(session);
+  }, []);
+
+  const handleRenameSubmit = useCallback(
+    async (newTitle: string) => {
+      if (renameSession) {
+        await updateSession(renameSession.id, { title: newTitle });
+        setRenameSession(null);
+      }
+    },
+    [renameSession, updateSession]
+  );
+
+  return (
+    <>
+      <SidebarGroup className="flex-1">
+        <SidebarGroupLabel>History</SidebarGroupLabel>
+        <SidebarGroupContent>
+          {/* Search Input */}
+          <div className="px-2 pb-2">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search sessions..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-8 h-9"
+              />
+            </div>
+          </div>
+
+          {/* Session List */}
+          <ScrollArea className="h-[calc(100vh-320px)]">
+            <SidebarMenu>
+              {isLoading ? (
+                <div className="px-2 py-4 text-sm text-muted-foreground text-center">
+                  Loading...
+                </div>
+              ) : filteredSessions.length === 0 ? (
+                <div className="px-2 py-4 text-sm text-muted-foreground text-center">
+                  {search ? "No matching sessions" : "No conversations yet."}
+                </div>
+              ) : (
+                filteredSessions.map((session) => (
+                  <SidebarMenuItem key={session.id} className="group">
+                    <SidebarMenuButton
+                      onClick={() => handleSelectSession(session.id)}
+                      isActive={currentSessionId === session.id}
+                      className="pr-8"
+                    >
+                      <MessageSquare className="h-4 w-4 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <span className="truncate block">{session.title}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatRelativeTime(session.updatedAt || session.createdAt)}
+                        </span>
+                      </div>
+                    </SidebarMenuButton>
+
+                    {/* Popover Menu */}
+                    <Popover
+                      open={openPopoverId === session.id}
+                      onOpenChange={(open) => setOpenPopoverId(open ? session.id : null)}
+                    >
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 opacity-0 group-hover:opacity-100"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-40 p-1" align="end">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="w-full justify-start"
+                          onClick={() => handleRenameClick({ id: session.id, title: session.title })}
+                        >
+                          <Pencil className="h-4 w-4 mr-2" />
+                          Rename
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="w-full justify-start text-destructive hover:text-destructive"
+                          onClick={() => handleDeleteSession(session.id)}
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete
+                        </Button>
+                      </PopoverContent>
+                    </Popover>
+                  </SidebarMenuItem>
+                ))
+              )}
+            </SidebarMenu>
+          </ScrollArea>
+        </SidebarGroupContent>
+      </SidebarGroup>
+
+      {/* Rename Dialog */}
+      <RenameSessionDialog
+        open={!!renameSession}
+        onOpenChange={(open) => !open && setRenameSession(null)}
+        currentTitle={renameSession?.title || ""}
+        onSubmit={handleRenameSubmit}
+      />
+    </>
+  );
+}
+```
+
+**`components/layout/RenameSessionDialog.tsx`**:
+```typescript
+"use client";
+
+import { useState, useEffect } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+interface RenameSessionDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  currentTitle: string;
+  onSubmit: (newTitle: string) => Promise<void>;
+}
+
+export function RenameSessionDialog({
+  open,
+  onOpenChange,
+  currentTitle,
+  onSubmit,
+}: RenameSessionDialogProps) {
+  const [title, setTitle] = useState(currentTitle);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Reset title when dialog opens with new session
+  useEffect(() => {
+    if (open) {
+      setTitle(currentTitle);
+    }
+  }, [open, currentTitle]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim() || title === currentTitle) {
+      onOpenChange(false);
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await onSubmit(title.trim());
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[400px]">
+        <form onSubmit={handleSubmit}>
+          <DialogHeader>
+            <DialogTitle>Rename Session</DialogTitle>
+            <DialogDescription>
+              Enter a new name for this chat session.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Label htmlFor="session-title" className="sr-only">
+              Session Title
+            </Label>
+            <Input
+              id="session-title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Enter session title..."
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isSubmitting || !title.trim()}>
+              {isSubmitting ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+```
+
+#### Modified Files
+
+**`components/layout/AppSidebar.tsx`** - Simplified, delegates to ChatSidebar:
+```typescript
+"use client";
+
+import { useRouter } from "next/navigation";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  useSidebar,
+} from "@/components/ui/sidebar";
+import { Plus, Store, Settings } from "lucide-react";
+import { useSessions } from "@/hooks/chat";
+import { useSessionStore } from "@/store/sessionStore";
+import { ChatSidebar } from "./ChatSidebar";
+import { useCallback } from "react";
+
+export function AppSidebar() {
+  const router = useRouter();
+  const { isMobile, setOpenMobile } = useSidebar();
+
+  const { createSession } = useSessions();
+  const setCurrentSession = useSessionStore((s) => s.setCurrentSession);
+
+  const handleNewChat = useCallback(async () => {
+    const session = await createSession();
+    if (session) {
+      setCurrentSession(session.id);
+      router.push(`/chat/${session.id}`);
+      if (isMobile) setOpenMobile(false);
+    }
+  }, [createSession, setCurrentSession, router, isMobile, setOpenMobile]);
+
+  const handleNavClick = useCallback(
+    (href: string) => {
+      router.push(href);
+      if (isMobile) setOpenMobile(false);
+    },
+    [router, isMobile, setOpenMobile]
+  );
+
+  return (
+    <Sidebar>
+      <SidebarHeader className="border-b">
+        <div className="flex items-center justify-between px-2 py-2">
+          <span className="font-semibold text-lg">AiMo Chat</span>
+        </div>
+      </SidebarHeader>
+
+      <SidebarContent>
+        {/* Quick Actions */}
+        <SidebarMenu className="px-2 pt-2">
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={handleNewChat}>
+              <Plus className="h-4 w-4" />
+              <span>New Chat</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={() => handleNavClick("/store")}>
+              <Store className="h-4 w-4" />
+              <span>Browse Store</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+
+        {/* Chat History (delegated to ChatSidebar) */}
+        <ChatSidebar />
+      </SidebarContent>
+
+      <SidebarFooter className="border-t">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={() => handleNavClick("/settings")}>
+              <Settings className="h-4 w-4" />
+              <span>Settings</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+    </Sidebar>
+  );
+}
+```
+
+**`lib/utils.ts`** - Add relative time formatter:
+```typescript
+// Add this function to lib/utils.ts
+
+export function formatRelativeTime(date: Date | string | number): string {
+  const now = new Date();
+  const then = new Date(date);
+  const diffMs = now.getTime() - then.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHour = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHour / 24);
+  const diffWeek = Math.floor(diffDay / 7);
+  const diffMonth = Math.floor(diffDay / 30);
+
+  if (diffSec < 60) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffHour < 24) return `${diffHour}h ago`;
+  if (diffDay < 7) return `${diffDay}d ago`;
+  if (diffWeek < 4) return `${diffWeek}w ago`;
+  return `${diffMonth}mo ago`;
+}
+```
+
+#### Required Hook Update
+
+**`hooks/chat/useSessions.ts`** - Ensure `updateSession` method exists:
+```typescript
+// The useSessions hook should expose:
+interface UseSessionsReturn {
+  sessions: Session[];
+  isLoading: boolean;
+  createSession: () => Promise<Session | null>;
+  deleteSession: (id: string) => Promise<void>;
+  updateSession: (id: string, updates: Partial<Session>) => Promise<void>; // Add if missing
+}
+```
+
+#### Summary of Changes
+
+| File | Action | Description |
+|------|--------|-------------|
+| `ChatSidebar.tsx` | **Create** | History section with search, session list, relative time, popover actions |
+| `RenameSessionDialog.tsx` | **Create** | Dialog/modal for renaming sessions |
+| `AppSidebar.tsx` | **Modify** | Simplify to shell + delegate to ChatSidebar |
+| `lib/utils.ts` | **Modify** | Add `formatRelativeTime` helper |
+| `useSessions.ts` | **Modify** | Ensure `updateSession` method exists |
+
+---
+
+### 3.2 ChatInterface with Integrated Header
+
+**Reference**: `aimo-web-app/src/components/chat/ChatInterface.tsx`
+
+Update ChatInterface to include a header section with:
+- `SidebarTrigger` (for mobile)
+- Session title (editable or display)
+- Model selector (move from prompt footer if desired)
+
+#### Modified Files
+
+**`components/chat/ChatInterface.tsx`**:
+```typescript
+"use client";
+
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Separator } from "@/components/ui/separator";
+import { useSessions } from "@/hooks/chat/useSessions";
+import { useSessionStore } from "@/store/sessionStore";
+import { ChatModelSelector } from "./ChatModelSelector";
+// ... existing imports
+
+interface ChatInterfaceProps {
+  sessionId?: string;
+}
+
+export function ChatInterface({ sessionId }: ChatInterfaceProps) {
+  const { sessions } = useSessions();
+  const { currentSessionId } = useSessionStore();
+
+  const activeSessionId = sessionId || currentSessionId;
+  const currentSession = sessions.find((s) => s.id === activeSessionId);
+
+  // ... existing chat logic
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+        <SidebarTrigger className="-ml-1" />
+        <Separator orientation="vertical" className="h-4" />
+        <h1 className="text-sm font-medium truncate flex-1">
+          {currentSession?.title || "New Chat"}
+        </h1>
+        <ChatModelSelector />
+      </header>
+
+      {/* Conversation Area */}
+      <div className="flex-1 overflow-hidden">
+        <Conversation>
+          {/* ... existing conversation content */}
+        </Conversation>
+      </div>
+
+      {/* Prompt Input */}
+      <div className="border-t p-4">
+        <PromptInput>
+          {/* ... existing prompt input with tools/agent selectors */}
+        </PromptInput>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+### 3.3 StoreItem (Unified Detail Page)
+
+**Reference**: `aimo-web-app/src/components/marketplace/Service/ServicePage.tsx`
+
+Create a single `StoreItem` component that handles all three types (model, agent, tool) based on query params or route.
+
+#### New Files
+
+**`components/store/StoreItem.tsx`**:
+```typescript
+"use client";
+
+import { useSearchParams } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import { ArrowLeft, Check, ExternalLink } from "lucide-react";
+import Link from "next/link";
+import { useServiceLists } from "@/hooks/store/useServiceLists";
+import { useModelStore } from "@/store/modelStore";
+import { useAgentStore } from "@/store/agentStore";
+import { useToolStore } from "@/store/toolStore";
+
+interface StoreItemProps {
+  id: string;
+}
+
+export function StoreItem({ id }: StoreItemProps) {
+  const searchParams = useSearchParams();
+  const type = searchParams.get("type") as "model" | "agent" | "tool" | null;
+
+  const { models, agents, tools, isLoading } = useServiceLists();
+  const { selectedModelId, setSelectedModel } = useModelStore();
+  const { selectedAgentId, setSelectedAgent } = useAgentStore();
+  const { globalEnabledTools, toggleGlobalTool } = useToolStore();
+
+  // Find the item based on type
+  const item = type === "model"
+    ? models.find((m) => m.id === id)
+    : type === "agent"
+    ? agents.find((a) => a.agent_id === id)
+    : type === "tool"
+    ? tools.find((t) => t.agent_id === id || t.id === id)
+    : null;
+
+  if (isLoading) {
+    return <div className="p-6">Loading...</div>;
+  }
+
+  if (!item || !type) {
+    return (
+      <div className="p-6">
+        <p className="text-muted-foreground">Item not found</p>
+        <Link href="/store">
+          <Button variant="link" className="px-0">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Store
+          </Button>
+        </Link>
+      </div>
+    );
+  }
+
+  // Render based on type
+  return (
+    <div className="container max-w-4xl py-6">
+      <Link href="/store">
+        <Button variant="ghost" size="sm" className="mb-4">
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Back to Store
+        </Button>
+      </Link>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-start justify-between">
+            <div>
+              <CardTitle className="text-2xl">
+                {type === "model" && item.name}
+                {type === "agent" && item.name}
+                {type === "tool" && (item.name || item.agent_name)}
+              </CardTitle>
+              <CardDescription className="mt-2">
+                {type === "model" && item.description}
+                {type === "agent" && item.description}
+                {type === "tool" && item.description}
+              </CardDescription>
+            </div>
+            <Badge variant="outline">{type}</Badge>
+          </div>
+        </CardHeader>
+
+        <CardContent className="space-y-6">
+          {/* Model-specific fields */}
+          {type === "model" && (
+            <>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <span className="text-muted-foreground">Provider</span>
+                  <p className="font-medium">{item.provider}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Context Length</span>
+                  <p className="font-medium">{item.contextLength?.toLocaleString()} tokens</p>
+                </div>
+                {item.pricing && (
+                  <>
+                    <div>
+                      <span className="text-muted-foreground">Input Price</span>
+                      <p className="font-medium">${item.pricing.input}/1M tokens</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Output Price</span>
+                      <p className="font-medium">${item.pricing.output}/1M tokens</p>
+                    </div>
+                  </>
+                )}
+              </div>
+              <Separator />
+              <Button
+                onClick={() => setSelectedModel(item.id)}
+                disabled={selectedModelId === item.id}
+              >
+                {selectedModelId === item.id ? (
+                  <>
+                    <Check className="h-4 w-4 mr-2" />
+                    Selected
+                  </>
+                ) : (
+                  "Select Model"
+                )}
+              </Button>
+            </>
+          )}
+
+          {/* Agent-specific fields */}
+          {type === "agent" && (
+            <>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                {item.a2a_card?.capabilities && (
+                  <div>
+                    <span className="text-muted-foreground">Capabilities</span>
+                    <div className="flex gap-1 mt-1">
+                      {item.a2a_card.capabilities.streaming && <Badge variant="secondary">Streaming</Badge>}
+                      {item.a2a_card.capabilities.pushNotifications && <Badge variant="secondary">Push</Badge>}
+                    </div>
+                  </div>
+                )}
+                {item.a2a_card?.skills && (
+                  <div>
+                    <span className="text-muted-foreground">Skills</span>
+                    <p className="font-medium">{item.a2a_card.skills.length} skills</p>
+                  </div>
+                )}
+              </div>
+              {item.a2a_card?.skills && item.a2a_card.skills.length > 0 && (
+                <>
+                  <Separator />
+                  <div>
+                    <h4 className="font-medium mb-2">Skills</h4>
+                    <div className="space-y-2">
+                      {item.a2a_card.skills.map((skill) => (
+                        <div key={skill.id} className="text-sm">
+                          <span className="font-medium">{skill.name}</span>
+                          {skill.description && (
+                            <p className="text-muted-foreground">{skill.description}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+              <Separator />
+              <Button
+                onClick={() => setSelectedAgent(selectedAgentId === item.agent_id ? null : item.agent_id)}
+                variant={selectedAgentId === item.agent_id ? "secondary" : "default"}
+              >
+                {selectedAgentId === item.agent_id ? (
+                  <>
+                    <Check className="h-4 w-4 mr-2" />
+                    Selected
+                  </>
+                ) : (
+                  "Select Agent"
+                )}
+              </Button>
+            </>
+          )}
+
+          {/* Tool-specific fields */}
+          {type === "tool" && (
+            <>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                {item.metadata?.category && (
+                  <div>
+                    <span className="text-muted-foreground">Category</span>
+                    <p className="font-medium">{item.metadata.category}</p>
+                  </div>
+                )}
+                {item.pricing?.per_call && (
+                  <div>
+                    <span className="text-muted-foreground">Price per Call</span>
+                    <p className="font-medium">${item.pricing.per_call}</p>
+                  </div>
+                )}
+                {item.endpoint && (
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">Endpoint</span>
+                    <p className="font-medium text-xs font-mono truncate">{item.endpoint}</p>
+                  </div>
+                )}
+              </div>
+              {item.metadata?.tags && item.metadata.tags.length > 0 && (
+                <div className="flex gap-1 flex-wrap">
+                  {item.metadata.tags.map((tag) => (
+                    <Badge key={tag} variant="outline">{tag}</Badge>
+                  ))}
+                </div>
+              )}
+              <Separator />
+              {(() => {
+                const toolId = item.id || item.agent_id;
+                const isEnabled = globalEnabledTools.includes(toolId);
+                return (
+                  <Button
+                    onClick={() => toggleGlobalTool(toolId)}
+                    variant={isEnabled ? "secondary" : "default"}
+                  >
+                    {isEnabled ? (
+                      <>
+                        <Check className="h-4 w-4 mr-2" />
+                        Enabled
+                      </>
+                    ) : (
+                      "Enable Tool"
+                    )}
+                  </Button>
+                );
+              })()}
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+```
+
+**`app/store/[id]/page.tsx`**:
+```typescript
+import { StoreItem } from "@/components/store/StoreItem";
+
+interface StoreItemPageProps {
+  params: { id: string };
+}
+
+export default function StoreItemPage({ params }: StoreItemPageProps) {
+  return <StoreItem id={params.id} />;
+}
+```
+
+---
+
+### 3.4 Store Filters (Search + Provider + Category)
+
+**Reference**: `aimo-web-app/src/components/marketplace/filters/`
+
+Implement a filter system with:
+- Search input (existing)
+- Provider filter (multi-select popover)
+- Category filter (for tools)
+
+#### New Types
+
+**`types/filters.ts`**:
+```typescript
+export interface StoreFilters {
+  search: string;
+  providers: string[];
+  categories: string[];
+  tab: "model" | "agent" | "tool";
+}
+
+export interface FilterOption {
+  value: string;
+  label: string;
+  count?: number;
+}
+```
+
+#### New Store
+
+**`store/storeFiltersStore.ts`**:
+```typescript
+import { create } from "zustand";
+import type { StoreFilters } from "@/types/filters";
+
+interface StoreFiltersState extends StoreFilters {
+  setSearch: (search: string) => void;
+  setProviders: (providers: string[]) => void;
+  toggleProvider: (provider: string) => void;
+  setCategories: (categories: string[]) => void;
+  toggleCategory: (category: string) => void;
+  setTab: (tab: StoreFilters["tab"]) => void;
+  clearFilters: () => void;
+}
+
+const initialState: StoreFilters = {
+  search: "",
+  providers: [],
+  categories: [],
+  tab: "model",
+};
+
+export const useStoreFiltersStore = create<StoreFiltersState>((set, get) => ({
+  ...initialState,
+  setSearch: (search) => set({ search }),
+  setProviders: (providers) => set({ providers }),
+  toggleProvider: (provider) => {
+    const current = get().providers;
+    const updated = current.includes(provider)
+      ? current.filter((p) => p !== provider)
+      : [...current, provider];
+    set({ providers: updated });
+  },
+  setCategories: (categories) => set({ categories }),
+  toggleCategory: (category) => {
+    const current = get().categories;
+    const updated = current.includes(category)
+      ? current.filter((c) => c !== category)
+      : [...current, category];
+    set({ categories: updated });
+  },
+  setTab: (tab) => set({ tab, providers: [], categories: [] }), // Reset filters on tab change
+  clearFilters: () => set({ search: "", providers: [], categories: [] }),
+}));
+```
+
+#### New Filter Components
+
+**`components/store/filters/FilterPopover.tsx`**:
+```typescript
+"use client";
+
+import { ReactNode } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
+import { ChevronDown, X } from "lucide-react";
+import type { FilterOption } from "@/types/filters";
+
+interface FilterPopoverProps {
+  label: string;
+  options: FilterOption[];
+  selected: string[];
+  onToggle: (value: string) => void;
+  onClear?: () => void;
+}
+
+export function FilterPopover({
+  label,
+  options,
+  selected,
+  onToggle,
+  onClear,
+}: FilterPopoverProps) {
+  const hasSelection = selected.length > 0;
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="h-8 gap-1">
+          {label}
+          {hasSelection && (
+            <Badge variant="secondary" className="ml-1 px-1 min-w-[20px]">
+              {selected.length}
+            </Badge>
+          )}
+          <ChevronDown className="h-3 w-3 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-0" align="start">
+        <div className="p-2 border-b">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium">{label}</span>
+            {hasSelection && onClear && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs"
+                onClick={onClear}
+              >
+                Clear
+              </Button>
+            )}
+          </div>
+        </div>
+        <ScrollArea className="h-[200px]">
+          <div className="p-2 space-y-1">
+            {options.map((option) => (
+              <label
+                key={option.value}
+                className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent cursor-pointer"
+              >
+                <Checkbox
+                  checked={selected.includes(option.value)}
+                  onCheckedChange={() => onToggle(option.value)}
+                />
+                <span className="flex-1 text-sm">{option.label}</span>
+                {option.count !== undefined && (
+                  <span className="text-xs text-muted-foreground">
+                    {option.count}
+                  </span>
+                )}
+              </label>
+            ))}
+            {options.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                No options available
+              </p>
+            )}
+          </div>
+        </ScrollArea>
+      </PopoverContent>
+    </Popover>
+  );
+}
+```
+
+**`components/store/filters/ProviderFilter.tsx`**:
+```typescript
+"use client";
+
+import { useMemo } from "react";
+import { FilterPopover } from "./FilterPopover";
+import { useStoreFiltersStore } from "@/store/storeFiltersStore";
+import { useServiceLists } from "@/hooks/store/useServiceLists";
+import type { FilterOption } from "@/types/filters";
+
+export function ProviderFilter() {
+  const { providers, toggleProvider, setProviders } = useStoreFiltersStore();
+  const { models } = useServiceLists();
+
+  const options: FilterOption[] = useMemo(() => {
+    const providerCounts = new Map<string, number>();
+    models.forEach((model) => {
+      const provider = model.provider || "Unknown";
+      providerCounts.set(provider, (providerCounts.get(provider) || 0) + 1);
+    });
+    return Array.from(providerCounts.entries())
+      .map(([value, count]) => ({
+        value,
+        label: value,
+        count,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [models]);
+
+  return (
+    <FilterPopover
+      label="Provider"
+      options={options}
+      selected={providers}
+      onToggle={toggleProvider}
+      onClear={() => setProviders([])}
+    />
+  );
+}
+```
+
+**`components/store/filters/CategoryFilter.tsx`**:
+```typescript
+"use client";
+
+import { useMemo } from "react";
+import { FilterPopover } from "./FilterPopover";
+import { useStoreFiltersStore } from "@/store/storeFiltersStore";
+import { useServiceLists } from "@/hooks/store/useServiceLists";
+import type { FilterOption } from "@/types/filters";
+
+export function CategoryFilter() {
+  const { categories, toggleCategory, setCategories } = useStoreFiltersStore();
+  const { tools } = useServiceLists();
+
+  const options: FilterOption[] = useMemo(() => {
+    const categoryCounts = new Map<string, number>();
+    tools.forEach((tool) => {
+      const category = tool.metadata?.category || tool.category || "Uncategorized";
+      categoryCounts.set(category, (categoryCounts.get(category) || 0) + 1);
+    });
+    return Array.from(categoryCounts.entries())
+      .map(([value, count]) => ({
+        value,
+        label: value,
+        count,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [tools]);
+
+  return (
+    <FilterPopover
+      label="Category"
+      options={options}
+      selected={categories}
+      onToggle={toggleCategory}
+      onClear={() => setCategories([])}
+    />
+  );
+}
+```
+
+#### Modified StoreHeader
+
+**`components/store/StoreHeader.tsx`**:
+```typescript
+"use client";
+
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { LayoutGrid, List, X } from "lucide-react";
+import { useStoreFiltersStore } from "@/store/storeFiltersStore";
+import { ProviderFilter } from "./filters/ProviderFilter";
+import { CategoryFilter } from "./filters/CategoryFilter";
+
+interface StoreHeaderProps {
+  viewMode: "grid" | "list";
+  onViewModeChange: (mode: "grid" | "list") => void;
+  counts: { models: number; agents: number; tools: number };
+}
+
+export function StoreHeader({ viewMode, onViewModeChange, counts }: StoreHeaderProps) {
+  const { search, setSearch, tab, setTab, providers, categories, clearFilters } = useStoreFiltersStore();
+
+  const hasActiveFilters = search || providers.length > 0 || categories.length > 0;
+
+  return (
+    <div className="space-y-4 mb-6">
+      {/* Tabs */}
+      <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
+        <TabsList>
+          <TabsTrigger value="model">
+            Models ({counts.models})
+          </TabsTrigger>
+          <TabsTrigger value="agent">
+            Agents ({counts.agents})
+          </TabsTrigger>
+          <TabsTrigger value="tool">
+            Tools ({counts.tools})
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {/* Search & Filters */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          placeholder="Search..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-64"
+        />
+
+        {/* Show provider filter for models tab */}
+        {tab === "model" && <ProviderFilter />}
+
+        {/* Show category filter for tools tab */}
+        {tab === "tool" && <CategoryFilter />}
+
+        {/* Clear filters button */}
+        {hasActiveFilters && (
+          <Button variant="ghost" size="sm" onClick={clearFilters}>
+            <X className="h-4 w-4 mr-1" />
+            Clear
+          </Button>
+        )}
+
+        {/* View mode toggle */}
+        <div className="ml-auto flex gap-1">
+          <Button
+            variant={viewMode === "grid" ? "secondary" : "ghost"}
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => onViewModeChange("grid")}
+          >
+            <LayoutGrid className="h-4 w-4" />
+          </Button>
+          <Button
+            variant={viewMode === "list" ? "secondary" : "ghost"}
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => onViewModeChange("list")}
+          >
+            <List className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+### 3.5 Hook for Filtered Data
+
+**`hooks/store/useStoreFilters.ts`**:
+```typescript
+import { useMemo } from "react";
+import { useStoreFiltersStore } from "@/store/storeFiltersStore";
+import { useServiceLists } from "./useServiceLists";
+
+export function useFilteredServices() {
+  const { models, agents, tools, isLoading } = useServiceLists();
+  const { search, providers, categories, tab } = useStoreFiltersStore();
+
+  const filteredModels = useMemo(() => {
+    if (tab !== "model") return models;
+
+    return models.filter((model) => {
+      // Search filter
+      if (search) {
+        const searchLower = search.toLowerCase();
+        const matchesSearch =
+          model.name?.toLowerCase().includes(searchLower) ||
+          model.description?.toLowerCase().includes(searchLower) ||
+          model.provider?.toLowerCase().includes(searchLower);
+        if (!matchesSearch) return false;
+      }
+
+      // Provider filter
+      if (providers.length > 0) {
+        if (!providers.includes(model.provider || "")) return false;
+      }
+
+      return true;
+    });
+  }, [models, search, providers, tab]);
+
+  const filteredAgents = useMemo(() => {
+    if (tab !== "agent") return agents;
+
+    return agents.filter((agent) => {
+      if (search) {
+        const searchLower = search.toLowerCase();
+        const matchesSearch =
+          agent.name?.toLowerCase().includes(searchLower) ||
+          agent.description?.toLowerCase().includes(searchLower);
+        if (!matchesSearch) return false;
+      }
+      return true;
+    });
+  }, [agents, search, tab]);
+
+  const filteredTools = useMemo(() => {
+    if (tab !== "tool") return tools;
+
+    return tools.filter((tool) => {
+      // Search filter
+      if (search) {
+        const searchLower = search.toLowerCase();
+        const matchesSearch =
+          tool.name?.toLowerCase().includes(searchLower) ||
+          tool.agent_name?.toLowerCase().includes(searchLower) ||
+          tool.description?.toLowerCase().includes(searchLower);
+        if (!matchesSearch) return false;
+      }
+
+      // Category filter
+      if (categories.length > 0) {
+        const toolCategory = tool.metadata?.category || tool.category || "Uncategorized";
+        if (!categories.includes(toolCategory)) return false;
+      }
+
+      return true;
+    });
+  }, [tools, search, categories, tab]);
+
+  return {
+    models: filteredModels,
+    agents: filteredAgents,
+    tools: filteredTools,
+    isLoading,
+    counts: {
+      models: filteredModels.length,
+      agents: filteredAgents.length,
+      tools: filteredTools.length,
+    },
+  };
+}
+```
+
+---
+
+### 3.6 Files to Delete
+
+After refactoring, remove the old ChatSidebar:
+- `components/chat/ChatSidebar.tsx` (replaced by AppSidebar)
+
+---
+
+### Summary of Phase 3 Changes
+
+| Component | Action | Description |
+|-----------|--------|-------------|
+| `AppSidebar` | **Create** | Full sidebar with nav, sessions, footer |
+| `app/layout.tsx` | **Modify** | Add SidebarProvider + AppSidebar |
+| `ChatInterface` | **Modify** | Add header with SidebarTrigger + title |
+| `StoreItem` | **Create** | Unified detail page for all types |
+| `FilterPopover` | **Create** | Reusable filter popover component |
+| `ProviderFilter` | **Create** | Provider multi-select filter |
+| `CategoryFilter` | **Create** | Category filter for tools |
+| `StoreHeader` | **Modify** | Add filters integration |
+| `storeFiltersStore` | **Create** | Filter state management |
+| `useFilteredServices` | **Create** | Hook for filtered data |
+| `types/filters.ts` | **Create** | Filter type definitions |
+| `ChatSidebar` | **Delete** | Replaced by AppSidebar |
+
+---
+
 ## Roadmap
 
 ### V1 ✅ COMPLETE
