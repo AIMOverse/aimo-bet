@@ -1,3 +1,5 @@
+/** biome-ignore-all lint/nursery/useImageSize: "size will be handled by props" */
+
 import { cn } from "@/lib/utils";
 import type { Experimental_GeneratedImage } from "ai";
 
@@ -17,7 +19,7 @@ export const Image = ({
     alt={props.alt}
     className={cn(
       "h-auto max-w-full overflow-hidden rounded-md",
-      props.className
+      props.className,
     )}
     src={`data:${mediaType};base64,${base64}`}
   />

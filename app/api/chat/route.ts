@@ -2,7 +2,12 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { streamText, UIMessage, ToolSet } from "ai";
 import { DEFAULT_SYSTEM_PROMPT } from "@/config/defaults";
 import { BUILT_IN_TOOLS } from "@/config/tools";
-import { connectToMCPServer, getToolEndpoint, MCPClientWrapper } from "@/lib/mcp";
+import { getModelById } from "@/config/models";
+import {
+  connectToMCPServer,
+  getToolEndpoint,
+  MCPClientWrapper,
+} from "@/lib/mcp";
 
 // AiMo Network API configuration
 const AIMO_BASE_URL = "https://devnet.aimo.network/api/v1";
@@ -112,8 +117,8 @@ async function cleanupMCPClients(clients: MCPClientWrapper[]): Promise<void> {
     clients.map((client) =>
       client.close().catch((error) => {
         console.error("Error closing MCP client:", error);
-      })
-    )
+      }),
+    ),
   );
 }
 
@@ -135,7 +140,7 @@ export async function POST(req: Request) {
     if (!process.env.OPENAI_API_KEY) {
       return new Response(
         JSON.stringify({ error: "AiMo API key not configured" }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
+        { status: 500, headers: { "Content-Type": "application/json" } },
       );
     }
 
@@ -163,11 +168,31 @@ export async function POST(req: Request) {
     // Stream the response with tools if any are enabled
     const hasTools = Object.keys(tools).length > 0;
 
+    // Check if model supports image output
+    const modelDef = getModelById(model);
+    const supportsImageOutput = modelDef?.outputModalities?.includes("image");
+
+    // Build experimental provider metadata for image-capable models
+    const experimentalProviderMetadata =
+      supportsImageOutput && modelDef
+        ? {
+            openai: {
+              modalities: modelDef.outputModalities,
+              ...(modelDef.imageSettings?.defaultAspectRatio && {
+                image_config: {
+                  aspect_ratio: modelDef.imageSettings.defaultAspectRatio,
+                },
+              }),
+            },
+          }
+        : undefined;
+
     const result = streamText({
       model: aimo.chat(model),
       system: DEFAULT_SYSTEM_PROMPT,
       messages: simpleMessages,
       tools: hasTools ? tools : undefined,
+      providerOptions: experimentalProviderMetadata,
       onFinish: async () => {
         // Clean up MCP clients when streaming completes
         await cleanupMCPClients(mcpClients);
@@ -199,7 +224,7 @@ export async function POST(req: Request) {
 
     return new Response(
       JSON.stringify({ error: "Failed to process chat request" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+      { status: 500, headers: { "Content-Type": "application/json" } },
     );
   }
 }
