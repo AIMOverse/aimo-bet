@@ -11,7 +11,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { Plus, Store, Settings } from "lucide-react";
+import { Plus, Store, Bot, Settings } from "lucide-react";
 import { useSessionStore } from "@/store/sessionStore";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { useCallback } from "react";
@@ -35,7 +35,7 @@ export function AppSidebar() {
       router.push(href);
       if (isMobile) setOpenMobile(false);
     },
-    [router, isMobile, setOpenMobile]
+    [router, isMobile, setOpenMobile],
   );
 
   return (
@@ -59,6 +59,12 @@ export function AppSidebar() {
             <SidebarMenuButton onClick={() => handleNavClick("/store")}>
               <Store className="h-4 w-4" />
               <span>Browse Store</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={() => handleNavClick("/agent")}>
+              <Bot className="h-4 w-4" />
+              <span>Build Agent</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
