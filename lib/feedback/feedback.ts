@@ -1,4 +1,4 @@
-import { toast } from "sonner"
+import { toast } from "sonner";
 
 /**
  * Unified feedback layer for user notifications.
@@ -14,12 +14,12 @@ export const feedback = {
    * Show an error message. Optionally logs the error to console.
    */
   error: (message: string, err?: unknown) => {
-    if (err) console.error(err)
-    toast.error(message)
+    if (err) console.error(err);
+    toast.error(message);
   },
 
   /**
    * Show an informational message
    */
   info: (message: string) => toast.info(message),
-}
+};

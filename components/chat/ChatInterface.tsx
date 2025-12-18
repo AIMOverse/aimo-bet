@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, type ChangeEvent, useCallback } from "react";
+import { memo, type ChangeEvent, useCallback, use } from "react";
 import type { UIMessage, ChatStatus } from "ai";
 import {
   Conversation,
@@ -32,9 +32,8 @@ import { ChatModelSelector } from "./ChatModelSelector";
 import { ChatAgentSelector } from "./ChatAgentSelector";
 import { ChatToolSelector } from "./ChatToolSelector";
 import { useChatMessages } from "@/hooks/chat";
-import { useOnlineStatus } from "@/hooks/useOnlineStatus";
-import { MessageSquareIcon, WifiOffIcon } from "lucide-react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useIsOffline } from "@/hooks/use-offline";
+import { MessageSquareIcon } from "lucide-react";
 import { Streamdown } from "streamdown";
 import { Separator } from "@/components/ui/separator";
 
@@ -47,20 +46,21 @@ export const ChatInterface = memo(function ChatInterface({
   sessionId,
   sessionTitle,
 }: ChatInterfaceProps) {
-  const isOnline = useOnlineStatus();
-
   // Sessions are created server-side on first message
   const { messages, input, setInput, isLoading, sendMessage, stop } =
     useChatMessages({
       sessionId,
     });
 
+  // Show toast when offline
+  useIsOffline();
+
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
-      if (!message.text.trim() || !isOnline) return;
+      if (!message.text.trim()) return;
       await sendMessage(message.text);
     },
-    [sendMessage, isOnline]
+    [sendMessage],
   );
 
   // Determine chat status for submit button
@@ -77,16 +77,6 @@ export const ChatInterface = memo(function ChatInterface({
         </h1>
         <ChatAgentSelector />
       </header>
-
-      {/* Offline Banner */}
-      {!isOnline && (
-        <Alert variant="destructive" className="mx-4 mt-2 rounded-md">
-          <WifiOffIcon className="h-4 w-4" />
-          <AlertDescription>
-            You&apos;re offline. Connect to the internet to send messages.
-          </AlertDescription>
-        </Alert>
-      )}
 
       {/* Messages Area */}
       <Conversation className="flex-1">
@@ -118,8 +108,7 @@ export const ChatInterface = memo(function ChatInterface({
           onChange={(e: ChangeEvent<HTMLTextAreaElement>) =>
             setInput(e.target.value)
           }
-          placeholder={isOnline ? "Send a message..." : "You're offline..."}
-          disabled={!isOnline}
+          placeholder={"Send a message..."}
         />
         <PromptInputFooter>
           <PromptInputTools>
