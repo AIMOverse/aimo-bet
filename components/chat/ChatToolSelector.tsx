@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useToolStore } from "@/store/toolStore";
-import { Globe, ImageIcon, Settings2 } from "lucide-react";
+import { Globe, ImageIcon, Settings2, VideoIcon } from "lucide-react";
 
 interface ToolToggleItemProps {
   icon: React.ReactNode;
@@ -76,8 +76,10 @@ function ToolDisabledItem({
 export function ChatToolMenuItems() {
   const {
     generateImageEnabled,
+    generateVideoEnabled,
     webSearchEnabled,
     setGenerateImageEnabled,
+    setGenerateVideoEnabled,
     setWebSearchEnabled,
   } = useToolStore();
 
@@ -89,6 +91,12 @@ export function ChatToolMenuItems() {
         label="Generate Image"
         checked={generateImageEnabled}
         onCheckedChange={setGenerateImageEnabled}
+      />
+      <ToolToggleItem
+        icon={<VideoIcon />}
+        label="Generate Video"
+        checked={generateVideoEnabled}
+        onCheckedChange={setGenerateVideoEnabled}
       />
       <ToolToggleItem
         icon={<Globe />}
