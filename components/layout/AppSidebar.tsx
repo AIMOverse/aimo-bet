@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Search } from "lucide-react";
+import { Plus, Search, FolderOpen } from "lucide-react";
 import { useChatStore } from "@/store/chatStore";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { GenerateSidebar } from "@/components/generate/GenerateSidebar";
@@ -101,6 +101,12 @@ export function AppSidebar() {
               <span>
                 {activeMode === "chat" ? "New Chat" : "New Generation"}
               </span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={() => router.push("/library")}>
+              <FolderOpen className="h-4 w-4" />
+              <span>Library</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
