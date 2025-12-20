@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import type { ChatSession } from "@/types/chat";
-import { useSessionStore } from "@/store/sessionStore";
+import { useChatStore } from "@/store/chatStore";
 import { clearCachedMessages } from "@/lib/cache/messages";
 
 interface UseSessionsReturn {
@@ -18,7 +18,7 @@ interface UseSessionsReturn {
   /** Update a session */
   updateSession: (
     id: string,
-    data: Partial<Pick<ChatSession, "title" | "modelId">>
+    data: Partial<Pick<ChatSession, "title" | "modelId">>,
   ) => Promise<void>;
   /** Delete a session */
   deleteSession: (id: string) => Promise<void>;
@@ -34,8 +34,8 @@ export function useSessions(): UseSessionsReturn {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const currentSessionId = useSessionStore((s) => s.currentSessionId);
-  const setCurrentSessionId = useSessionStore((s) => s.setCurrentSession);
+  const currentSessionId = useChatStore((s) => s.currentSessionId);
+  const setCurrentSessionId = useChatStore((s) => s.setCurrentSession);
 
   const currentSession =
     sessions.find((s) => s.id === currentSessionId) ?? null;
@@ -65,7 +65,7 @@ export function useSessions(): UseSessionsReturn {
           ...s,
           createdAt: new Date(s.createdAt),
           updatedAt: new Date(s.updatedAt),
-        })
+        }),
       );
 
       setSessions(sessionsWithDates);
@@ -84,7 +84,7 @@ export function useSessions(): UseSessionsReturn {
   const updateSession = useCallback(
     async (
       id: string,
-      data: Partial<Pick<ChatSession, "title" | "modelId">>
+      data: Partial<Pick<ChatSession, "title" | "modelId">>,
     ) => {
       try {
         const response = await fetch(`/api/sessions?id=${id}`, {
@@ -99,15 +99,15 @@ export function useSessions(): UseSessionsReturn {
 
         setSessions((prev) =>
           prev.map((s) =>
-            s.id === id ? { ...s, ...data, updatedAt: new Date() } : s
-          )
+            s.id === id ? { ...s, ...data, updatedAt: new Date() } : s,
+          ),
         );
       } catch (err) {
         console.error("Failed to update session:", err);
         throw err;
       }
     },
-    []
+    [],
   );
 
   const deleteSession = useCallback(
@@ -129,21 +129,21 @@ export function useSessions(): UseSessionsReturn {
         // If deleting current session, navigate to new chat
         if (currentSessionId === id) {
           setCurrentSessionId(null);
-          router.push("/chat/new");
+          router.push("/chat");
         }
       } catch (err) {
         console.error("Failed to delete session:", err);
         throw err;
       }
     },
-    [currentSessionId, setCurrentSessionId, router]
+    [currentSessionId, setCurrentSessionId, router],
   );
 
   const setCurrentSession = useCallback(
     (id: string | null) => {
       setCurrentSessionId(id);
     },
-    [setCurrentSessionId]
+    [setCurrentSessionId],
   );
 
   return {

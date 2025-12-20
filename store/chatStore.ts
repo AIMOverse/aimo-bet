@@ -1,10 +1,14 @@
 "use client";
 
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
 type ConnectionStatus = "idle" | "connecting" | "connected" | "error";
 
 interface ChatState {
+  /** Currently active session ID */
+  currentSessionId: string | null;
+
   /** Connection status to AI */
   connectionStatus: ConnectionStatus;
 
@@ -13,6 +17,9 @@ interface ChatState {
 
   /** Error message if any */
   error: string | null;
+
+  /** Set the current session */
+  setCurrentSession: (id: string | null) => void;
 
   /** Set connection status */
   setConnectionStatus: (status: ConnectionStatus) => void;
@@ -26,7 +33,7 @@ interface ChatState {
   /** Clear error */
   clearError: () => void;
 
-  /** Reset chat state */
+  /** Reset chat state (keeps currentSessionId) */
   reset: () => void;
 }
 
@@ -36,25 +43,36 @@ const initialState = {
   error: null,
 };
 
-export const useChatStore = create<ChatState>()((set) => ({
-  ...initialState,
+export const useChatStore = create<ChatState>()(
+  persist(
+    (set) => ({
+      currentSessionId: null,
+      ...initialState,
 
-  setConnectionStatus: (status) => set({ connectionStatus: status }),
+      setCurrentSession: (id) => set({ currentSessionId: id }),
 
-  setIsGenerating: (isGenerating) =>
-    set({
-      isGenerating,
-      connectionStatus: isGenerating ? "connected" : "idle",
+      setConnectionStatus: (status) => set({ connectionStatus: status }),
+
+      setIsGenerating: (isGenerating) =>
+        set({
+          isGenerating,
+          connectionStatus: isGenerating ? "connected" : "idle",
+        }),
+
+      setError: (error) =>
+        set({
+          error,
+          connectionStatus: error ? "error" : "idle",
+          isGenerating: false,
+        }),
+
+      clearError: () => set({ error: null, connectionStatus: "idle" }),
+
+      reset: () => set(initialState),
     }),
-
-  setError: (error) =>
-    set({
-      error,
-      connectionStatus: error ? "error" : "idle",
-      isGenerating: false,
-    }),
-
-  clearError: () => set({ error: null, connectionStatus: "idle" }),
-
-  reset: () => set(initialState),
-}));
+    {
+      name: "aimo-chat",
+      partialize: (state) => ({ currentSessionId: state.currentSessionId }),
+    },
+  ),
+);

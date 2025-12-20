@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, type ChangeEvent, useCallback, use } from "react";
+import { memo, type ChangeEvent, useCallback } from "react";
 import type { UIMessage, ChatStatus } from "ai";
 import {
   Conversation,
@@ -17,6 +17,10 @@ import {
   PromptInputSubmit,
   PromptInputAttachments,
   PromptInputAttachment,
+  PromptInputActionMenu,
+  PromptInputActionMenuTrigger,
+  PromptInputActionMenuContent,
+  PromptInputActionAddAttachments,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { Image } from "@/components/ai-elements/image";
@@ -27,24 +31,26 @@ import {
   ToolInput,
   ToolOutput,
 } from "@/components/ai-elements/tool";
-import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
 import { ChatModelSelector } from "./ChatModelSelector";
-import { ChatAgentSelector } from "./ChatAgentSelector";
-import { ChatToolSelector } from "./ChatToolSelector";
+import { ChatToolMenuItems } from "./ChatToolSelector";
 import { useChatMessages } from "@/hooks/chat";
 import { useIsOffline } from "@/hooks/use-offline";
-import { MessageSquareIcon } from "lucide-react";
 import { Streamdown } from "streamdown";
-import { Separator } from "@/components/ui/separator";
+
+const suggestions = [
+  "What are the latest trends in AI?",
+  "How does machine learning work?",
+  "Explain quantum computing",
+  "Best practices for React development",
+];
 
 interface ChatInterfaceProps {
   sessionId: string | null;
-  sessionTitle?: string;
 }
 
 export const ChatInterface = memo(function ChatInterface({
   sessionId,
-  sessionTitle,
 }: ChatInterfaceProps) {
   // Sessions are created server-side on first message
   const { messages, input, setInput, isLoading, sendMessage, stop } =
@@ -57,8 +63,12 @@ export const ChatInterface = memo(function ChatInterface({
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
-      if (!message.text.trim()) return;
-      await sendMessage(message.text);
+      const hasText = message.text.trim().length > 0;
+      const hasFiles = message.files && message.files.length > 0;
+
+      if (!hasText && !hasFiles) return;
+
+      await sendMessage(message.text, message.files);
     },
     [sendMessage],
   );
@@ -66,26 +76,71 @@ export const ChatInterface = memo(function ChatInterface({
   // Determine chat status for submit button
   const status: ChatStatus = isLoading ? "streaming" : "ready";
 
+  const isEmpty = messages.length === 0;
+
+  // Shared input component to avoid duplication
+  const promptInput = (
+    <PromptInput
+      onSubmit={handleSubmit}
+      className="mx-auto w-full max-w-3xl p-4"
+    >
+      <PromptInputAttachments>
+        {(attachment) => (
+          <PromptInputAttachment key={attachment.id} data={attachment} />
+        )}
+      </PromptInputAttachments>
+      <PromptInputTextarea
+        value={input}
+        onChange={(e: ChangeEvent<HTMLTextAreaElement>) =>
+          setInput(e.target.value)
+        }
+        placeholder={"Send a message..."}
+      />
+      <PromptInputFooter>
+        <PromptInputTools>
+          <PromptInputActionMenu>
+            <PromptInputActionMenuTrigger />
+            <PromptInputActionMenuContent>
+              <PromptInputActionAddAttachments />
+              <ChatToolMenuItems />
+            </PromptInputActionMenuContent>
+          </PromptInputActionMenu>
+        </PromptInputTools>
+        <div className="flex items-center gap-1">
+          <ChatModelSelector />
+          <PromptInputSubmit
+            status={status}
+            onClick={isLoading ? stop : undefined}
+          />
+        </div>
+      </PromptInputFooter>
+    </PromptInput>
+  );
+
   return (
     <div className="flex h-full flex-col">
-      {/* Header */}
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
-        <SidebarTrigger className="-ml-1" />
-        <Separator orientation="vertical" className="h-4" />
-        <h1 className="text-sm font-medium truncate flex-1">
-          {sessionTitle || "New Chat"}
-        </h1>
-        <ChatAgentSelector />
-      </header>
-
-      {/* Messages Area */}
       <Conversation className="flex-1">
-        {messages.length === 0 ? (
-          <ConversationEmptyState
-            title="Start a conversation"
-            description="Send a message to begin chatting with AI"
-            icon={<MessageSquareIcon className="size-8" />}
-          />
+        {isEmpty ? (
+          <ConversationEmptyState>
+            <div className="mb-8 text-center">
+              <h1 className="text-2xl font-semibold tracking-tight">
+                Uncensored & Private AI
+              </h1>
+              <p className="mt-2 text-muted-foreground">
+                No Subscription. No Top Up. No KYC. No Censorship.
+              </p>
+            </div>
+            {promptInput}
+            <Suggestions className="mt-4">
+              {suggestions.map((suggestion) => (
+                <Suggestion
+                  key={suggestion}
+                  suggestion={suggestion}
+                  onClick={(text) => setInput(text)}
+                />
+              ))}
+            </Suggestions>
+          </ConversationEmptyState>
         ) : (
           <ConversationContent>
             {messages.map((message) => (
@@ -96,31 +151,8 @@ export const ChatInterface = memo(function ChatInterface({
         <ConversationScrollButton />
       </Conversation>
 
-      {/* Input Area */}
-      <PromptInput onSubmit={handleSubmit} className="mx-auto max-w-3xl">
-        <PromptInputAttachments>
-          {(attachment) => (
-            <PromptInputAttachment key={attachment.id} data={attachment} />
-          )}
-        </PromptInputAttachments>
-        <PromptInputTextarea
-          value={input}
-          onChange={(e: ChangeEvent<HTMLTextAreaElement>) =>
-            setInput(e.target.value)
-          }
-          placeholder={"Send a message..."}
-        />
-        <PromptInputFooter>
-          <PromptInputTools>
-            <ChatModelSelector />
-            <ChatToolSelector />
-          </PromptInputTools>
-          <PromptInputSubmit
-            status={status}
-            onClick={isLoading ? stop : undefined}
-          />
-        </PromptInputFooter>
-      </PromptInput>
+      {/* Input Area - only show at bottom when there are messages */}
+      {!isEmpty && promptInput}
     </div>
   );
 });

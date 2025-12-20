@@ -1,13 +1,7 @@
 import { createOpenAI } from "@ai-sdk/openai";
-import { streamText, UIMessage, ToolSet, createIdGenerator } from "ai";
+import { streamText, UIMessage, createIdGenerator } from "ai";
 import { DEFAULT_SYSTEM_PROMPT } from "@/config/defaults";
-import { BUILT_IN_TOOLS } from "@/config/tools";
 import { getModelById } from "@/config/models";
-import {
-  connectToMCPServer,
-  getToolEndpoint,
-  MCPClientWrapper,
-} from "@/lib/mcp";
 import {
   loadMessages,
   saveChat,
@@ -34,8 +28,6 @@ interface ChatRequest {
   sessionId: string | null;
   /** Model to use */
   model?: string;
-  /** Enabled tool IDs */
-  enabledTools?: string[];
 }
 
 type SimpleMessage = { role: "user" | "assistant" | "system"; content: string };
@@ -69,94 +61,23 @@ function toSimpleMessages(messages: UIMessage[]): SimpleMessage[] {
 }
 
 // ============================================================================
-// Tool Setup
-// ============================================================================
-
-/**
- * Set up tools for the chat request.
- * Returns the tools object and a list of MCP clients to close after the request.
- */
-async function setupTools(enabledTools: string[]): Promise<{
-  tools: ToolSet;
-  mcpClients: MCPClientWrapper[];
-}> {
-  const tools: ToolSet = {};
-  const mcpClients: MCPClientWrapper[] = [];
-
-  if (enabledTools.length === 0) {
-    return { tools, mcpClients };
-  }
-
-  // Separate built-in tools from network tools
-  const builtInToolIds = Object.keys(BUILT_IN_TOOLS);
-
-  for (const toolId of enabledTools) {
-    // Add built-in tools
-    if (builtInToolIds.includes(toolId)) {
-      const builtInTool = BUILT_IN_TOOLS[toolId as keyof typeof BUILT_IN_TOOLS];
-      if (builtInTool) {
-        tools[toolId] = builtInTool;
-      }
-      continue;
-    }
-
-    // Connect to network tools (MCP endpoints)
-    try {
-      const endpoint = await getToolEndpoint(toolId);
-      if (endpoint) {
-        const mcpClient = await connectToMCPServer({
-          type: "http",
-          url: endpoint,
-        });
-        mcpClients.push(mcpClient);
-
-        // Get tools from the MCP server
-        const mcpTools = await mcpClient.tools();
-        Object.assign(tools, mcpTools);
-      }
-    } catch (error) {
-      console.error(`Failed to connect to MCP tool ${toolId}:`, error);
-      // Continue without this tool - don't fail the entire request
-    }
-  }
-
-  return { tools, mcpClients };
-}
-
-/**
- * Clean up MCP clients after request completes
- */
-async function cleanupMCPClients(clients: MCPClientWrapper[]): Promise<void> {
-  await Promise.all(
-    clients.map((client) =>
-      client.close().catch((error) => {
-        console.error("Error closing MCP client:", error);
-      })
-    )
-  );
-}
-
-// ============================================================================
 // Main Handler
 // ============================================================================
 
 export async function POST(req: Request) {
-  let mcpClients: MCPClientWrapper[] = [];
-
   try {
     const {
       message,
       sessionId: clientSessionId,
       model = "openai/gpt-4o",
-      enabledTools = [],
     }: ChatRequest = await req.json();
 
     // Validate API key is configured
     if (!process.env.OPENAI_API_KEY) {
-      return new Response(
-        JSON.stringify({ error: "AiMo API key not configured" }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ error: "API key not configured" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     // Validate message
@@ -192,10 +113,6 @@ export async function POST(req: Request) {
     // Combine previous messages with new user message
     const messages: UIMessage[] = [...previousMessages, userMessage];
 
-    // Set up tools
-    const { tools, mcpClients: clients } = await setupTools(enabledTools);
-    mcpClients = clients;
-
     // Create OpenAI-compatible client pointing to AiMo Network
     const aimo = createOpenAI({
       baseURL: AIMO_BASE_URL,
@@ -204,9 +121,6 @@ export async function POST(req: Request) {
 
     // Convert to simple OpenAI format (content as string, not array)
     const simpleMessages = toSimpleMessages(messages);
-
-    // Stream the response with tools if any are enabled
-    const hasTools = Object.keys(tools).length > 0;
 
     // Check if model supports image output
     const modelDef = getModelById(model);
@@ -231,12 +145,10 @@ export async function POST(req: Request) {
       model: aimo.chat(model),
       system: DEFAULT_SYSTEM_PROMPT,
       messages: simpleMessages,
-      tools: hasTools ? tools : undefined,
       providerOptions: experimentalProviderMetadata,
     });
 
     // Consume stream to ensure onFinish is called even on client disconnect
-    // This runs in the background - no await
     result.consumeStream();
 
     // Return streaming response with server-side message ID generation
@@ -258,15 +170,9 @@ export async function POST(req: Request) {
         } catch (error) {
           console.error("Failed to save chat:", error);
         }
-
-        // Clean up MCP clients when streaming completes
-        await cleanupMCPClients(mcpClients);
       },
     });
   } catch (error) {
-    // Ensure MCP clients are cleaned up on error
-    await cleanupMCPClients(mcpClients);
-
     console.error("Chat API error:", error);
 
     // Handle specific OpenAI errors
@@ -287,7 +193,7 @@ export async function POST(req: Request) {
 
     return new Response(
       JSON.stringify({ error: "Failed to process chat request" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+      { status: 500, headers: { "Content-Type": "application/json" } },
     );
   }
 }

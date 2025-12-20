@@ -11,8 +11,8 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
@@ -27,9 +27,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MoreHorizontal, Pencil, Trash2, Search } from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useSessions } from "@/hooks/chat";
-import { useSessionStore } from "@/store/sessionStore";
+import { useChatStore } from "@/store/chatStore";
 
 interface RenameSessionDialogProps {
   open: boolean;
@@ -105,15 +105,18 @@ function RenameSessionDialog({
   );
 }
 
-export function ChatSidebar() {
+interface ChatSidebarProps {
+  search: string;
+}
+
+export function ChatSidebar({ search }: ChatSidebarProps) {
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
 
   const { sessions, deleteSession, updateSession, isLoading } = useSessions();
-  const currentSessionId = useSessionStore((s) => s.currentSessionId);
-  const setCurrentSession = useSessionStore((s) => s.setCurrentSession);
+  const currentSessionId = useChatStore((s) => s.currentSessionId);
+  const setCurrentSession = useChatStore((s) => s.setCurrentSession);
 
-  const [search, setSearch] = useState("");
   const [renameSession, setRenameSession] = useState<{
     id: string;
     title: string;
@@ -169,19 +172,7 @@ export function ChatSidebar() {
       <SidebarGroup className="flex-1">
         <SidebarGroupLabel>History</SidebarGroupLabel>
         <SidebarGroupContent>
-          <div className="px-2 pb-2">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search sessions..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-8 h-9"
-              />
-            </div>
-          </div>
-
-          <ScrollArea className="h-[calc(100vh-320px)]">
+          <ScrollArea className="h-[calc(100vh-280px)]">
             <SidebarMenu>
               {isLoading ? (
                 <SidebarMenuItem key="loading">

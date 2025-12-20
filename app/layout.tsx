@@ -4,6 +4,8 @@ import "./globals.css";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { Toaster } from "@/components/ui/sonner";
+import { WalletProvider } from "@/components/account/WalletProvider";
+import { ThemeProvider } from "@/components/layout/ThemeProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -30,13 +32,22 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <SidebarProvider>
-          <AppSidebar />
-          <SidebarInset className="h-screen overflow-hidden">
-            {children}
-          </SidebarInset>
-        </SidebarProvider>
-        <Toaster />
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <WalletProvider>
+            <SidebarProvider>
+              <AppSidebar />
+              <SidebarInset className="h-screen overflow-hidden">
+                {children}
+              </SidebarInset>
+            </SidebarProvider>
+            <Toaster />
+          </WalletProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

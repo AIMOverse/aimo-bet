@@ -4,11 +4,9 @@ import { useChat as useAIChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import type { UIMessage } from "ai";
+import type { UIMessage, FileUIPart } from "ai";
 import { useChatStore } from "@/store/chatStore";
 import { useModelStore } from "@/store/modelStore";
-import { useToolStore } from "@/store/toolStore";
-import { useSessionStore } from "@/store/sessionStore";
 import { getCachedMessages, setCachedMessages } from "@/lib/cache/messages";
 
 interface UseChatMessagesOptions {
@@ -27,8 +25,8 @@ interface UseChatMessagesReturn {
   isLoading: boolean;
   /** Error if any */
   error: Error | undefined;
-  /** Send a message */
-  sendMessage: (content: string) => Promise<void>;
+  /** Send a message with optional file attachments */
+  sendMessage: (content: string, files?: FileUIPart[]) => Promise<void>;
   /** Stop generation */
   stop: () => void;
   /** Reload last message */
@@ -46,16 +44,15 @@ export function useChatMessages({
   const [input, setInput] = useState("");
   // For new chats, generate a session ID client-side (UUIDs are collision-safe)
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(
-    sessionId
+    sessionId,
   );
   const hasLoadedRef = useRef<string | null>(null);
   const isNewChatRef = useRef(sessionId === null);
 
   const selectedModelId = useModelStore((s) => s.selectedModelId);
-  const globalEnabledTools = useToolStore((s) => s.globalEnabledTools);
   const setIsGenerating = useChatStore((s) => s.setIsGenerating);
   const setStoreError = useChatStore((s) => s.setError);
-  const setStoreCurrentSession = useSessionStore((s) => s.setCurrentSession);
+  const setStoreCurrentSession = useChatStore((s) => s.setCurrentSession);
 
   // Create transport that sends only the last message
   const transport = useMemo(
@@ -74,12 +71,11 @@ export function useChatMessages({
               },
               sessionId: currentSessionId,
               model: selectedModelId,
-              enabledTools: globalEnabledTools,
             },
           };
         },
       }),
-    [currentSessionId, selectedModelId, globalEnabledTools]
+    [currentSessionId, selectedModelId],
   );
 
   // Load messages when session changes
@@ -96,9 +92,7 @@ export function useChatMessages({
         }
 
         // Fetch fresh from API
-        const response = await fetch(
-          `/api/sessions/messages?id=${sessionId}`
-        );
+        const response = await fetch(`/api/sessions/messages?id=${sessionId}`);
         if (response.ok) {
           const messages = await response.json();
           setInitialMessages(messages);
@@ -176,8 +170,11 @@ export function useChatMessages({
   }, [initialMessages, sessionId, setMessages]);
 
   const sendMessage = useCallback(
-    async (content: string) => {
-      if (!content.trim()) return;
+    async (content: string, files?: FileUIPart[]) => {
+      const hasText = content.trim().length > 0;
+      const hasFiles = files && files.length > 0;
+
+      if (!hasText && !hasFiles) return;
 
       // For new chats, generate a session ID and navigate
       if (isNewChatRef.current && !currentSessionId) {
@@ -190,11 +187,26 @@ export function useChatMessages({
         router.push(`/chat/${newSessionId}`);
       }
 
+      // Build message parts
+      const parts: UIMessage["parts"] = [];
+
+      // Add file parts first (images appear before text)
+      if (hasFiles) {
+        for (const file of files) {
+          parts.push(file);
+        }
+      }
+
+      // Add text part
+      if (hasText) {
+        parts.push({ type: "text", text: content });
+      }
+
       // Send to AI using the AI SDK sendMessage
       // The message will be persisted server-side
-      aiSendMessage({ parts: [{ type: "text", text: content }] });
+      aiSendMessage({ parts });
     },
-    [aiSendMessage, currentSessionId, router, setStoreCurrentSession]
+    [aiSendMessage, currentSessionId, router, setStoreCurrentSession],
   );
 
   // Append message locally (for manual additions)
@@ -202,7 +214,7 @@ export function useChatMessages({
     (message: UIMessage) => {
       setMessages((prev) => [...prev, message]);
     },
-    [setMessages]
+    [setMessages],
   );
 
   const isLoading =
