@@ -20,13 +20,18 @@ export const registry = createProviderRegistry(
     // openrouter,
     // anthropic,
   },
-  { separator: "/" }
+  { separator: "/" },
 );
 
 /**
  * Get a language model by ID.
  *
- * @param modelId - Model ID in format 'provider/model'
+ * Accepts multiple formats:
+ * - Registry format: 'aimo/gpt-oss-120b', 'aimo/fast', 'aimo/creative'
+ * - Full model ID: '9D9ZcNGUSDCfiDQ4DcGvvF1de5s9cqZuE5T7KcWFSgV6:openai/gpt-oss-120b'
+ * - Short name: 'gpt-oss-120b'
+ *
+ * @param modelId - Model ID in any supported format
  * @returns Language model instance
  *
  * @example
@@ -34,5 +39,14 @@ export const registry = createProviderRegistry(
  * const result = await streamText({ model, prompt: '...' });
  */
 export function getModel(modelId: string) {
-  return registry.languageModel(modelId as `aimo/${string}`);
+  // If already in registry format (aimo/...), use directly
+  if (modelId.startsWith("aimo/")) {
+    return registry.languageModel(modelId as `aimo/${string}`);
+  }
+
+  // Extract model name from full ID format (e.g., "xxx:openai/gpt-oss-120b" -> "gpt-oss-120b")
+  const modelName = modelId.includes("/") ? modelId.split("/").pop()! : modelId;
+
+  // Use the aimo provider with the extracted model name
+  return registry.languageModel(`aimo/${modelName}` as `aimo/${string}`);
 }

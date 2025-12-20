@@ -38,6 +38,64 @@ pnpm lint       # Run ESLint
 
 ---
 
+## Architecture
+
+### System Overview
+
+```
+┌─────────────┐      ┌─────────────────┐      ┌──────────────────┐
+│   Client    │ ───► │  Next.js API    │ ───► │  AI Inference    │
+│  (Browser)  │      │   (route.ts)    │      │  (AiMo Network)  │
+└─────────────┘      └────────┬────────┘      └──────────────────┘
+                              │
+                              ▼
+                     ┌─────────────────┐
+                     │    Supabase     │
+                     │   (Storage)     │
+                     └─────────────────┘
+```
+
+The Next.js server acts as a middle layer between:
+- **Client**: Browser running the chat UI
+- **AI Inference**: Stateless LLM API (AiMo Network) - separate server
+- **Storage**: Supabase for persistence - separate server
+
+### Message Flow Pattern
+
+**Client sends full message history with each request.** The AI SDK's `useChat` hook manages client-side state and sends the complete `messages[]` array.
+
+```typescript
+// Client (via useChat + sendMessage)
+sendMessage(
+  { text: input },
+  {
+    body: {
+      sessionId: currentSessionId,
+      model: selectedModel,
+    },
+  },
+);
+
+// Server receives full history + custom fields
+const { messages, sessionId, model }: {
+  messages: UIMessage[];
+  sessionId: string | null;
+  model?: string;
+} = await req.json();
+```
+
+**Why this pattern:**
+- AI inference server is stateless (needs full context every call)
+- Client already has messages in memory (no redundant DB read)
+- Simpler architecture: DB is write-during-chat, read-on-resume
+- Aligns with AI SDK's native `useChat` behavior
+
+**DB reads only occur when:**
+- User reopens an existing session (page load/refresh)
+- Not on every message exchange
+
+---
+
 ## Project Structure
 
 ```
@@ -48,26 +106,18 @@ aimo-chat/
 │   ├── chat/
 │   │   ├── page.tsx             # New chat (no session)
 │   │   └── [id]/page.tsx        # Existing chat session
-│   ├── generate/
-│   │   ├── page.tsx             # New generation (placeholder)
-│   │   └── [id]/page.tsx        # Existing generation session
 │   └── api/
-│       └── chat/route.ts        # Chat API
+│       └── chat/route.ts        # Chat API (proxies to inference)
 ├── components/
 │   ├── ui/                      # shadcn/ui primitives
 │   ├── layout/                  # AppSidebar, AppHeader, ThemeProvider
-│   ├── chat/                    # ChatInterface, ChatSidebar, etc.
-│   └── generate/                # Generate mode components
+│   └── chat/                    # ChatInterface, ChatSidebar, etc.
 ├── lib/
-│   └── ai/                      # AI integration layer
-│       ├── middleware/          # Language model middleware
-│       │   ├── logging.ts       # Request/response logging
-│       │   ├── cache.ts         # Response caching
-│       │   └── index.ts         # Middleware exports
-│       ├── providers/           # Custom provider configurations
-│       │   ├── aimo.ts          # AiMo Network provider
-│       │   └── index.ts         # Provider exports
-│       └── registry.ts          # Unified provider registry
+│   ├── ai/                      # AI integration layer
+│   │   ├── middleware/          # Language model middleware
+│   │   ├── providers/           # Custom provider configurations
+│   │   └── registry.ts          # Unified provider registry
+│   └── supabase/                # Database operations
 ├── config/
 │   ├── models.ts                # Model definitions
 │   ├── providers.ts             # Provider configurations
@@ -80,183 +130,40 @@ aimo-chat/
 
 ---
 
-## AI Architecture: Provider Registry & Middleware
-
-The AI integration uses Vercel AI SDK's provider management and middleware system for a clean, extensible architecture.
-
-### Architecture Overview
-
-```
-                    ┌─────────────────────────────────────┐
-                    │         Provider Registry           │
-                    │   (Unified access via string IDs)   │
-                    └─────────────────────────────────────┘
-                                    │
-            ┌───────────────────────┼───────────────────────┐
-            ▼                       ▼                       ▼
-    ┌───────────────┐      ┌───────────────┐      ┌───────────────┐
-    │ Custom Provider│      │ Custom Provider│      │   Fallback    │
-    │     (aimo)     │      │  (openrouter)  │      │   Provider    │
-    └───────────────┘      └───────────────┘      └───────────────┘
-            │                       │
-            ▼                       ▼
-    ┌─────────────────────────────────────┐
-    │           Middleware Stack          │
-    │  (logging → cache → defaultSettings)│
-    └─────────────────────────────────────┘
-                    │
-                    ▼
-            ┌───────────────┐
-            │   LLM API     │
-            └───────────────┘
-```
+## AI Integration
 
 ### Provider Registry (`lib/ai/registry.ts`)
 
-Centralized model access through simple string IDs:
+Centralized model access through string IDs:
 
 ```typescript
-import { createProviderRegistry } from 'ai';
-import { aimo } from './providers/aimo';
-
-export const registry = createProviderRegistry(
-  {
-    aimo,
-    // openrouter, // Future providers
-  },
-  { separator: '/' },
-);
-
-// Usage: registry.languageModel('aimo/fast')
-export function getModel(modelId: string) {
-  return registry.languageModel(modelId);
-}
-```
-
-### Custom Provider (`lib/ai/providers/aimo.ts`)
-
-Pre-configured models with middleware and aliases:
-
-```typescript
-import { createOpenAI } from '@ai-sdk/openai';
-import { customProvider, wrapLanguageModel, defaultSettingsMiddleware } from 'ai';
-import { loggingMiddleware } from '../middleware/logging';
-
-const aimoBase = createOpenAI({
-  baseURL: 'https://devnet.aimo.network/api/v1',
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-export const aimo = customProvider({
-  languageModels: {
-    // Default model with logging
-    'gpt-oss-120b': wrapLanguageModel({
-      model: aimoBase.chat('model-id'),
-      middleware: [loggingMiddleware],
-    }),
-
-    // Alias: fast responses
-    fast: wrapLanguageModel({
-      model: aimoBase.chat('model-id'),
-      middleware: [
-        loggingMiddleware,
-        defaultSettingsMiddleware({
-          settings: { temperature: 0.7, maxOutputTokens: 1000 },
-        }),
-      ],
-    }),
-
-    // Alias: creative writing
-    creative: wrapLanguageModel({
-      model: aimoBase.chat('model-id'),
-      middleware: [
-        loggingMiddleware,
-        defaultSettingsMiddleware({
-          settings: { temperature: 1.0 },
-        }),
-      ],
-    }),
-  },
-  fallbackProvider: aimoBase,
-});
-```
-
-### Middleware (`lib/ai/middleware/`)
-
-Intercept and modify LLM calls for cross-cutting concerns:
-
-```typescript
-// lib/ai/middleware/logging.ts
-import type { LanguageModelV3Middleware } from '@ai-sdk/provider';
-
-export const loggingMiddleware: LanguageModelV3Middleware = {
-  wrapGenerate: async ({ doGenerate, params }) => {
-    const start = Date.now();
-    console.log('[AI] Generate started');
-
-    const result = await doGenerate();
-
-    console.log(`[AI] Completed in ${Date.now() - start}ms`);
-    return result;
-  },
-
-  wrapStream: async ({ doStream, params }) => {
-    console.log('[AI] Stream started');
-    return doStream();
-  },
-};
-```
-
-### Available Middleware Types
-
-| Middleware | Purpose | Use Case |
-|------------|---------|----------|
-| `loggingMiddleware` | Log requests/responses | Debugging, monitoring |
-| `cacheMiddleware` | Cache identical queries | Reduce API costs |
-| `defaultSettingsMiddleware` | Apply default settings | Consistent model behavior |
-| `extractReasoningMiddleware` | Extract `<think>` tags | Reasoning models (DeepSeek R1) |
-| `guardrailsMiddleware` | Filter sensitive content | PII protection |
-
-### Usage in API Routes
-
-```typescript
-// app/api/chat/route.ts
-import { streamText } from 'ai';
 import { getModel } from '@/lib/ai/registry';
 
-const result = streamText({
-  model: getModel('aimo/fast'), // Uses registry with middleware
-  system: DEFAULT_SYSTEM_PROMPT,
-  messages: simpleMessages,
-});
+// Usage: getModel('aimo/gpt-oss-120b')
+const model = getModel(modelId);
 ```
 
-### Request Flow
+### API Route Pattern (`app/api/chat/route.ts`)
 
-```
-User selects "aimo/fast"
-        │
-        ▼
-┌─────────────────┐
-│ Provider Registry│ → Parses provider/model ID
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Custom Provider │ → Finds pre-configured "fast" model
-│     (aimo)      │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│   Middleware    │ → 1. loggingMiddleware (logs request)
-│     Stack       │ → 2. defaultSettingsMiddleware (applies temp=0.7)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  AiMo Network   │ → Actual API call
-└─────────────────┘
+```typescript
+import { streamText, UIMessage } from 'ai';
+import { getModel } from '@/lib/ai/registry';
+
+export async function POST(req: Request) {
+  const { messages, sessionId, model } = await req.json();
+
+  const result = streamText({
+    model: getModel(model),
+    system: DEFAULT_SYSTEM_PROMPT,
+    messages,
+  });
+
+  return result.toUIMessageStreamResponse({
+    onFinish: async ({ messages }) => {
+      await saveChat({ sessionId, messages });
+    },
+  });
+}
 ```
 
 ---
@@ -290,31 +197,3 @@ export const useSettingsStore = create<SettingsState>()(
   )
 );
 ```
-
----
-
-## Roadmap
-
-### V1 - Core Chat (COMPLETE)
-- [x] Basic chat interface
-- [x] Model selection
-- [x] Session management
-- [x] Markdown rendering
-- [x] Dark/light theme
-
-### V2 - Extensibility (COMPLETE)
-- [x] Agent/tool selection
-- [x] MCP tool support
-
-### V3 - AI Architecture (CURRENT)
-- [ ] Provider Registry implementation
-- [ ] Custom Provider with model aliases
-- [ ] Middleware stack (logging, cache, defaults)
-- [ ] Chat/Generate mode tabs
-- [ ] Simplified settings
-
-### V4 - Future
-- [ ] Generate mode (image/content generation)
-- [ ] Multiple provider support (OpenRouter, Anthropic)
-- [ ] Export/import chat history
-- [ ] Optional encryption

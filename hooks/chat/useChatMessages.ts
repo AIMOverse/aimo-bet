@@ -54,26 +54,18 @@ export function useChatMessages({
   const setStoreError = useChatStore((s) => s.setError);
   const setStoreCurrentSession = useChatStore((s) => s.setCurrentSession);
 
-  // Create transport that sends only the last message
+  // Send only the last message to the server (server loads history from DB)
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
         api: "/api/chat",
-        // Only send the last message to reduce payload size
-        // Server will load previous messages from Supabase
-        prepareSendMessagesRequest({ messages }) {
-          const lastMessage = messages[messages.length - 1];
-          return {
-            body: {
-              message: {
-                role: lastMessage.role,
-                parts: lastMessage.parts,
-              },
-              sessionId: currentSessionId,
-              model: selectedModelId,
-            },
-          };
-        },
+        prepareSendMessagesRequest: ({ messages, id }) => ({
+          body: {
+            message: messages[messages.length - 1],
+            sessionId: currentSessionId ?? id,
+            model: selectedModelId,
+          },
+        }),
       }),
     [currentSessionId, selectedModelId],
   );
