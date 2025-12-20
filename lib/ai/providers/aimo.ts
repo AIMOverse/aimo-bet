@@ -4,14 +4,14 @@ import {
   wrapLanguageModel,
   defaultSettingsMiddleware,
 } from "ai";
+import { getDefaultProvider } from "@/config/providers";
+import { MODELS } from "@/config/models";
 import { loggingMiddleware } from "../middleware";
 
-// AiMo Network API configuration
-const AIMO_BASE_URL = "https://devnet.aimo.network/api/v1";
-
-// Default model ID
-const DEFAULT_MODEL_ID =
-  "9D9ZcNGUSDCfiDQ4DcGvvF1de5s9cqZuE5T7KcWFSgV6:openai/gpt-oss-120b";
+// Get configuration from central config
+const provider = getDefaultProvider();
+const AIMO_BASE_URL = provider.baseUrl;
+const DEFAULT_MODEL_ID = MODELS[0].id;
 
 /**
  * Base AiMo OpenAI-compatible client
