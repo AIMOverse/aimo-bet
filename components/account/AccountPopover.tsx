@@ -140,59 +140,59 @@ export function AccountPopover() {
         <PopoverContent align="start" className="w-64 p-2">
           <div className="flex flex-col gap-1">
             {isLoggedIn && (
-              <Item size="sm">
-                <ItemMedia variant="icon">
-                  <User className="h-4 w-4" />
-                </ItemMedia>
-                <ItemContent>
-                  <ItemTitle>{displayName}</ItemTitle>
+              <>
+                <Item size="sm">
+                  <ItemMedia variant="icon">
+                    <User className="h-4 w-4" />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>{displayName}</ItemTitle>
+                    {wallet?.address && (
+                      <ItemDescription className="font-mono">
+                        {truncateAddress(wallet.address)}
+                      </ItemDescription>
+                    )}
+                  </ItemContent>
                   {wallet?.address && (
-                    <ItemDescription className="font-mono">
-                      {truncateAddress(wallet.address)}
-                    </ItemDescription>
+                    <ItemActions>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={handleCopyAddress}
+                      >
+                        {copied ? (
+                          <Check className="h-3 w-3 text-green-500" />
+                        ) : (
+                          <Copy className="h-3 w-3" />
+                        )}
+                      </Button>
+                    </ItemActions>
                   )}
-                </ItemContent>
-                {wallet?.address && (
-                  <ItemActions>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      onClick={handleCopyAddress}
-                    >
-                      {copied ? (
-                        <Check className="h-3 w-3 text-green-500" />
-                      ) : (
-                        <Copy className="h-3 w-3" />
-                      )}
-                    </Button>
-                  </ItemActions>
-                )}
-              </Item>
+                </Item>
+
+                <Separator />
+
+                <Item size="sm">
+                  <ItemMedia variant="icon">
+                    <CreditCard className="h-4 w-4" />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>Balance</ItemTitle>
+                    <ItemDescription>
+                      {usdcBalance !== null ? `$${usdcBalance} USDC` : "--"}
+                    </ItemDescription>
+                  </ItemContent>
+                  {isLoggedIn && (
+                    <ItemActions>
+                      <Button variant="outline" size="sm" onClick={handleTopUp}>
+                        Top up
+                      </Button>
+                    </ItemActions>
+                  )}
+                </Item>
+              </>
             )}
-
-            <Separator />
-
-            <Item size="sm">
-              <ItemMedia variant="icon">
-                <CreditCard className="h-4 w-4" />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>Balance</ItemTitle>
-                <ItemDescription>
-                  {usdcBalance !== null ? `$${usdcBalance} USDC` : "--"}
-                </ItemDescription>
-              </ItemContent>
-              {isLoggedIn && (
-                <ItemActions>
-                  <Button variant="outline" size="sm" onClick={handleTopUp}>
-                    Top up
-                  </Button>
-                </ItemActions>
-              )}
-            </Item>
-
-            <Separator />
 
             {isLoggedIn ? (
               <>
