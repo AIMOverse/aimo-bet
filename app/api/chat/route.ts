@@ -1,16 +1,13 @@
-import { createOpenAI } from "@ai-sdk/openai";
 import { streamText, UIMessage, createIdGenerator } from "ai";
 import { DEFAULT_SYSTEM_PROMPT } from "@/config/defaults";
 import { getModelById } from "@/config/models";
+import { getModel } from "@/lib/ai/registry";
 import {
   loadMessages,
   saveChat,
   generateSessionId,
   generateMessageId,
 } from "@/lib/supabase/messages";
-
-// AiMo Network API configuration
-const AIMO_BASE_URL = "https://devnet.aimo.network/api/v1";
 
 export const maxDuration = 60;
 
@@ -69,7 +66,7 @@ export async function POST(req: Request) {
     const {
       message,
       sessionId: clientSessionId,
-      model = "openai/gpt-4o",
+      model = "aimo/gpt-oss-120b",
     }: ChatRequest = await req.json();
 
     // Validate API key is configured
@@ -113,12 +110,6 @@ export async function POST(req: Request) {
     // Combine previous messages with new user message
     const messages: UIMessage[] = [...previousMessages, userMessage];
 
-    // Create OpenAI-compatible client pointing to AiMo Network
-    const aimo = createOpenAI({
-      baseURL: AIMO_BASE_URL,
-      apiKey: process.env.OPENAI_API_KEY,
-    });
-
     // Convert to simple OpenAI format (content as string, not array)
     const simpleMessages = toSimpleMessages(messages);
 
@@ -142,7 +133,7 @@ export async function POST(req: Request) {
         : undefined;
 
     const result = streamText({
-      model: aimo.chat(model),
+      model: getModel(model),
       system: DEFAULT_SYSTEM_PROMPT,
       messages: simpleMessages,
       providerOptions: experimentalProviderMetadata,

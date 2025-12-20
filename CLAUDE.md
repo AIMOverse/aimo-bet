@@ -38,32 +38,6 @@ pnpm lint       # Run ESLint
 
 ---
 
-## App Modes: Chat & Generate
-
-AiMo Chat supports two distinct modes, accessible via tabs in the sidebar:
-
-### Chat Mode (`/chat`)
-- Conversational interface with LLMs
-- Session-based history
-- Routes: `/chat` (new), `/chat/[id]` (existing session)
-
-### Generate Mode (`/generate`)
-- For content/image generation tasks (future)
-- Session-based history (mirrors chat structure)
-- Routes: `/generate` (new), `/generate/[id]` (existing session)
-- **Current status**: Empty state placeholder
-
-### Sidebar Tab Navigation
-
-The sidebar includes a tab switcher below the "AiMo Chat" title:
-- Tabs: "Chat" | "Generate"
-- Active tab derived from URL pathname
-- Clicking a tab navigates to the respective route
-- "New Chat" button changes to "New Generation" on Generate tab
-- Sidebar content changes based on active tab
-
----
-
 ## Project Structure
 
 ```
@@ -77,117 +51,213 @@ aimo-chat/
 │   ├── generate/
 │   │   ├── page.tsx             # New generation (placeholder)
 │   │   └── [id]/page.tsx        # Existing generation session
-│   ├── library/
-│   │   └── page.tsx             # Library/history page
 │   └── api/
-│       └── chat/route.ts        # Chat API (simplified)
+│       └── chat/route.ts        # Chat API
 ├── components/
 │   ├── ui/                      # shadcn/ui primitives
-│   ├── layout/
-│   │   ├── AppSidebar.tsx       # Main sidebar with mode tabs
-│   │   ├── AppHeader.tsx        # Header component
-│   │   └── ThemeProvider.tsx    # Theme context
-│   ├── chat/
-│   │   ├── ChatInterface.tsx    # Main chat UI
-│   │   ├── ChatSidebar.tsx      # Chat session list
-│   │   ├── ChatModelSelector.tsx
-│   │   └── ChatToolSelector.tsx
-│   └── account/
-│       └── AccountPopover.tsx   # User account menu
+│   ├── layout/                  # AppSidebar, AppHeader, ThemeProvider
+│   ├── chat/                    # ChatInterface, ChatSidebar, etc.
+│   └── generate/                # Generate mode components
+├── lib/
+│   └── ai/                      # AI integration layer
+│       ├── middleware/          # Language model middleware
+│       │   ├── logging.ts       # Request/response logging
+│       │   ├── cache.ts         # Response caching
+│       │   └── index.ts         # Middleware exports
+│       ├── providers/           # Custom provider configurations
+│       │   ├── aimo.ts          # AiMo Network provider
+│       │   └── index.ts         # Provider exports
+│       └── registry.ts          # Unified provider registry
+├── config/
+│   ├── models.ts                # Model definitions
+│   ├── providers.ts             # Provider configurations
+│   └── defaults.ts              # Default settings
 ├── hooks/
-│   └── chat/
-│       ├── useChatMessages.ts   # Chat logic
-│       └── useSessions.ts       # Session management
-├── store/
-│   ├── chatStore.ts             # Chat state
-│   ├── toolStore.ts             # Tool state
-│   └── index.ts                 # Store exports
-└── types/
-    └── chat.ts                  # Message, Session types
+│   └── chat/                    # Chat-related hooks
+├── store/                       # Zustand stores
+└── types/                       # TypeScript types
 ```
 
 ---
 
-## Implementation: Sidebar Mode Tabs
+## AI Architecture: Provider Registry & Middleware
 
-### AppSidebar Component Changes
+The AI integration uses Vercel AI SDK's provider management and middleware system for a clean, extensible architecture.
+
+### Architecture Overview
+
+```
+                    ┌─────────────────────────────────────┐
+                    │         Provider Registry           │
+                    │   (Unified access via string IDs)   │
+                    └─────────────────────────────────────┘
+                                    │
+            ┌───────────────────────┼───────────────────────┐
+            ▼                       ▼                       ▼
+    ┌───────────────┐      ┌───────────────┐      ┌───────────────┐
+    │ Custom Provider│      │ Custom Provider│      │   Fallback    │
+    │     (aimo)     │      │  (openrouter)  │      │   Provider    │
+    └───────────────┘      └───────────────┘      └───────────────┘
+            │                       │
+            ▼                       ▼
+    ┌─────────────────────────────────────┐
+    │           Middleware Stack          │
+    │  (logging → cache → defaultSettings)│
+    └─────────────────────────────────────┘
+                    │
+                    ▼
+            ┌───────────────┐
+            │   LLM API     │
+            └───────────────┘
+```
+
+### Provider Registry (`lib/ai/registry.ts`)
+
+Centralized model access through simple string IDs:
 
 ```typescript
-// components/layout/AppSidebar.tsx
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { usePathname, useRouter } from "next/navigation";
+import { createProviderRegistry } from 'ai';
+import { aimo } from './providers/aimo';
 
-export function AppSidebar() {
-  const pathname = usePathname();
-  const router = useRouter();
-  
-  // Derive active tab from URL
-  const activeTab = pathname.startsWith("/generate") ? "generate" : "chat";
-  
-  const handleTabChange = (value: string) => {
-    router.push(`/${value}`);
-  };
+export const registry = createProviderRegistry(
+  {
+    aimo,
+    // openrouter, // Future providers
+  },
+  { separator: '/' },
+);
 
-  return (
-    <Sidebar>
-      <SidebarHeader className="border-b">
-        {/* Title */}
-        <div className="flex items-center justify-between px-2 py-2">
-          <span className="font-semibold text-lg">AiMo Chat</span>
-        </div>
-        
-        {/* Mode Tabs */}
-        <div className="px-2 pb-2">
-          <Tabs value={activeTab} onValueChange={handleTabChange}>
-            <TabsList className="w-full">
-              <TabsTrigger value="chat" className="flex-1">Chat</TabsTrigger>
-              <TabsTrigger value="generate" className="flex-1">Generate</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
-      </SidebarHeader>
-
-      <SidebarContent>
-        {/* Dynamic "New" button */}
-        <SidebarMenu className="px-2 pt-2">
-          <SidebarMenuItem>
-            <SidebarMenuButton onClick={handleNew}>
-              <Plus className="h-4 w-4" />
-              <span>{activeTab === "chat" ? "New Chat" : "New Generation"}</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-
-        {/* Tab-specific content */}
-        {activeTab === "chat" ? (
-          <ChatSidebar />
-        ) : (
-          <GenerateSidebar /> {/* Empty state for now */}
-        )}
-      </SidebarContent>
-      
-      {/* ... footer */}
-    </Sidebar>
-  );
+// Usage: registry.languageModel('aimo/fast')
+export function getModel(modelId: string) {
+  return registry.languageModel(modelId);
 }
 ```
 
-### Files to Create/Modify
+### Custom Provider (`lib/ai/providers/aimo.ts`)
 
-| File | Action | Description |
-|------|--------|-------------|
-| `components/layout/AppSidebar.tsx` | **Modify** | Add tabs, derive active tab from URL |
-| `app/generate/page.tsx` | **Create** | Empty state placeholder page |
-| `app/generate/[id]/page.tsx` | **Create** | Session page placeholder |
-| `components/generate/GenerateSidebar.tsx` | **Create** | Empty sidebar for generate mode |
+Pre-configured models with middleware and aliases:
 
-### Implementation Steps
+```typescript
+import { createOpenAI } from '@ai-sdk/openai';
+import { customProvider, wrapLanguageModel, defaultSettingsMiddleware } from 'ai';
+import { loggingMiddleware } from '../middleware/logging';
 
-1. **Update AppSidebar** - Add Tabs component, usePathname for active state
-2. **Create `/generate` route** - Simple placeholder with "Coming Soon" message
-3. **Create `/generate/[id]` route** - Placeholder for future sessions
-4. **Create GenerateSidebar** - Empty state component for sidebar content
-5. **Update "New" button** - Dynamic label based on active tab
+const aimoBase = createOpenAI({
+  baseURL: 'https://devnet.aimo.network/api/v1',
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+export const aimo = customProvider({
+  languageModels: {
+    // Default model with logging
+    'gpt-oss-120b': wrapLanguageModel({
+      model: aimoBase.chat('model-id'),
+      middleware: [loggingMiddleware],
+    }),
+
+    // Alias: fast responses
+    fast: wrapLanguageModel({
+      model: aimoBase.chat('model-id'),
+      middleware: [
+        loggingMiddleware,
+        defaultSettingsMiddleware({
+          settings: { temperature: 0.7, maxOutputTokens: 1000 },
+        }),
+      ],
+    }),
+
+    // Alias: creative writing
+    creative: wrapLanguageModel({
+      model: aimoBase.chat('model-id'),
+      middleware: [
+        loggingMiddleware,
+        defaultSettingsMiddleware({
+          settings: { temperature: 1.0 },
+        }),
+      ],
+    }),
+  },
+  fallbackProvider: aimoBase,
+});
+```
+
+### Middleware (`lib/ai/middleware/`)
+
+Intercept and modify LLM calls for cross-cutting concerns:
+
+```typescript
+// lib/ai/middleware/logging.ts
+import type { LanguageModelV3Middleware } from '@ai-sdk/provider';
+
+export const loggingMiddleware: LanguageModelV3Middleware = {
+  wrapGenerate: async ({ doGenerate, params }) => {
+    const start = Date.now();
+    console.log('[AI] Generate started');
+
+    const result = await doGenerate();
+
+    console.log(`[AI] Completed in ${Date.now() - start}ms`);
+    return result;
+  },
+
+  wrapStream: async ({ doStream, params }) => {
+    console.log('[AI] Stream started');
+    return doStream();
+  },
+};
+```
+
+### Available Middleware Types
+
+| Middleware | Purpose | Use Case |
+|------------|---------|----------|
+| `loggingMiddleware` | Log requests/responses | Debugging, monitoring |
+| `cacheMiddleware` | Cache identical queries | Reduce API costs |
+| `defaultSettingsMiddleware` | Apply default settings | Consistent model behavior |
+| `extractReasoningMiddleware` | Extract `<think>` tags | Reasoning models (DeepSeek R1) |
+| `guardrailsMiddleware` | Filter sensitive content | PII protection |
+
+### Usage in API Routes
+
+```typescript
+// app/api/chat/route.ts
+import { streamText } from 'ai';
+import { getModel } from '@/lib/ai/registry';
+
+const result = streamText({
+  model: getModel('aimo/fast'), // Uses registry with middleware
+  system: DEFAULT_SYSTEM_PROMPT,
+  messages: simpleMessages,
+});
+```
+
+### Request Flow
+
+```
+User selects "aimo/fast"
+        │
+        ▼
+┌─────────────────┐
+│ Provider Registry│ → Parses provider/model ID
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Custom Provider │ → Finds pre-configured "fast" model
+│     (aimo)      │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│   Middleware    │ → 1. loggingMiddleware (logs request)
+│     Stack       │ → 2. defaultSettingsMiddleware (applies temp=0.7)
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  AiMo Network   │ → Actual API call
+└─────────────────┘
+```
 
 ---
 
@@ -196,32 +266,25 @@ export function AppSidebar() {
 - Use `@/` path alias for imports
 - Use `@/lib/utils` for className merging (`cn` function)
 - Functional components with TypeScript
+- Named exports with clear prop types
 - Keep components focused and single-purpose
-- **User-friendly language** - avoid developer jargon in UI
 
-### Component Patterns
+### Component Pattern
 
 ```typescript
-// Preferred: Named exports, clear prop types
-export function ModelSelector({ 
-  value, 
-  onChange 
-}: ModelSelectorProps) {
+export function ModelSelector({ value, onChange }: ModelSelectorProps) {
   // ...
 }
 ```
 
-### Store Patterns
+### Store Pattern
 
 ```typescript
-// Zustand store with persist middleware
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
       apiKey: '',
-      endpoint: 'https://api.openai.com/v1',
       setApiKey: (key) => set({ apiKey: key }),
-      setEndpoint: (url) => set({ endpoint: url }),
     }),
     { name: 'aimo-chat-settings' }
   )
@@ -232,29 +295,26 @@ export const useSettingsStore = create<SettingsState>()(
 
 ## Roadmap
 
-### V1 - COMPLETE
+### V1 - Core Chat (COMPLETE)
 - [x] Basic chat interface
 - [x] Model selection
 - [x] Session management
 - [x] Markdown rendering
 - [x] Dark/light theme
 
-### V2 - COMPLETE
-- [x] Store page (models, agents, tools)
-- [x] Agent/tool selection in chat
+### V2 - Extensibility (COMPLETE)
+- [x] Agent/tool selection
 - [x] MCP tool support
 
-### V3 - Simplification (CURRENT)
-- [x] Remove store/agent/tool complexity
-- [ ] Add Chat/Generate mode tabs in sidebar
-- [ ] Create `/generate` route structure
-- [ ] Simplified settings page
-- [ ] User-centered UI language
-- [ ] Privacy-first messaging
+### V3 - AI Architecture (CURRENT)
+- [ ] Provider Registry implementation
+- [ ] Custom Provider with model aliases
+- [ ] Middleware stack (logging, cache, defaults)
+- [ ] Chat/Generate mode tabs
+- [ ] Simplified settings
 
-### V4 - Future Considerations
-- [ ] Generate mode implementation (image/content generation)
+### V4 - Future
+- [ ] Generate mode (image/content generation)
+- [ ] Multiple provider support (OpenRouter, Anthropic)
 - [ ] Export/import chat history
-- [ ] Multiple API endpoints
-- [ ] Optional encryption for stored chats
-- [ ] Mobile-optimized UI
+- [ ] Optional encryption
