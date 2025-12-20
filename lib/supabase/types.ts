@@ -42,6 +42,50 @@ export interface DbAttachmentMeta {
 }
 
 // =============================================================================
+// Library File Types
+// =============================================================================
+
+/**
+ * Source type for library files
+ */
+export type FileSourceType = "chat" | "generated" | "uploaded";
+
+/**
+ * File type category for filtering
+ */
+export type FileCategory = "image" | "document" | "code" | "other";
+
+/**
+ * library_files table row
+ */
+export interface DbLibraryFile {
+  id: string; // UUID
+  name: string; // Display name
+  storage_path: string; // Path in Supabase Storage
+  content_type: string; // MIME type
+  size: number; // File size in bytes
+  source_type: FileSourceType; // Where the file came from
+  source_id: string | null; // Session ID if from chat, generation ID if generated
+  category: FileCategory; // Computed category for filtering
+  created_at: string; // TIMESTAMPTZ as ISO string
+}
+
+/**
+ * library_files insert type
+ */
+export interface DbLibraryFileInsert {
+  id?: string;
+  name: string;
+  storage_path: string;
+  content_type: string;
+  size: number;
+  source_type: FileSourceType;
+  source_id?: string | null;
+  category: FileCategory;
+  created_at?: string;
+}
+
+// =============================================================================
 // Insert Types
 // =============================================================================
 
@@ -113,6 +157,12 @@ export interface Database {
             referencedColumns: ["id"];
           }
         ];
+      };
+      library_files: {
+        Row: DbLibraryFile;
+        Insert: DbLibraryFileInsert;
+        Update: Partial<DbLibraryFileInsert>;
+        Relationships: GenericRelationship[];
       };
     };
     Views: Record<string, never>;
