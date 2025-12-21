@@ -5,8 +5,9 @@ import {
   convertToModelMessages,
 } from "ai";
 import { DEFAULT_SYSTEM_PROMPT } from "@/config/defaults";
-import { getModelById } from "@/config/models";
+import { getModelById } from "@/lib/ai/models/models";
 import { getModel } from "@/lib/ai/registry";
+import { generateImageTool, generateVideoTool } from "@/lib/ai/tools";
 import {
   saveChat,
   loadMessages,
@@ -24,6 +25,12 @@ interface ChatRequest {
   sessionId: string | null;
   /** Model to use */
   model?: string;
+  /** Tools configuration */
+  tools?: {
+    generateImage?: boolean;
+    generateVideo?: boolean;
+    webSearch?: boolean;
+  };
 }
 
 // ============================================================================
@@ -35,7 +42,8 @@ export async function POST(req: Request) {
     const {
       message,
       sessionId,
-      model = "aimo/gpt-oss-120b",
+      model = "openrouter/gpt-4o",
+      tools,
     }: ChatRequest = await req.json();
 
     // Validate message
@@ -47,7 +55,7 @@ export async function POST(req: Request) {
     }
 
     // Validate API key is configured
-    if (!process.env.OPENAI_API_KEY) {
+    if (!process.env.OPENROUTER_API_KEY) {
       return new Response(JSON.stringify({ error: "API key not configured" }), {
         status: 500,
         headers: { "Content-Type": "application/json" },
@@ -57,6 +65,21 @@ export async function POST(req: Request) {
     // Determine session ID (create new if not provided)
     const finalSessionId = sessionId ?? generateSessionId();
 
+    // Validate UUID format to prevent database errors
+    const isValidUUID =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        finalSessionId,
+      );
+    if (!isValidUUID) {
+      return new Response(
+        JSON.stringify({ error: "Invalid session ID format" }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
+
     // Load previous messages from DB and append new message
     const previousMessages = sessionId ? await loadMessages(sessionId) : [];
     const messages = [...previousMessages, message];
@@ -64,6 +87,16 @@ export async function POST(req: Request) {
     // Check if model supports image output
     const modelDef = getModelById(model);
     const supportsImageOutput = modelDef?.outputModalities?.includes("image");
+
+    // Build enabled tools object
+    const enabledTools = {
+      ...(tools?.generateImage && { generateImage: generateImageTool }),
+      ...(tools?.generateVideo && { generateVideo: generateVideoTool }),
+      // Future: add more tools here
+    };
+
+    console.log("[chat/route] Request tools config:", tools);
+    console.log("[chat/route] Enabled tools:", Object.keys(enabledTools));
 
     // Build experimental provider metadata for image-capable models
     const providerOptions =
@@ -80,11 +113,37 @@ export async function POST(req: Request) {
           }
         : undefined;
 
+    const toolsToPass =
+      Object.keys(enabledTools).length > 0 ? enabledTools : undefined;
+    console.log(
+      "[chat/route] Tools passed to streamText:",
+      toolsToPass ? Object.keys(toolsToPass) : "none",
+    );
+    console.log("[chat/route] Model:", model);
+
     const result = streamText({
       model: getModel(model),
       system: DEFAULT_SYSTEM_PROMPT,
       messages: await convertToModelMessages(messages),
       providerOptions,
+      tools: toolsToPass,
+      onStepFinish: ({ toolCalls, toolResults }) => {
+        console.log("[chat/route] Step finished:", {
+          toolCalls: toolCalls?.length,
+          toolResults: toolResults?.length,
+        });
+        if (toolCalls) {
+          toolCalls.forEach((tc, i) => {
+            if (tc && "toolName" in tc) {
+              console.log(
+                `[chat/route] Tool call ${i}:`,
+                tc.toolName,
+                "input" in tc ? tc.input : undefined,
+              );
+            }
+          });
+        }
+      },
     });
 
     // Consume stream to ensure onFinish is called even on client disconnect

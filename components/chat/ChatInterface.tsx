@@ -24,6 +24,7 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { Image } from "@/components/ai-elements/image";
+import { Video } from "@/components/chat/video";
 import {
   Tool,
   ToolHeader,
@@ -170,6 +171,14 @@ interface GenerateImageResult {
   error?: string;
 }
 
+/** Result type from generateVideo tool */
+interface GenerateVideoResult {
+  success: boolean;
+  video?: { url: string; mediaType: string };
+  prompt: string;
+  error?: string;
+}
+
 const ChatMessage = memo(function ChatMessage({ message }: ChatMessageProps) {
   return (
     <Message from={message.role}>
@@ -244,6 +253,29 @@ const ChatMessage = memo(function ChatMessage({ message }: ChatMessageProps) {
                           Prompt enhanced: {result.revisedPrompt}
                         </p>
                       )}
+                  </div>
+                );
+              }
+            }
+
+            // Special rendering for generateVideo tool results
+            if (
+              toolName === "generateVideo" &&
+              toolPart.state === "output-available"
+            ) {
+              const result = toolPart.output as GenerateVideoResult;
+
+              if (result?.success && result.video) {
+                return (
+                  <div key={index} className="mt-2 space-y-2">
+                    <Video
+                      url={result.video.url}
+                      mediaType={result.video.mediaType}
+                      className="max-w-md rounded-lg"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Prompt: {result.prompt}
+                    </p>
                   </div>
                 );
               }

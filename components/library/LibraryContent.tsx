@@ -8,7 +8,12 @@ import { toast } from "sonner";
 import { FileCard } from "./FileCard";
 import { FileFilters } from "./FileFilters";
 import { FilePreview } from "./FilePreview";
-import type { LibraryFile, ViewMode, LibraryFilters, SortBy } from "@/types/library";
+import type {
+  LibraryFile,
+  ViewMode,
+  LibraryFilters,
+  SortBy,
+} from "@/types/library";
 import type { FileCategory, FileSourceType } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 
@@ -47,10 +52,12 @@ export function LibraryContent() {
       if (!response.ok) throw new Error("Failed to fetch files");
 
       const data = await response.json();
-      const filesWithDates = data.files.map((f: LibraryFile & { createdAt: string }) => ({
-        ...f,
-        createdAt: new Date(f.createdAt),
-      }));
+      const filesWithDates = data.files.map(
+        (f: LibraryFile & { createdAt: string }) => ({
+          ...f,
+          createdAt: new Date(f.createdAt),
+        }),
+      );
       setFiles(filesWithDates);
     } catch (error) {
       console.error("Failed to fetch files:", error);
@@ -98,40 +105,43 @@ export function LibraryContent() {
   }, []);
 
   // Handle file upload
-  const handleUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const fileList = e.target.files;
-    if (!fileList || fileList.length === 0) return;
+  const handleUpload = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const fileList = e.target.files;
+      if (!fileList || fileList.length === 0) return;
 
-    setUploading(true);
-    try {
-      for (const file of Array.from(fileList)) {
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("sourceType", "uploaded");
+      setUploading(true);
+      try {
+        for (const file of Array.from(fileList)) {
+          const formData = new FormData();
+          formData.append("file", file);
+          formData.append("sourceType", "uploaded");
 
-        const response = await fetch("/api/library", {
-          method: "POST",
-          body: formData,
-        });
+          const response = await fetch("/api/library", {
+            method: "POST",
+            body: formData,
+          });
 
-        if (!response.ok) throw new Error(`Failed to upload ${file.name}`);
+          if (!response.ok) throw new Error(`Failed to upload ${file.name}`);
+        }
+
+        toast.success(
+          fileList.length === 1
+            ? "File uploaded successfully"
+            : `${fileList.length} files uploaded successfully`,
+        );
+        fetchFiles();
+      } catch (error) {
+        console.error("Upload failed:", error);
+        toast.error("Failed to upload files");
+      } finally {
+        setUploading(false);
+        // Reset input
+        e.target.value = "";
       }
-
-      toast.success(
-        fileList.length === 1
-          ? "File uploaded successfully"
-          : `${fileList.length} files uploaded successfully`
-      );
-      fetchFiles();
-    } catch (error) {
-      console.error("Upload failed:", error);
-      toast.error("Failed to upload files");
-    } finally {
-      setUploading(false);
-      // Reset input
-      e.target.value = "";
-    }
-  }, [fetchFiles]);
+    },
+    [fetchFiles],
+  );
 
   // Handle file download
   const handleDownload = useCallback(async (file: LibraryFile) => {
@@ -205,11 +215,7 @@ export function LibraryContent() {
         <h1 className="text-xl font-semibold">Library</h1>
         <div className="flex items-center gap-2">
           {selectedIds.size > 0 && (
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={handleBulkDelete}
-            >
+            <Button variant="destructive" size="sm" onClick={handleBulkDelete}>
               <Trash2 className="h-4 w-4 mr-2" />
               Delete ({selectedIds.size})
             </Button>
@@ -247,7 +253,7 @@ export function LibraryContent() {
             className={cn(
               viewMode === "grid"
                 ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4"
-                : "space-y-2"
+                : "space-y-2",
             )}
           >
             {Array.from({ length: 12 }).map((_, i) => (
@@ -285,7 +291,7 @@ export function LibraryContent() {
             className={cn(
               viewMode === "grid"
                 ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4"
-                : "space-y-1"
+                : "space-y-1",
             )}
           >
             {sortedFiles.map((file) => (

@@ -35,16 +35,22 @@ interface FileCardProps {
   onDelete: (file: LibraryFile) => void;
 }
 
-function getCategoryIcon(category: string) {
+function CategoryIcon({
+  category,
+  className,
+}: {
+  category: string;
+  className?: string;
+}) {
   switch (category) {
     case "image":
-      return ImageIcon;
+      return <ImageIcon className={className} />;
     case "document":
-      return FileText;
+      return <FileText className={className} />;
     case "code":
-      return Code;
+      return <Code className={className} />;
     default:
-      return File;
+      return <File className={className} />;
   }
 }
 
@@ -58,7 +64,6 @@ export function FileCard({
   onDelete,
 }: FileCardProps) {
   const [imageError, setImageError] = useState(false);
-  const Icon = getCategoryIcon(file.category);
   const isImage = file.category === "image" && file.url && !imageError;
 
   if (viewMode === "list") {
@@ -66,7 +71,7 @@ export function FileCard({
       <div
         className={cn(
           "flex items-center gap-3 px-3 py-2 rounded-md hover:bg-muted/50 transition-colors cursor-pointer group",
-          selected && "bg-muted"
+          selected && "bg-muted",
         )}
         onClick={() => onPreview(file)}
       >
@@ -76,7 +81,7 @@ export function FileCard({
           onClick={(e) => e.stopPropagation()}
         />
 
-        <div className="flex-shrink-0 w-10 h-10 rounded bg-muted flex items-center justify-center overflow-hidden">
+        <div className="shrink-0 w-10 h-10 rounded bg-muted flex items-center justify-center overflow-hidden">
           {isImage ? (
             <Image
               src={file.url!}
@@ -85,9 +90,13 @@ export function FileCard({
               height={40}
               className="object-cover w-full h-full"
               onError={() => setImageError(true)}
+              unoptimized
             />
           ) : (
-            <Icon className="h-5 w-5 text-muted-foreground" />
+            <CategoryIcon
+              category={file.category}
+              className="h-5 w-5 text-muted-foreground"
+            />
           )}
         </div>
 
@@ -135,7 +144,7 @@ export function FileCard({
     <Card
       className={cn(
         "group relative overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all",
-        selected && "ring-2 ring-primary"
+        selected && "ring-2 ring-primary",
       )}
       onClick={() => onPreview(file)}
     >
@@ -196,9 +205,13 @@ export function FileCard({
             height={200}
             className="object-cover w-full h-full"
             onError={() => setImageError(true)}
+            unoptimized
           />
         ) : (
-          <Icon className="h-12 w-12 text-muted-foreground" />
+          <CategoryIcon
+            category={file.category}
+            className="h-12 w-12 text-muted-foreground"
+          />
         )}
       </div>
 

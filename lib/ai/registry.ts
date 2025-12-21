@@ -1,5 +1,5 @@
 import { createProviderRegistry } from "ai";
-import { aimo } from "./providers";
+import { openrouter } from "./providers";
 
 /**
  * Unified provider registry for all AI models.
@@ -7,17 +7,15 @@ import { aimo } from "./providers";
  * Access models using: registry.languageModel('provider/model')
  *
  * Examples:
- * - 'aimo/fast' - Fast responses with lower temperature
- * - 'aimo/creative' - Creative writing with higher temperature
- * - 'aimo/precise' - Precise responses with low temperature
- * - 'aimo/gpt-oss-120b' - Default model
- * - 'aimo/any-model-id' - Fallback to base provider
+ * - 'openrouter/gpt-4o' - GPT-4o via OpenRouter
+ * - 'openrouter/claude-sonnet-4' - Claude Sonnet 4 via OpenRouter
+ * - 'openrouter/deepseek-chat' - DeepSeek Chat via OpenRouter
+ * - 'openrouter/anthropic/claude-sonnet-4-20250514' - Full model ID fallback
  */
 export const registry = createProviderRegistry(
   {
-    aimo,
+    openrouter,
     // Future providers can be added here:
-    // openrouter,
     // anthropic,
   },
   { separator: "/" },
@@ -27,26 +25,25 @@ export const registry = createProviderRegistry(
  * Get a language model by ID.
  *
  * Accepts multiple formats:
- * - Registry format: 'aimo/gpt-oss-120b', 'aimo/fast', 'aimo/creative'
- * - Full model ID: '9D9ZcNGUSDCfiDQ4DcGvvF1de5s9cqZuE5T7KcWFSgV6:openai/gpt-oss-120b'
- * - Short name: 'gpt-oss-120b'
+ * - Registry format: 'openrouter/gpt-4o', 'openrouter/claude-sonnet-4'
+ * - Full OpenRouter model ID: 'openrouter/anthropic/claude-sonnet-4-20250514'
+ * - Short name: 'gpt-4o' (defaults to openrouter provider)
  *
  * @param modelId - Model ID in any supported format
  * @returns Language model instance
  *
  * @example
- * const model = getModel('aimo/fast');
+ * const model = getModel('openrouter/gpt-4o');
  * const result = await streamText({ model, prompt: '...' });
  */
 export function getModel(modelId: string) {
-  // If already in registry format (aimo/...), use directly
-  if (modelId.startsWith("aimo/")) {
-    return registry.languageModel(modelId as `aimo/${string}`);
+  // If already in registry format (openrouter/...), use directly
+  if (modelId.startsWith("openrouter/")) {
+    return registry.languageModel(modelId as `openrouter/${string}`);
   }
 
-  // Extract model name from full ID format (e.g., "xxx:openai/gpt-oss-120b" -> "gpt-oss-120b")
-  const modelName = modelId.includes("/") ? modelId.split("/").pop()! : modelId;
-
-  // Use the aimo provider with the extracted model name
-  return registry.languageModel(`aimo/${modelName}` as `aimo/${string}`);
+  // Default to openrouter provider with the model name
+  return registry.languageModel(
+    `openrouter/${modelId}` as `openrouter/${string}`,
+  );
 }

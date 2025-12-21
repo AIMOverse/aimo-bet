@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import type { UIMessage, FileUIPart } from "ai";
 import { useChatStore } from "@/store/chatStore";
 import { useModelStore } from "@/store/modelStore";
+import { useToolStore } from "@/store/toolStore";
 import { getCachedMessages, setCachedMessages } from "@/lib/cache/messages";
 
 interface UseChatMessagesOptions {
@@ -42,14 +43,25 @@ export function useChatMessages({
   const [initialMessages, setInitialMessages] = useState<UIMessage[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [input, setInput] = useState("");
+  
+  // Generate a stable ID for new chats to ensure we always use a UUID
+  // This prevents the AI SDK from generating non-UUID IDs (nanoid)
+  const [generatedSessionId] = useState(() => crypto.randomUUID());
+
   // For new chats, generate a session ID client-side (UUIDs are collision-safe)
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(
     sessionId,
   );
+  
+  // The effective session ID to use for the chat instance
+  const activeSessionId = currentSessionId ?? generatedSessionId;
+
   const hasLoadedRef = useRef<string | null>(null);
   const isNewChatRef = useRef(sessionId === null);
 
   const selectedModelId = useModelStore((s) => s.selectedModelId);
+  const { generateImageEnabled, generateVideoEnabled, webSearchEnabled } =
+    useToolStore.getState();
   const setIsGenerating = useChatStore((s) => s.setIsGenerating);
   const setStoreError = useChatStore((s) => s.setError);
   const setStoreCurrentSession = useChatStore((s) => s.setCurrentSession);
@@ -62,12 +74,18 @@ export function useChatMessages({
         prepareSendMessagesRequest: ({ messages, id }) => ({
           body: {
             message: messages[messages.length - 1],
-            sessionId: currentSessionId ?? id,
+            // Use the ID passed from useChat, which matches activeSessionId
+            sessionId: id,
             model: selectedModelId,
+            tools: {
+              generateImage: generateImageEnabled,
+              generateVideo: generateVideoEnabled,
+              webSearch: webSearchEnabled,
+            },
           },
         }),
       }),
-    [currentSessionId, selectedModelId],
+    [selectedModelId, generateImageEnabled, generateVideoEnabled, webSearchEnabled],
   );
 
   // Load messages when session changes
@@ -133,7 +151,8 @@ export function useChatMessages({
     regenerate,
     setMessages,
   } = useAIChat({
-    id: currentSessionId ?? undefined,
+    // Always provide a UUID
+    id: activeSessionId,
     messages: initialMessages,
     transport,
     onFinish: async () => {
@@ -170,7 +189,8 @@ export function useChatMessages({
 
       // For new chats, generate a session ID and navigate
       if (isNewChatRef.current && !currentSessionId) {
-        const newSessionId = crypto.randomUUID();
+        // Use the ID that useAIChat is already configured with
+        const newSessionId = activeSessionId;
         setCurrentSessionId(newSessionId);
         setStoreCurrentSession(newSessionId);
         isNewChatRef.current = false;

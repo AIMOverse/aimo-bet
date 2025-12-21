@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { MODELS, getModelById } from "@/config/models";
+import { MODELS, getModelById } from "@/lib/ai/models/models";
 import { useModelStore } from "@/store/modelStore";
 import type { ModelDefinition } from "@/types/models";
 
@@ -24,7 +24,7 @@ export function useModels(): UseModelsReturn {
 
   const selectedModel = useMemo(
     () => getModelById(selectedModelId) ?? null,
-    [selectedModelId]
+    [selectedModelId],
   );
 
   return {

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { MODELS } from "@/config/models";
+import { MODELS } from "@/lib/ai/models/models";
 
 /**
  * GET /api/models
@@ -17,7 +17,7 @@ export async function GET() {
     console.error("Failed to fetch models:", error);
     return NextResponse.json(
       { error: "Failed to fetch models" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
