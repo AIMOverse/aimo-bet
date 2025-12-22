@@ -1,4 +1,10 @@
-import { UIMessage, createIdGenerator, createAgentUIStreamResponse } from "ai";
+import {
+  UIMessage,
+  createIdGenerator,
+  createAgentUIStream,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+} from "ai";
 import { chatAgent } from "@/lib/ai/agents";
 import {
   saveChat,
@@ -50,8 +56,9 @@ export async function POST(req: Request) {
       });
     }
 
-    // Determine session ID (create new if not provided)
+    // Server generates session ID for new chats (single source of truth)
     const finalSessionId = sessionId ?? generateSessionId();
+    const isNewSession = sessionId === null;
 
     // Validate UUID format
     const isValidUUID =
@@ -69,27 +76,45 @@ export async function POST(req: Request) {
     const previousMessages = sessionId ? await loadMessages(sessionId) : [];
     const uiMessages = [...previousMessages, message];
 
-    // Stream response from agent using createAgentUIStreamResponse
-    return createAgentUIStreamResponse({
-      agent: chatAgent,
-      uiMessages,
-      options: {
-        model,
-        tools: {
-          generateImage: tools.generateImage ?? false,
-          generateVideo: tools.generateVideo ?? false,
-          webSearch: tools.webSearch ?? false,
-        },
+    const generateMessageId = createIdGenerator({
+      prefix: "msg",
+      size: 16,
+    });
+
+    // Create the stream with custom data injection for session ID
+    const stream = createUIMessageStream({
+      generateId: generateMessageId,
+      execute: async ({ writer }) => {
+        // Send session ID as transient data immediately (for new sessions)
+        // This allows client to update URL before streaming completes
+        if (isNewSession) {
+          writer.write({
+            type: "data-session",
+            data: { sessionId: finalSessionId },
+            transient: true,
+          });
+        }
+
+        // Stream response from agent
+        const agentStream = await createAgentUIStream({
+          agent: chatAgent,
+          uiMessages,
+          options: {
+            model,
+            tools: {
+              generateImage: tools.generateImage ?? false,
+              generateVideo: tools.generateVideo ?? false,
+              webSearch: tools.webSearch ?? false,
+            },
+          },
+        });
+
+        // Pipe agent stream to the writer
+        writer.merge(agentStream);
       },
-      generateMessageId: createIdGenerator({
-        prefix: "msg",
-        size: 16,
-      }),
       onFinish: async ({ messages: responseMessages }) => {
         try {
           // Combine user messages with AI response messages
-          // uiMessages contains the conversation history + new user message
-          // responseMessages contains the AI-generated response(s)
           const allMessages = [...uiMessages, ...responseMessages];
           await saveChat({
             sessionId: finalSessionId,
@@ -101,6 +126,9 @@ export async function POST(req: Request) {
         }
       },
     });
+
+    // Return the stream as a proper SSE response
+    return createUIMessageStreamResponse({ stream });
   } catch (error) {
     console.error("Chat API error:", error);
     if (error instanceof Error) {

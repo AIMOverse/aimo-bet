@@ -17,6 +17,8 @@ interface UseChatMessagesOptions {
 interface UseChatMessagesReturn {
   /** All messages in the chat */
   messages: UIMessage[];
+  /** Current session ID (may differ from prop after first message in new chat) */
+  currentSessionId: string | null;
   /** Input value (managed locally) */
   input: string;
   /** Set input value */
@@ -42,17 +44,10 @@ export function useChatMessages({
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [input, setInput] = useState("");
 
-  // Generate a stable ID for new chats to ensure we always use a UUID
-  // This prevents the AI SDK from generating non-UUID IDs (nanoid)
-  const [generatedSessionId] = useState(() => crypto.randomUUID());
-
-  // For new chats, generate a session ID client-side (UUIDs are collision-safe)
+  // Session ID state - server is the single source of truth for new sessions
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(
     sessionId,
   );
-
-  // The effective session ID to use for the chat instance
-  const activeSessionId = currentSessionId ?? generatedSessionId;
 
   const hasLoadedRef = useRef<string | null>(null);
   const isNewChatRef = useRef(sessionId === null);
@@ -71,11 +66,12 @@ export function useChatMessages({
     () =>
       new DefaultChatTransport({
         api: "/api/chat",
-        prepareSendMessagesRequest: ({ messages, id }) => ({
+        prepareSendMessagesRequest: ({ messages }) => ({
           body: {
             message: messages[messages.length - 1],
-            // Use the ID passed from useChat, which matches activeSessionId
-            sessionId: id,
+            // Server is source of truth for session IDs
+            // Send null for new chats, server will generate and return via stream
+            sessionId: currentSessionId,
             model: selectedModelId,
             tools: {
               generateImage: generateImageEnabled,
@@ -86,6 +82,7 @@ export function useChatMessages({
         }),
       }),
     [
+      currentSessionId,
       selectedModelId,
       generateImageEnabled,
       generateVideoEnabled,
@@ -154,6 +151,35 @@ export function useChatMessages({
     }
   }, [sessionId, currentSessionId]);
 
+  // Handle session ID received from server via transient data
+  const handleSessionData = useCallback(
+    (data: unknown) => {
+      // Check if this is a session data part from the server
+      if (
+        data &&
+        typeof data === "object" &&
+        "sessionId" in data &&
+        typeof (data as { sessionId: unknown }).sessionId === "string"
+      ) {
+        const newSessionId = (data as { sessionId: string }).sessionId;
+
+        // Only update if we don't have a session ID yet (new chat)
+        if (!currentSessionId && isNewChatRef.current) {
+          setCurrentSessionId(newSessionId);
+          setStoreCurrentSession(newSessionId);
+          isNewChatRef.current = false;
+
+          // Mark that we need to refresh sessions after response completes
+          shouldRefreshOnFinishRef.current = true;
+
+          // Update URL without triggering navigation
+          window.history.replaceState(null, "", `/chat/${newSessionId}`);
+        }
+      }
+    },
+    [currentSessionId, setStoreCurrentSession],
+  );
+
   const {
     messages,
     status,
@@ -163,10 +189,11 @@ export function useChatMessages({
     regenerate,
     setMessages,
   } = useAIChat({
-    // Always provide a UUID
-    id: activeSessionId,
+    // Use current session ID if available, otherwise let useChat generate one internally
+    id: currentSessionId ?? undefined,
     messages: initialMessages,
     transport,
+    onData: handleSessionData,
     onFinish: async () => {
       setIsGenerating(false);
       // Refresh session list if this was a new chat (to show AI-generated title)
@@ -204,22 +231,6 @@ export function useChatMessages({
 
       if (!hasText && !hasFiles) return;
 
-      // For new chats, update the URL without causing a navigation/remount
-      if (isNewChatRef.current && !currentSessionId) {
-        // Use the ID that useAIChat is already configured with
-        const newSessionId = activeSessionId;
-        setCurrentSessionId(newSessionId);
-        setStoreCurrentSession(newSessionId);
-        isNewChatRef.current = false;
-
-        // Mark that we need to refresh sessions after first message completes
-        // This ensures the AI-generated title appears in the sidebar
-        shouldRefreshOnFinishRef.current = true;
-
-        // Update URL without triggering navigation (no remount, preserves state)
-        window.history.replaceState(null, "", `/chat/${newSessionId}`);
-      }
-
       // Build message parts
       const parts: UIMessage["parts"] = [];
 
@@ -236,10 +247,10 @@ export function useChatMessages({
       }
 
       // Send to AI using the AI SDK sendMessage
-      // The message will be persisted server-side
+      // Session ID will be received from server via onData for new chats
       aiSendMessage({ parts });
     },
-    [aiSendMessage, currentSessionId, setStoreCurrentSession, activeSessionId],
+    [aiSendMessage],
   );
 
   // Append message locally (for manual additions)
@@ -255,6 +266,7 @@ export function useChatMessages({
 
   return {
     messages: isLoadingHistory ? [] : messages,
+    currentSessionId,
     input,
     setInput,
     isLoading,

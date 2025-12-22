@@ -54,10 +54,17 @@ export const ChatInterface = memo(function ChatInterface({
   sessionId,
 }: ChatInterfaceProps) {
   // Sessions are created server-side on first message
-  const { messages, input, setInput, isLoading, sendMessage, stop } =
-    useChatMessages({
-      sessionId,
-    });
+  const {
+    messages,
+    currentSessionId,
+    input,
+    setInput,
+    isLoading,
+    sendMessage,
+    stop,
+  } = useChatMessages({
+    sessionId,
+  });
 
   // Show toast when offline
   useIsOffline();
@@ -78,7 +85,8 @@ export const ChatInterface = memo(function ChatInterface({
   // Determine chat status for submit button
   const status: ChatStatus = isLoading ? "streaming" : "ready";
 
-  const isEmpty = messages.length === 0;
+  // Use currentSessionId from hook (updates after first message) instead of prop
+  const isEmpty = currentSessionId === null;
 
   // Shared input component to avoid duplication
   const promptInput = (
