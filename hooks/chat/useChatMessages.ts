@@ -40,6 +40,9 @@ interface UseChatMessagesReturn {
 export function useChatMessages({
   sessionId,
 }: UseChatMessagesOptions): UseChatMessagesReturn {
+  // Debug: confirm this hook version is loaded
+  console.log("[DEBUG] useChatMessages hook called with sessionId:", sessionId);
+
   const [initialMessages, setInitialMessages] = useState<UIMessage[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [input, setInput] = useState("");
