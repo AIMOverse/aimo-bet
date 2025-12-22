@@ -159,28 +159,38 @@ export function useChatMessages({
   }, [sessionId, currentSessionId]);
 
   // Handle session ID received from server via transient data
+  // onData receives the full data part: { type: "data-session", data: { sessionId: "..." } }
   const handleSessionData = useCallback(
-    (data: unknown) => {
+    (dataPart: unknown) => {
       // Check if this is a session data part from the server
       if (
-        data &&
-        typeof data === "object" &&
-        "sessionId" in data &&
-        typeof (data as { sessionId: unknown }).sessionId === "string"
+        dataPart &&
+        typeof dataPart === "object" &&
+        "type" in dataPart &&
+        (dataPart as { type: string }).type === "data-session" &&
+        "data" in dataPart
       ) {
-        const newSessionId = (data as { sessionId: string }).sessionId;
+        const data = (dataPart as { data: unknown }).data;
+        if (
+          data &&
+          typeof data === "object" &&
+          "sessionId" in data &&
+          typeof (data as { sessionId: unknown }).sessionId === "string"
+        ) {
+          const newSessionId = (data as { sessionId: string }).sessionId;
 
-        // Only update if we don't have a session ID yet (new chat)
-        if (!currentSessionId && isNewChatRef.current) {
-          setCurrentSessionId(newSessionId);
-          setStoreCurrentSession(newSessionId);
-          isNewChatRef.current = false;
+          // Only update if we don't have a session ID yet (new chat)
+          if (!currentSessionId && isNewChatRef.current) {
+            setCurrentSessionId(newSessionId);
+            setStoreCurrentSession(newSessionId);
+            isNewChatRef.current = false;
 
-          // Mark that we need to refresh sessions after response completes
-          shouldRefreshOnFinishRef.current = true;
+            // Mark that we need to refresh sessions after response completes
+            shouldRefreshOnFinishRef.current = true;
 
-          // Update URL without triggering navigation
-          window.history.replaceState(null, "", `/chat/${newSessionId}`);
+            // Update URL without triggering navigation
+            window.history.replaceState(null, "", `/chat/${newSessionId}`);
+          }
         }
       }
     },
