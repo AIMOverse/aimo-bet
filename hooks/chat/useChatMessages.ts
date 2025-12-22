@@ -73,6 +73,8 @@ export function useChatMessages({
   const pendingClearRef = useRef(false);
   // Counter to force sync effect to run when navigating to new chat
   const [syncTrigger, setSyncTrigger] = useState(0);
+  // Ref for session update callback (avoids stale closure in fetch wrapper)
+  const sessionUpdateRef = useRef<(sessionId: string) => void>(() => {});
 
   const selectedModelId = useModelStore((s) => s.selectedModelId);
   const { generateImageEnabled, generateVideoEnabled, webSearchEnabled } =
@@ -82,11 +84,40 @@ export function useChatMessages({
   const setStoreCurrentSession = useChatStore((s) => s.setCurrentSession);
   const triggerSessionRefresh = useChatStore((s) => s.triggerSessionRefresh);
 
+  // Update sessionUpdateRef when dependencies change
+  sessionUpdateRef.current = (newSessionId: string) => {
+    console.log("[DEBUG] Session update from header:", newSessionId);
+    if (!currentSessionId && isNewChatRef.current) {
+      console.log("[DEBUG] Updating currentSessionId to:", newSessionId);
+      setCurrentSessionId(newSessionId);
+      setStoreCurrentSession(newSessionId);
+      isNewChatRef.current = false;
+      shouldRefreshOnFinishRef.current = true;
+      window.history.replaceState(null, "", `/chat/${newSessionId}`);
+    }
+  };
+
+  // Custom fetch wrapper that intercepts response headers
+  const customFetch = useCallback(
+    async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const response = await fetch(input, init);
+      // Extract session ID from header if present
+      const sessionId = response.headers.get("X-Session-Id");
+      if (sessionId) {
+        console.log("[DEBUG] Found X-Session-Id header:", sessionId);
+        sessionUpdateRef.current(sessionId);
+      }
+      return response;
+    },
+    [],
+  );
+
   // Send only the last message to the server (server loads history from DB)
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
         api: "/api/chat",
+        fetch: customFetch,
         prepareSendMessagesRequest: ({ messages }) => {
           console.log("[DEBUG] prepareSendMessagesRequest called", {
             messageCount: messages.length,
@@ -110,6 +141,7 @@ export function useChatMessages({
         },
       }),
     [
+      customFetch,
       currentSessionId,
       selectedModelId,
       generateImageEnabled,
@@ -182,8 +214,9 @@ export function useChatMessages({
     }
   }, [sessionId, currentSessionId]);
 
-  // Handle session ID received from server via transient data
-  // onData receives the full data part: { type: "data-session", data: { sessionId: "..." } }
+  // Fallback handler for session ID via transient data (kept for future AI SDK compatibility)
+  // Note: onData may not work with DefaultChatTransport in current AI SDK v6
+  // Primary approach uses X-Session-Id response header via customFetch above
   const handleSessionData = useCallback(
     (dataPart: unknown) => {
       console.log("[DEBUG] onData called with:", dataPart);
@@ -311,7 +344,7 @@ export function useChatMessages({
 
       console.log("[DEBUG] Calling aiSendMessage with parts:", parts);
       // Send to AI using the AI SDK sendMessage
-      // Session ID will be received from server via onData for new chats
+      // Session ID will be received from server via X-Session-Id header for new chats
       aiSendMessage({ parts });
       console.log("[DEBUG] aiSendMessage called");
     },

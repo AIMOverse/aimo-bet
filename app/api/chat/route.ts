@@ -128,7 +128,13 @@ export async function POST(req: Request) {
     });
 
     // Return the stream as a proper SSE response
-    return createUIMessageStreamResponse({ stream });
+    // Include session ID in header for new sessions (more reliable than transient data)
+    return createUIMessageStreamResponse({
+      stream,
+      headers: isNewSession
+        ? { "X-Session-Id": finalSessionId }
+        : undefined,
+    });
   } catch (error) {
     console.error("Chat API error:", error);
     if (error instanceof Error) {
