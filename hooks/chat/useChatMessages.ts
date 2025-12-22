@@ -47,9 +47,18 @@ export function useChatMessages({
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [input, setInput] = useState("");
 
-  // Stable internal ID for useAIChat - generated once per hook instance
-  // This prevents useAIChat from resetting when currentSessionId changes
-  const [internalChatId] = useState(() => sessionId ?? crypto.randomUUID());
+  // Get newChatCounter from store to detect when user explicitly requests a new chat
+  const newChatCounter = useChatStore((s) => s.newChatCounter);
+
+  // Stable internal ID for useAIChat - regenerated when:
+  // 1. sessionId prop changes (navigating between sessions)
+  // 2. newChatCounter changes (user clicks "New Chat")
+  // This prevents useAIChat from resetting when currentSessionId updates from server
+  const internalChatId = useMemo(
+    () => sessionId ?? crypto.randomUUID(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sessionId, newChatCounter]
+  );
 
   // Session ID for persistence - server is the single source of truth for new sessions
   // This may differ from internalChatId (server-generated vs client-generated)
