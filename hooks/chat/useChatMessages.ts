@@ -52,6 +52,10 @@ export function useChatMessages({
   const hasLoadedRef = useRef<string | null>(null);
   const isNewChatRef = useRef(sessionId === null);
   const shouldRefreshOnFinishRef = useRef(false);
+  // Track when we need to clear messages (navigating to new chat)
+  const pendingClearRef = useRef(false);
+  // Counter to force sync effect to run when navigating to new chat
+  const [syncTrigger, setSyncTrigger] = useState(0);
 
   const selectedModelId = useModelStore((s) => s.selectedModelId);
   const { generateImageEnabled, generateVideoEnabled, webSearchEnabled } =
@@ -144,6 +148,9 @@ export function useChatMessages({
       hasLoadedRef.current = null;
       setCurrentSessionId(null);
       isNewChatRef.current = true;
+      // Mark that we need to clear messages and trigger the sync effect
+      pendingClearRef.current = true;
+      setSyncTrigger((prev) => prev + 1);
     } else if (sessionId !== currentSessionId) {
       // Navigating to a different existing session - load from DB
       setCurrentSessionId(sessionId);
@@ -217,11 +224,23 @@ export function useChatMessages({
     }
   }, [status, setIsGenerating]);
 
-  // Update messages when initial messages change (loaded from DB or cleared for new chat)
+  // Ref to avoid setMessages in deps (it changes when transport changes, causing unwanted clears)
+  const setMessagesRef = useRef(setMessages);
+  setMessagesRef.current = setMessages;
+
+  // Sync messages: clear for new chat, or load from DB for existing session
   useEffect(() => {
-    // Always sync initialMessages to useAIChat - including empty array for new chats
-    setMessages(initialMessages);
-  }, [initialMessages, setMessages]);
+    if (pendingClearRef.current) {
+      // Clear messages when navigating to new chat
+      setMessagesRef.current([]);
+      pendingClearRef.current = false;
+    } else if (initialMessages.length > 0) {
+      // Load messages from DB for existing session
+      setMessagesRef.current(initialMessages);
+    }
+    // syncTrigger forces this effect to run when navigating to new chat
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialMessages, syncTrigger]);
 
   const sendMessage = useCallback(
     async (content: string, files?: FileUIPart[]) => {
