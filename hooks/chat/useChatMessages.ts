@@ -47,7 +47,12 @@ export function useChatMessages({
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [input, setInput] = useState("");
 
-  // Session ID state - server is the single source of truth for new sessions
+  // Stable internal ID for useAIChat - generated once per hook instance
+  // This prevents useAIChat from resetting when currentSessionId changes
+  const [internalChatId] = useState(() => sessionId ?? crypto.randomUUID());
+
+  // Session ID for persistence - server is the single source of truth for new sessions
+  // This may differ from internalChatId (server-generated vs client-generated)
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(
     sessionId,
   );
@@ -219,8 +224,8 @@ export function useChatMessages({
     regenerate,
     setMessages,
   } = useAIChat({
-    // Use current session ID if available, otherwise let useChat generate one internally
-    id: currentSessionId ?? undefined,
+    // Use stable internal ID to prevent hook reset when currentSessionId changes
+    id: internalChatId,
     messages: initialMessages,
     transport,
     onData: handleSessionData,
