@@ -70,8 +70,9 @@ export const ChatInterface = memo(function ChatInterface({
       if (!hasText && !hasFiles) return;
 
       await sendMessage(message.text, message.files);
+      setInput(""); // Clear input after sending to prevent stale state
     },
-    [sendMessage],
+    [sendMessage, setInput],
   );
 
   // Determine chat status for submit button
@@ -119,38 +120,40 @@ export const ChatInterface = memo(function ChatInterface({
   );
 
   return (
-    <div className="flex h-full flex-col">
-      <Conversation className="flex-1">
-        {isEmpty ? (
-          <ConversationEmptyState>
-            <div className="mb-8 text-center">
-              <h1 className="text-2xl font-semibold tracking-tight">
-                Uncensored & Private AI
-              </h1>
-              <p className="mt-2 text-muted-foreground">
-                No Subscription. No Top Up. No KYC. No Censorship.
-              </p>
-            </div>
-            {promptInput}
-            <Suggestions className="mt-4">
-              {suggestions.map((suggestion) => (
-                <Suggestion
-                  key={suggestion}
-                  suggestion={suggestion}
-                  onClick={(text) => setInput(text)}
-                />
+    <div className="flex flex-1 min-h-0 flex-col">
+      <div className="relative flex-1 min-h-0">
+        <Conversation className="absolute inset-0">
+          {isEmpty ? (
+            <ConversationEmptyState>
+              <div className="mb-8 text-center">
+                <h1 className="text-2xl font-semibold tracking-tight">
+                  Uncensored & Private AI
+                </h1>
+                <p className="mt-2 text-muted-foreground">
+                  No Subscription. No Top Up. No KYC. No Censorship.
+                </p>
+              </div>
+              {promptInput}
+              <Suggestions className="mt-4">
+                {suggestions.map((suggestion) => (
+                  <Suggestion
+                    key={suggestion}
+                    suggestion={suggestion}
+                    onClick={(text) => setInput(text)}
+                  />
+                ))}
+              </Suggestions>
+            </ConversationEmptyState>
+          ) : (
+            <ConversationContent>
+              {messages.map((message) => (
+                <ChatMessage key={message.id} message={message} />
               ))}
-            </Suggestions>
-          </ConversationEmptyState>
-        ) : (
-          <ConversationContent>
-            {messages.map((message) => (
-              <ChatMessage key={message.id} message={message} />
-            ))}
-          </ConversationContent>
-        )}
-        <ConversationScrollButton />
-      </Conversation>
+            </ConversationContent>
+          )}
+          <ConversationScrollButton />
+        </Conversation>
+      </div>
 
       {/* Input Area - only show at bottom when there are messages */}
       {!isEmpty && promptInput}

@@ -1,10 +1,17 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import type { ChatSession } from "@/types/chat";
 import { useChatStore } from "@/store/chatStore";
 import { clearCachedMessages } from "@/lib/cache/messages";
+
+// Module-level state to prevent duplicate fetches across component instances
+let globalSessionsPromise: Promise<ChatSession[]> | null = null;
+let globalSessionsCache: ChatSession[] | null = null;
+let globalLastFetchTime = 0;
+let isFetching = false;
+const CACHE_TTL = 5000; // 5 seconds
 
 interface UseSessionsReturn {
   /** All chat sessions */
@@ -30,8 +37,11 @@ interface UseSessionsReturn {
 
 export function useSessions(): UseSessionsReturn {
   const router = useRouter();
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  // Initialize with cached data if available
+  const [sessions, setSessions] = useState<ChatSession[]>(
+    () => globalSessionsCache ?? [],
+  );
+  const [isLoading, setIsLoading] = useState(() => !globalSessionsCache);
   const [error, setError] = useState<string | null>(null);
 
   const currentSessionId = useChatStore((s) => s.currentSessionId);
@@ -40,46 +50,96 @@ export function useSessions(): UseSessionsReturn {
   const currentSession =
     sessions.find((s) => s.id === currentSessionId) ?? null;
 
-  // Load sessions from API
-  const loadSessions = useCallback(async () => {
+  // Load sessions from API with deduplication
+  const loadSessions = useCallback(async (forceRefresh = false) => {
+    const now = Date.now();
+
+    // Use cached data if available and fresh
+    if (
+      !forceRefresh &&
+      globalSessionsCache &&
+      now - globalLastFetchTime < CACHE_TTL
+    ) {
+      setSessions(globalSessionsCache);
+      setIsLoading(false);
+      return;
+    }
+
+    // Hard block: if already fetching, just skip
+    if (isFetching) {
+      return;
+    }
+
+    // If we have a pending promise, wait for it
+    if (globalSessionsPromise) {
+      try {
+        const sessions = await globalSessionsPromise;
+        setSessions(sessions);
+      } catch {
+        // Error handled by original caller
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
     try {
+      isFetching = true;
       setIsLoading(true);
       setError(null);
 
-      const response = await fetch("/api/sessions");
-      if (!response.ok) {
-        throw new Error("Failed to fetch sessions");
-      }
+      // Create and store the promise
+      globalSessionsPromise = (async () => {
+        const response = await fetch("/api/sessions");
+        if (!response.ok) {
+          throw new Error("Failed to fetch sessions");
+        }
 
-      const data = await response.json();
+        const data = await response.json();
 
-      // Convert date strings to Date objects
-      const sessionsWithDates: ChatSession[] = data.map(
-        (s: {
-          id: string;
-          title: string;
-          modelId: string;
-          createdAt: string;
-          updatedAt: string;
-        }) => ({
-          ...s,
-          createdAt: new Date(s.createdAt),
-          updatedAt: new Date(s.updatedAt),
-        }),
-      );
+        // Convert date strings to Date objects
+        const sessionsWithDates: ChatSession[] = data.map(
+          (s: {
+            id: string;
+            title: string;
+            modelId: string;
+            createdAt: string;
+            updatedAt: string;
+          }) => ({
+            ...s,
+            createdAt: new Date(s.createdAt),
+            updatedAt: new Date(s.updatedAt),
+          }),
+        );
 
-      setSessions(sessionsWithDates);
+        return sessionsWithDates;
+      })();
+
+      const sessionsData = await globalSessionsPromise;
+      globalSessionsCache = sessionsData;
+      globalLastFetchTime = Date.now();
+      setSessions(sessionsData);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load sessions");
     } finally {
+      globalSessionsPromise = null;
+      isFetching = false;
       setIsLoading(false);
     }
   }, []);
 
-  // Load sessions on mount
+  // Load sessions on mount only
+  const mountIdRef = useRef(Math.random().toString(36).slice(2, 8));
   useEffect(() => {
+    console.log(
+      `[useSessions][${mountIdRef.current}] Component mounted, loading sessions`,
+    );
     loadSessions();
-  }, [loadSessions]);
+    return () => {
+      console.log(`[useSessions][${mountIdRef.current}] Component unmounting`);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const updateSession = useCallback(
     async (
@@ -146,6 +206,9 @@ export function useSessions(): UseSessionsReturn {
     [setCurrentSessionId],
   );
 
+  // Force refresh bypasses the cache
+  const forceRefresh = useCallback(() => loadSessions(true), [loadSessions]);
+
   return {
     sessions,
     currentSession,
@@ -154,6 +217,6 @@ export function useSessions(): UseSessionsReturn {
     updateSession,
     deleteSession,
     setCurrentSession,
-    refresh: loadSessions,
+    refresh: forceRefresh,
   };
 }

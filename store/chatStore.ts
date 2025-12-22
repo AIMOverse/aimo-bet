@@ -18,6 +18,9 @@ interface ChatState {
   /** Error message if any */
   error: string | null;
 
+  /** Counter to trigger session list refresh */
+  sessionRefreshTrigger: number;
+
   /** Set the current session */
   setCurrentSession: (id: string | null) => void;
 
@@ -33,6 +36,9 @@ interface ChatState {
   /** Clear error */
   clearError: () => void;
 
+  /** Trigger a refresh of the session list */
+  triggerSessionRefresh: () => void;
+
   /** Reset chat state (keeps currentSessionId) */
   reset: () => void;
 }
@@ -41,6 +47,7 @@ const initialState = {
   connectionStatus: "idle" as ConnectionStatus,
   isGenerating: false,
   error: null,
+  sessionRefreshTrigger: 0,
 };
 
 export const useChatStore = create<ChatState>()(
@@ -67,6 +74,11 @@ export const useChatStore = create<ChatState>()(
         }),
 
       clearError: () => set({ error: null, connectionStatus: "idle" }),
+
+      triggerSessionRefresh: () =>
+        set((state) => ({
+          sessionRefreshTrigger: state.sessionRefreshTrigger + 1,
+        })),
 
       reset: () => set(initialState),
     }),

@@ -1,5 +1,6 @@
-import { createIdGenerator, type UIMessage } from "ai";
+import { createIdGenerator, generateText, type UIMessage } from "ai";
 import { requireServerClient } from "./server";
+import { getModel } from "@/lib/ai/registry";
 import type {
   DbChatSession,
   DbChatMessage,
@@ -65,12 +66,14 @@ function dbToMessage(row: DbChatMessage): PersistedMessage {
 function messageToDbInsert(
   message: UIMessage,
   sessionId: string,
-  model?: string
+  model?: string,
 ): DbChatMessageInsert {
   // Extract text content from parts
   const content =
     message.parts
-      ?.filter((part): part is { type: "text"; text: string } => part.type === "text")
+      ?.filter(
+        (part): part is { type: "text"; text: string } => part.type === "text",
+      )
       .map((part) => part.text)
       .join("") ?? "";
 
@@ -121,7 +124,9 @@ export async function createSession(data: {
 /**
  * Get a session by ID
  */
-export async function getSession(sessionId: string): Promise<ChatSession | null> {
+export async function getSession(
+  sessionId: string,
+): Promise<ChatSession | null> {
   const supabase = requireServerClient();
 
   const { data: row, error } = await supabase
@@ -164,7 +169,7 @@ export async function getSessions(): Promise<ChatSession[]> {
  */
 export async function updateSession(
   sessionId: string,
-  data: { title?: string; modelId?: string }
+  data: { title?: string; modelId?: string },
 ): Promise<void> {
   const supabase = requireServerClient();
 
@@ -230,7 +235,9 @@ export async function loadMessages(sessionId: string): Promise<UIMessage[]> {
     return {
       id: persisted.id,
       role: persisted.role,
-      parts: persisted.parts ?? [{ type: "text" as const, text: persisted.content }],
+      parts: persisted.parts ?? [
+        { type: "text" as const, text: persisted.content },
+      ],
     };
   });
 }
@@ -241,13 +248,15 @@ export async function loadMessages(sessionId: string): Promise<UIMessage[]> {
 export async function saveMessage(
   sessionId: string,
   message: UIMessage,
-  model?: string
+  model?: string,
 ): Promise<void> {
   const supabase = requireServerClient();
 
   const insert = messageToDbInsert(message, sessionId, model);
 
-  const { error } = await supabase.from("chat_messages").insert(insert as never);
+  const { error } = await supabase
+    .from("chat_messages")
+    .insert(insert as never);
 
   if (error) {
     throw new Error(`Failed to save message: ${error.message}`);
@@ -263,11 +272,13 @@ export async function saveMessage(
 export async function saveMessages(
   sessionId: string,
   messages: UIMessage[],
-  model?: string
+  model?: string,
 ): Promise<void> {
   const supabase = requireServerClient();
 
-  const inserts = messages.map((msg) => messageToDbInsert(msg, sessionId, model));
+  const inserts = messages.map((msg) =>
+    messageToDbInsert(msg, sessionId, model),
+  );
 
   // Use upsert to handle cases where messages might already exist
   const { error } = await supabase
@@ -294,17 +305,32 @@ export async function saveChat(params: {
 }): Promise<void> {
   const { sessionId, messages, title, modelId } = params;
 
+  console.log("[saveChat] sessionId:", sessionId);
+  console.log("[saveChat] messages count:", messages.length);
+
   // Check if session exists
   const existingSession = await getSession(sessionId);
+  console.log(
+    "[saveChat] existingSession:",
+    existingSession ? "found" : "not found",
+  );
 
   if (!existingSession) {
-    // Create session with first message as potential title
+    // Create session with AI-generated title from first message
     const firstUserMessage = messages.find((m) => m.role === "user");
+    console.log(
+      "[saveChat] firstUserMessage:",
+      firstUserMessage ? JSON.stringify(firstUserMessage) : "not found",
+    );
+    console.log(
+      "[saveChat] all messages roles:",
+      messages.map((m) => m.role),
+    );
+
     const sessionTitle =
       title ??
-      (firstUserMessage
-        ? extractTitle(firstUserMessage)
-        : "New Chat");
+      (firstUserMessage ? await generateTitle(firstUserMessage) : "New Chat");
+    console.log("[saveChat] sessionTitle:", sessionTitle);
 
     await createSession({
       id: sessionId,
@@ -318,17 +344,52 @@ export async function saveChat(params: {
 }
 
 /**
- * Extract a title from the first message (first 50 chars)
+ * Extract text content from a UIMessage
  */
-function extractTitle(message: UIMessage): string {
-  const text = message.parts
-    ?.filter((part): part is { type: "text"; text: string } => part.type === "text")
-    .map((part) => part.text)
-    .join("")
-    .trim();
+function extractTextFromMessage(message: UIMessage): string {
+  return (
+    message.parts
+      ?.filter(
+        (part): part is { type: "text"; text: string } => part.type === "text",
+      )
+      .map((part) => part.text)
+      .join("")
+      .trim() ?? ""
+  );
+}
+
+/**
+ * Generate a title for a chat session using AI
+ * Falls back to truncated first message if AI generation fails
+ */
+async function generateTitle(userMessage: UIMessage): Promise<string> {
+  const text = extractTextFromMessage(userMessage);
+
+  console.log("[generateTitle] User message:", JSON.stringify(userMessage));
+  console.log("[generateTitle] Extracted text:", text);
 
   if (!text) return "New Chat";
 
-  // Truncate to 50 chars
-  return text.length > 50 ? text.slice(0, 50) + "..." : text;
+  try {
+    // Use a fast, cheap model for title generation
+    const result = await generateText({
+      model: getModel("openrouter/gpt-4o-mini"),
+      system: `Generate a concise title (max 6 words) for a chat conversation based on the user's first message.
+Rules:
+- Be specific and descriptive
+- No quotes or punctuation at the end
+- Use the same language as the user's message
+- Just output the title, nothing else`,
+      prompt: text,
+      maxOutputTokens: 30,
+    });
+
+    const title = result.text.trim();
+    console.log("[generateTitle] AI generated title:", title);
+    return title || text.slice(0, 50);
+  } catch (error) {
+    console.error("[generateTitle] Failed to generate title:", error);
+    // Fallback to truncated message
+    return text.length > 50 ? text.slice(0, 50) + "..." : text;
+  }
 }

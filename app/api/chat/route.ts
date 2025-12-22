@@ -1,13 +1,5 @@
-import {
-  streamText,
-  UIMessage,
-  createIdGenerator,
-  convertToModelMessages,
-} from "ai";
-import { DEFAULT_SYSTEM_PROMPT } from "@/config/defaults";
-import { getModelById } from "@/lib/ai/models/models";
-import { getModel } from "@/lib/ai/registry";
-import { generateImageTool, generateVideoTool } from "@/lib/ai/tools";
+import { UIMessage, createIdGenerator, createAgentUIStreamResponse } from "ai";
+import { chatAgent } from "@/lib/ai/agents";
 import {
   saveChat,
   loadMessages,
@@ -19,13 +11,9 @@ import {
 // ============================================================================
 
 interface ChatRequest {
-  /** Single new message from client */
   message: UIMessage;
-  /** Session ID (null for new conversations) */
   sessionId: string | null;
-  /** Model to use */
   model?: string;
-  /** Tools configuration */
   tools?: {
     generateImage?: boolean;
     generateVideo?: boolean;
@@ -43,7 +31,7 @@ export async function POST(req: Request) {
       message,
       sessionId,
       model = "openrouter/gpt-4o",
-      tools,
+      tools = {},
     }: ChatRequest = await req.json();
 
     // Validate message
@@ -65,7 +53,7 @@ export async function POST(req: Request) {
     // Determine session ID (create new if not provided)
     const finalSessionId = sessionId ?? generateSessionId();
 
-    // Validate UUID format to prevent database errors
+    // Validate UUID format
     const isValidUUID =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
         finalSessionId,
@@ -73,94 +61,39 @@ export async function POST(req: Request) {
     if (!isValidUUID) {
       return new Response(
         JSON.stringify({ error: "Invalid session ID format" }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        },
+        { status: 400, headers: { "Content-Type": "application/json" } },
       );
     }
 
     // Load previous messages from DB and append new message
     const previousMessages = sessionId ? await loadMessages(sessionId) : [];
-    const messages = [...previousMessages, message];
+    const uiMessages = [...previousMessages, message];
 
-    // Check if model supports image output
-    const modelDef = getModelById(model);
-    const supportsImageOutput = modelDef?.outputModalities?.includes("image");
-
-    // Build enabled tools object
-    const enabledTools = {
-      ...(tools?.generateImage && { generateImage: generateImageTool }),
-      ...(tools?.generateVideo && { generateVideo: generateVideoTool }),
-      // Future: add more tools here
-    };
-
-    console.log("[chat/route] Request tools config:", tools);
-    console.log("[chat/route] Enabled tools:", Object.keys(enabledTools));
-
-    // Build experimental provider metadata for image-capable models
-    const providerOptions =
-      supportsImageOutput && modelDef
-        ? {
-            openai: {
-              modalities: modelDef.outputModalities,
-              ...(modelDef.imageSettings?.defaultAspectRatio && {
-                image_config: {
-                  aspect_ratio: modelDef.imageSettings.defaultAspectRatio,
-                },
-              }),
-            },
-          }
-        : undefined;
-
-    const toolsToPass =
-      Object.keys(enabledTools).length > 0 ? enabledTools : undefined;
-    console.log(
-      "[chat/route] Tools passed to streamText:",
-      toolsToPass ? Object.keys(toolsToPass) : "none",
-    );
-    console.log("[chat/route] Model:", model);
-
-    const result = streamText({
-      model: getModel(model),
-      system: DEFAULT_SYSTEM_PROMPT,
-      messages: await convertToModelMessages(messages),
-      providerOptions,
-      tools: toolsToPass,
-      onStepFinish: ({ toolCalls, toolResults }) => {
-        console.log("[chat/route] Step finished:", {
-          toolCalls: toolCalls?.length,
-          toolResults: toolResults?.length,
-        });
-        if (toolCalls) {
-          toolCalls.forEach((tc, i) => {
-            if (tc && "toolName" in tc) {
-              console.log(
-                `[chat/route] Tool call ${i}:`,
-                tc.toolName,
-                "input" in tc ? tc.input : undefined,
-              );
-            }
-          });
-        }
+    // Stream response from agent using createAgentUIStreamResponse
+    return createAgentUIStreamResponse({
+      agent: chatAgent,
+      uiMessages,
+      options: {
+        model,
+        tools: {
+          generateImage: tools.generateImage ?? false,
+          generateVideo: tools.generateVideo ?? false,
+          webSearch: tools.webSearch ?? false,
+        },
       },
-    });
-
-    // Consume stream to ensure onFinish is called even on client disconnect
-    result.consumeStream();
-
-    // Return streaming response with server-side message ID generation
-    return result.toUIMessageStreamResponse({
-      originalMessages: messages,
       generateMessageId: createIdGenerator({
         prefix: "msg",
         size: 16,
       }),
-      onFinish: async ({ messages: finalMessages }) => {
+      onFinish: async ({ messages: responseMessages }) => {
         try {
+          // Combine user messages with AI response messages
+          // uiMessages contains the conversation history + new user message
+          // responseMessages contains the AI-generated response(s)
+          const allMessages = [...uiMessages, ...responseMessages];
           await saveChat({
             sessionId: finalSessionId,
-            messages: finalMessages,
+            messages: allMessages,
             modelId: model,
           });
         } catch (error) {

@@ -1,1 +1,0 @@
-export { GenerateSidebar } from "./GenerateSidebar";

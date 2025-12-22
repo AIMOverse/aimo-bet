@@ -3,7 +3,6 @@
 import { useChat as useAIChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { useRouter } from "next/navigation";
 import type { UIMessage, FileUIPart } from "ai";
 import { useChatStore } from "@/store/chatStore";
 import { useModelStore } from "@/store/modelStore";
@@ -39,11 +38,10 @@ interface UseChatMessagesReturn {
 export function useChatMessages({
   sessionId,
 }: UseChatMessagesOptions): UseChatMessagesReturn {
-  const router = useRouter();
   const [initialMessages, setInitialMessages] = useState<UIMessage[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [input, setInput] = useState("");
-  
+
   // Generate a stable ID for new chats to ensure we always use a UUID
   // This prevents the AI SDK from generating non-UUID IDs (nanoid)
   const [generatedSessionId] = useState(() => crypto.randomUUID());
@@ -52,12 +50,13 @@ export function useChatMessages({
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(
     sessionId,
   );
-  
+
   // The effective session ID to use for the chat instance
   const activeSessionId = currentSessionId ?? generatedSessionId;
 
   const hasLoadedRef = useRef<string | null>(null);
   const isNewChatRef = useRef(sessionId === null);
+  const shouldRefreshOnFinishRef = useRef(false);
 
   const selectedModelId = useModelStore((s) => s.selectedModelId);
   const { generateImageEnabled, generateVideoEnabled, webSearchEnabled } =
@@ -65,6 +64,7 @@ export function useChatMessages({
   const setIsGenerating = useChatStore((s) => s.setIsGenerating);
   const setStoreError = useChatStore((s) => s.setError);
   const setStoreCurrentSession = useChatStore((s) => s.setCurrentSession);
+  const triggerSessionRefresh = useChatStore((s) => s.triggerSessionRefresh);
 
   // Send only the last message to the server (server loads history from DB)
   const transport = useMemo(
@@ -85,12 +85,22 @@ export function useChatMessages({
           },
         }),
       }),
-    [selectedModelId, generateImageEnabled, generateVideoEnabled, webSearchEnabled],
+    [
+      selectedModelId,
+      generateImageEnabled,
+      generateVideoEnabled,
+      webSearchEnabled,
+    ],
   );
 
   // Load messages when session changes
   useEffect(() => {
-    if (!sessionId || hasLoadedRef.current === sessionId) return;
+    // Skip loading if:
+    // - No session ID (new chat)
+    // - Already loaded this session
+    if (!sessionId || hasLoadedRef.current === sessionId) {
+      return;
+    }
 
     const loadMessages = async () => {
       setIsLoadingHistory(true);
@@ -129,18 +139,20 @@ export function useChatMessages({
     loadMessages();
   }, [sessionId]);
 
-  // Reset when session changes
+  // Reset when session changes (e.g., navigating to a different session via sidebar)
   useEffect(() => {
     if (!sessionId) {
+      // Starting a new chat - reset everything
       setInitialMessages([]);
       hasLoadedRef.current = null;
       setCurrentSessionId(null);
       isNewChatRef.current = true;
-    } else {
+    } else if (sessionId !== currentSessionId) {
+      // Navigating to a different existing session - load from DB
       setCurrentSessionId(sessionId);
       isNewChatRef.current = false;
     }
-  }, [sessionId]);
+  }, [sessionId, currentSessionId]);
 
   const {
     messages,
@@ -157,6 +169,11 @@ export function useChatMessages({
     transport,
     onFinish: async () => {
       setIsGenerating(false);
+      // Refresh session list if this was a new chat (to show AI-generated title)
+      if (shouldRefreshOnFinishRef.current) {
+        shouldRefreshOnFinishRef.current = false;
+        triggerSessionRefresh();
+      }
     },
     onError: (err) => {
       setIsGenerating(false);
@@ -173,12 +190,12 @@ export function useChatMessages({
     }
   }, [status, setIsGenerating]);
 
-  // Update messages when initial messages are loaded
+  // Update messages when initial messages are loaded from DB
   useEffect(() => {
-    if (initialMessages.length > 0 && hasLoadedRef.current === sessionId) {
+    if (initialMessages.length > 0) {
       setMessages(initialMessages);
     }
-  }, [initialMessages, sessionId, setMessages]);
+  }, [initialMessages, setMessages]);
 
   const sendMessage = useCallback(
     async (content: string, files?: FileUIPart[]) => {
@@ -187,7 +204,7 @@ export function useChatMessages({
 
       if (!hasText && !hasFiles) return;
 
-      // For new chats, generate a session ID and navigate
+      // For new chats, update the URL without causing a navigation/remount
       if (isNewChatRef.current && !currentSessionId) {
         // Use the ID that useAIChat is already configured with
         const newSessionId = activeSessionId;
@@ -195,8 +212,12 @@ export function useChatMessages({
         setStoreCurrentSession(newSessionId);
         isNewChatRef.current = false;
 
-        // Navigate to the new session URL
-        router.push(`/chat/${newSessionId}`);
+        // Mark that we need to refresh sessions after first message completes
+        // This ensures the AI-generated title appears in the sidebar
+        shouldRefreshOnFinishRef.current = true;
+
+        // Update URL without triggering navigation (no remount, preserves state)
+        window.history.replaceState(null, "", `/chat/${newSessionId}`);
       }
 
       // Build message parts
@@ -218,7 +239,7 @@ export function useChatMessages({
       // The message will be persisted server-side
       aiSendMessage({ parts });
     },
-    [aiSendMessage, currentSessionId, router, setStoreCurrentSession],
+    [aiSendMessage, currentSessionId, setStoreCurrentSession, activeSessionId],
   );
 
   // Append message locally (for manual additions)

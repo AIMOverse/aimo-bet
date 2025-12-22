@@ -10,7 +10,20 @@ import {
 // GET /api/sessions - List all sessions
 // ============================================================================
 
+// Debug: track call frequency
+let lastCallTime = 0;
+let callCount = 0;
+
 export async function GET(req: Request) {
+  const now = Date.now();
+  if (now - lastCallTime < 1000) {
+    callCount++;
+    console.log(`[API /api/sessions] Rapid call #${callCount} within 1s`);
+  } else {
+    callCount = 1;
+    console.log(`[API /api/sessions] First call in new window`);
+  }
+  lastCallTime = now;
   try {
     const { searchParams } = new URL(req.url);
     const sessionId = searchParams.get("id");
@@ -21,7 +34,7 @@ export async function GET(req: Request) {
       if (!session) {
         return NextResponse.json(
           { error: "Session not found" },
-          { status: 404 }
+          { status: 404 },
         );
       }
       return NextResponse.json(session);
@@ -34,7 +47,7 @@ export async function GET(req: Request) {
     console.error("Failed to get sessions:", error);
     return NextResponse.json(
       { error: "Failed to get sessions" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -51,7 +64,7 @@ export async function PATCH(req: Request) {
     if (!sessionId) {
       return NextResponse.json(
         { error: "Session ID is required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -61,7 +74,7 @@ export async function PATCH(req: Request) {
     if (!title && !modelId) {
       return NextResponse.json(
         { error: "At least one field (title, modelId) is required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -72,7 +85,7 @@ export async function PATCH(req: Request) {
     console.error("Failed to update session:", error);
     return NextResponse.json(
       { error: "Failed to update session" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -89,7 +102,7 @@ export async function DELETE(req: Request) {
     if (!sessionId) {
       return NextResponse.json(
         { error: "Session ID is required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -100,7 +113,7 @@ export async function DELETE(req: Request) {
     console.error("Failed to delete session:", error);
     return NextResponse.json(
       { error: "Failed to delete session" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

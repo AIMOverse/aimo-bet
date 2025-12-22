@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   Sidebar,
   SidebarContent,
@@ -12,49 +12,27 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Search, FolderOpen } from "lucide-react";
 import { useChatStore } from "@/store/chatStore";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
-import { GenerateSidebar } from "@/components/generate/GenerateSidebar";
 import { AccountPopover } from "@/components/account/AccountPopover";
 import { useCallback, useState } from "react";
 
-type AppMode = "chat" | "generate";
-
 export function AppSidebar() {
   const router = useRouter();
-  const pathname = usePathname();
   const { isMobile, setOpenMobile } = useSidebar();
 
   const setCurrentSession = useChatStore((s) => s.setCurrentSession);
 
-  // Search state (shared across modes)
+  // Search state
   const [search, setSearch] = useState("");
 
-  // Derive active mode from URL
-  const activeMode: AppMode = pathname.startsWith("/generate")
-    ? "generate"
-    : "chat";
-
-  const handleModeChange = useCallback(
-    (mode: string) => {
-      router.push(`/${mode}`);
-      if (isMobile) setOpenMobile(false);
-    },
-    [router, isMobile, setOpenMobile],
-  );
-
-  // Navigate to appropriate route for new session
-  const handleNew = useCallback(() => {
-    if (activeMode === "chat") {
-      setCurrentSession(null);
-      router.push("/chat");
-    } else {
-      router.push("/generate");
-    }
+  // Navigate to new chat
+  const handleNewChat = useCallback(() => {
+    setCurrentSession(null);
+    router.push("/chat");
     if (isMobile) setOpenMobile(false);
-  }, [activeMode, setCurrentSession, router, isMobile, setOpenMobile]);
+  }, [setCurrentSession, router, isMobile, setOpenMobile]);
 
   return (
     <Sidebar>
@@ -65,7 +43,7 @@ export function AppSidebar() {
         </div>
 
         {/* Search */}
-        <div className="px-2 pt-2">
+        <div className="px-2 py-2">
           <div className="relative">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
@@ -76,31 +54,15 @@ export function AppSidebar() {
             />
           </div>
         </div>
-
-        {/* Mode Tabs */}
-        <div className="px-2 py-2">
-          <Tabs value={activeMode} onValueChange={handleModeChange}>
-            <TabsList className="w-full">
-              <TabsTrigger value="chat" className="flex-1">
-                Chat
-              </TabsTrigger>
-              <TabsTrigger value="generate" className="flex-1" disabled>
-                Generate
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
       </SidebarHeader>
 
       <SidebarContent>
         {/* Quick Actions */}
         <SidebarMenu className="px-2 pt-2">
           <SidebarMenuItem>
-            <SidebarMenuButton onClick={handleNew}>
+            <SidebarMenuButton onClick={handleNewChat}>
               <Plus className="h-4 w-4" />
-              <span>
-                {activeMode === "chat" ? "New Chat" : "New Generation"}
-              </span>
+              <span>New Chat</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
@@ -111,12 +73,8 @@ export function AppSidebar() {
           </SidebarMenuItem>
         </SidebarMenu>
 
-        {/* Mode-specific sidebar content */}
-        {activeMode === "chat" ? (
-          <ChatSidebar search={search} />
-        ) : (
-          <GenerateSidebar search={search} />
-        )}
+        {/* Chat history sidebar */}
+        <ChatSidebar search={search} />
       </SidebarContent>
 
       <SidebarFooter className="border-t p-2">
