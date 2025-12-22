@@ -40,11 +40,28 @@ interface UseChatMessagesReturn {
 export function useChatMessages({
   sessionId,
 }: UseChatMessagesOptions): UseChatMessagesReturn {
+  // Debug: confirm this hook version is loaded
+  console.log("[DEBUG] useChatMessages hook called with sessionId:", sessionId);
+
   const [initialMessages, setInitialMessages] = useState<UIMessage[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [input, setInput] = useState("");
 
-  // Session ID state - server is the single source of truth for new sessions
+  // Get newChatCounter from store to detect when user explicitly requests a new chat
+  const newChatCounter = useChatStore((s) => s.newChatCounter);
+
+  // Stable internal ID for useAIChat - regenerated when:
+  // 1. sessionId prop changes (navigating between sessions)
+  // 2. newChatCounter changes (user clicks "New Chat")
+  // This prevents useAIChat from resetting when currentSessionId updates from server
+  const internalChatId = useMemo(
+    () => sessionId ?? crypto.randomUUID(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sessionId, newChatCounter]
+  );
+
+  // Session ID for persistence - server is the single source of truth for new sessions
+  // This may differ from internalChatId (server-generated vs client-generated)
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(
     sessionId,
   );
@@ -216,8 +233,8 @@ export function useChatMessages({
     regenerate,
     setMessages,
   } = useAIChat({
-    // Use current session ID if available, otherwise let useChat generate one internally
-    id: currentSessionId ?? undefined,
+    // Use stable internal ID to prevent hook reset when currentSessionId changes
+    id: internalChatId,
     messages: initialMessages,
     transport,
     onData: handleSessionData,

@@ -22,17 +22,17 @@ export function AppSidebar() {
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
 
-  const setCurrentSession = useChatStore((s) => s.setCurrentSession);
+  const requestNewChat = useChatStore((s) => s.requestNewChat);
 
   // Search state
   const [search, setSearch] = useState("");
 
   // Navigate to new chat
   const handleNewChat = useCallback(() => {
-    setCurrentSession(null);
+    requestNewChat(); // Increments counter to force fresh chat state
     router.push("/chat");
     if (isMobile) setOpenMobile(false);
-  }, [setCurrentSession, router, isMobile, setOpenMobile]);
+  }, [requestNewChat, router, isMobile, setOpenMobile]);
 
   return (
     <Sidebar>
