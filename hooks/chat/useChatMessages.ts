@@ -217,11 +217,10 @@ export function useChatMessages({
     }
   }, [status, setIsGenerating]);
 
-  // Update messages when initial messages are loaded from DB
+  // Update messages when initial messages change (loaded from DB or cleared for new chat)
   useEffect(() => {
-    if (initialMessages.length > 0) {
-      setMessages(initialMessages);
-    }
+    // Always sync initialMessages to useAIChat - including empty array for new chats
+    setMessages(initialMessages);
   }, [initialMessages, setMessages]);
 
   const sendMessage = useCallback(
