@@ -70,20 +70,27 @@ export function useChatMessages({
     () =>
       new DefaultChatTransport({
         api: "/api/chat",
-        prepareSendMessagesRequest: ({ messages }) => ({
-          body: {
-            message: messages[messages.length - 1],
-            // Server is source of truth for session IDs
-            // Send null for new chats, server will generate and return via stream
-            sessionId: currentSessionId,
-            model: selectedModelId,
-            tools: {
-              generateImage: generateImageEnabled,
-              generateVideo: generateVideoEnabled,
-              webSearch: webSearchEnabled,
+        prepareSendMessagesRequest: ({ messages }) => {
+          console.log("[DEBUG] prepareSendMessagesRequest called", {
+            messageCount: messages.length,
+            lastMessage: messages[messages.length - 1],
+            currentSessionId,
+          });
+          return {
+            body: {
+              message: messages[messages.length - 1],
+              // Server is source of truth for session IDs
+              // Send null for new chats, server will generate and return via stream
+              sessionId: currentSessionId,
+              model: selectedModelId,
+              tools: {
+                generateImage: generateImageEnabled,
+                generateVideo: generateVideoEnabled,
+                webSearch: webSearchEnabled,
+              },
             },
-          },
-        }),
+          };
+        },
       }),
     [
       currentSessionId,
@@ -162,6 +169,7 @@ export function useChatMessages({
   // onData receives the full data part: { type: "data-session", data: { sessionId: "..." } }
   const handleSessionData = useCallback(
     (dataPart: unknown) => {
+      console.log("[DEBUG] onData called with:", dataPart);
       // Check if this is a session data part from the server
       if (
         dataPart &&
@@ -178,9 +186,11 @@ export function useChatMessages({
           typeof (data as { sessionId: unknown }).sessionId === "string"
         ) {
           const newSessionId = (data as { sessionId: string }).sessionId;
+          console.log("[DEBUG] Received sessionId from server:", newSessionId);
 
           // Only update if we don't have a session ID yet (new chat)
           if (!currentSessionId && isNewChatRef.current) {
+            console.log("[DEBUG] Updating currentSessionId to:", newSessionId);
             setCurrentSessionId(newSessionId);
             setStoreCurrentSession(newSessionId);
             isNewChatRef.current = false;
@@ -212,6 +222,7 @@ export function useChatMessages({
     transport,
     onData: handleSessionData,
     onFinish: async () => {
+      console.log("[DEBUG] onFinish called");
       setIsGenerating(false);
       // Refresh session list if this was a new chat (to show AI-generated title)
       if (shouldRefreshOnFinishRef.current) {
@@ -220,10 +231,16 @@ export function useChatMessages({
       }
     },
     onError: (err) => {
+      console.log("[DEBUG] onError called:", err.message);
       setIsGenerating(false);
       setStoreError(err.message);
     },
   });
+
+  // Debug: log status and messages changes
+  useEffect(() => {
+    console.log("[DEBUG] useAIChat state:", { status, messageCount: messages.length, messages });
+  }, [status, messages]);
 
   // Track streaming state
   useEffect(() => {
@@ -254,6 +271,7 @@ export function useChatMessages({
 
   const sendMessage = useCallback(
     async (content: string, files?: FileUIPart[]) => {
+      console.log("[DEBUG] sendMessage called:", { content, hasFiles: !!files?.length });
       const hasText = content.trim().length > 0;
       const hasFiles = files && files.length > 0;
 
@@ -274,9 +292,11 @@ export function useChatMessages({
         parts.push({ type: "text", text: content });
       }
 
+      console.log("[DEBUG] Calling aiSendMessage with parts:", parts);
       // Send to AI using the AI SDK sendMessage
       // Session ID will be received from server via onData for new chats
       aiSendMessage({ parts });
+      console.log("[DEBUG] aiSendMessage called");
     },
     [aiSendMessage],
   );
