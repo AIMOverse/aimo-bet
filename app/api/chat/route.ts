@@ -81,20 +81,10 @@ export async function POST(req: Request) {
       size: 16,
     });
 
-    // Create the stream with custom data injection for session ID
+    // Create the stream - session ID is sent via X-Session-Id header
     const stream = createUIMessageStream({
       generateId: generateMessageId,
       execute: async ({ writer }) => {
-        // Send session ID as transient data immediately (for new sessions)
-        // This allows client to update URL before streaming completes
-        if (isNewSession) {
-          writer.write({
-            type: "data-session",
-            data: { sessionId: finalSessionId },
-            transient: true,
-          });
-        }
-
         // Stream response from agent
         const agentStream = await createAgentUIStream({
           agent: chatAgent,
@@ -131,9 +121,7 @@ export async function POST(req: Request) {
     // Include session ID in header for new sessions (more reliable than transient data)
     return createUIMessageStreamResponse({
       stream,
-      headers: isNewSession
-        ? { "X-Session-Id": finalSessionId }
-        : undefined,
+      headers: isNewSession ? { "X-Session-Id": finalSessionId } : undefined,
     });
   } catch (error) {
     console.error("Chat API error:", error);

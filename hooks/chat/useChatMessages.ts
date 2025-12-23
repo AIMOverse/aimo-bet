@@ -40,9 +40,6 @@ interface UseChatMessagesReturn {
 export function useChatMessages({
   sessionId,
 }: UseChatMessagesOptions): UseChatMessagesReturn {
-  // Debug: confirm this hook version is loaded
-  console.log("[DEBUG] useChatMessages hook called with sessionId:", sessionId);
-
   const [initialMessages, setInitialMessages] = useState<UIMessage[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [input, setInput] = useState("");
@@ -57,7 +54,7 @@ export function useChatMessages({
   const internalChatId = useMemo(
     () => sessionId ?? crypto.randomUUID(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sessionId, newChatCounter]
+    [sessionId, newChatCounter],
   );
 
   // Session ID for persistence - server is the single source of truth for new sessions
@@ -79,6 +76,34 @@ export function useChatMessages({
   const selectedModelId = useModelStore((s) => s.selectedModelId);
   const { generateImageEnabled, generateVideoEnabled, webSearchEnabled } =
     useToolStore.getState();
+
+  // Refs for dynamic values used in transport (read at request time, not transport creation)
+  // This keeps the transport stable and prevents useAIChat from resetting
+  const currentSessionIdRef = useRef<string | null>(currentSessionId);
+  const selectedModelIdRef = useRef(selectedModelId);
+  const toolSettingsRef = useRef({
+    generateImageEnabled,
+    generateVideoEnabled,
+    webSearchEnabled,
+  });
+
+  // Keep refs updated when values change
+  useEffect(() => {
+    currentSessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
+
+  useEffect(() => {
+    selectedModelIdRef.current = selectedModelId;
+  }, [selectedModelId]);
+
+  useEffect(() => {
+    toolSettingsRef.current = {
+      generateImageEnabled,
+      generateVideoEnabled,
+      webSearchEnabled,
+    };
+  }, [generateImageEnabled, generateVideoEnabled, webSearchEnabled]);
+
   const setIsGenerating = useChatStore((s) => s.setIsGenerating);
   const setStoreError = useChatStore((s) => s.setError);
   const setStoreCurrentSession = useChatStore((s) => s.setCurrentSession);
@@ -86,9 +111,7 @@ export function useChatMessages({
 
   // Update sessionUpdateRef when dependencies change
   sessionUpdateRef.current = (newSessionId: string) => {
-    console.log("[DEBUG] Session update from header:", newSessionId);
     if (!currentSessionId && isNewChatRef.current) {
-      console.log("[DEBUG] Updating currentSessionId to:", newSessionId);
       setCurrentSessionId(newSessionId);
       setStoreCurrentSession(newSessionId);
       isNewChatRef.current = false;
@@ -97,15 +120,13 @@ export function useChatMessages({
     }
   };
 
-  // Custom fetch wrapper that intercepts response headers
+  // Custom fetch wrapper that intercepts response headers for session ID
   const customFetch = useCallback(
     async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const response = await fetch(input, init);
-      // Extract session ID from header if present
-      const sessionId = response.headers.get("X-Session-Id");
-      if (sessionId) {
-        console.log("[DEBUG] Found X-Session-Id header:", sessionId);
-        sessionUpdateRef.current(sessionId);
+      const newSessionId = response.headers.get("X-Session-Id");
+      if (newSessionId) {
+        sessionUpdateRef.current(newSessionId);
       }
       return response;
     },
@@ -113,41 +134,35 @@ export function useChatMessages({
   );
 
   // Send only the last message to the server (server loads history from DB)
+  // Transport is stable - dynamic values are read from refs at request time
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
         api: "/api/chat",
         fetch: customFetch,
         prepareSendMessagesRequest: ({ messages }) => {
-          console.log("[DEBUG] prepareSendMessagesRequest called", {
-            messageCount: messages.length,
-            lastMessage: messages[messages.length - 1],
-            currentSessionId,
-          });
+          // Read current values from refs at request time
+          const sessionId = currentSessionIdRef.current;
+          const model = selectedModelIdRef.current;
+          const tools = toolSettingsRef.current;
+
           return {
             body: {
               message: messages[messages.length - 1],
               // Server is source of truth for session IDs
               // Send null for new chats, server will generate and return via stream
-              sessionId: currentSessionId,
-              model: selectedModelId,
+              sessionId,
+              model,
               tools: {
-                generateImage: generateImageEnabled,
-                generateVideo: generateVideoEnabled,
-                webSearch: webSearchEnabled,
+                generateImage: tools.generateImageEnabled,
+                generateVideo: tools.generateVideoEnabled,
+                webSearch: tools.webSearchEnabled,
               },
             },
           };
         },
       }),
-    [
-      customFetch,
-      currentSessionId,
-      selectedModelId,
-      generateImageEnabled,
-      generateVideoEnabled,
-      webSearchEnabled,
-    ],
+    [customFetch], // Only customFetch - refs are read at request time
   );
 
   // Load messages when session changes
@@ -196,10 +211,32 @@ export function useChatMessages({
     loadMessages();
   }, [sessionId]);
 
-  // Reset when session changes (e.g., navigating to a different session via sidebar)
+  // Track previous values to detect navigation vs internal state updates
+  const prevSessionIdRef = useRef<string | null>(sessionId);
+  const prevNewChatCounterRef = useRef(newChatCounter);
+
+  // Reset when session prop changes (e.g., navigating via sidebar)
+  // or when newChatCounter changes (user clicks "New Chat" button)
+  // Only react to prop changes, not currentSessionId state changes
   useEffect(() => {
-    if (!sessionId) {
-      // Starting a new chat - reset everything
+    const prevSessionId = prevSessionIdRef.current;
+    const prevCounter = prevNewChatCounterRef.current;
+    prevSessionIdRef.current = sessionId;
+    prevNewChatCounterRef.current = newChatCounter;
+
+    // Check if user clicked "New Chat" (counter changed)
+    const isNewChatClick = newChatCounter !== prevCounter;
+
+    // Check if sessionId prop changed
+    const sessionIdChanged = sessionId !== prevSessionId;
+
+    // Only act if something relevant changed
+    if (!sessionIdChanged && !isNewChatClick) {
+      return;
+    }
+
+    if (!sessionId || isNewChatClick) {
+      // Navigating to new chat or user clicked "New Chat" - reset everything
       setInitialMessages([]);
       hasLoadedRef.current = null;
       setCurrentSessionId(null);
@@ -207,55 +244,12 @@ export function useChatMessages({
       // Mark that we need to clear messages and trigger the sync effect
       pendingClearRef.current = true;
       setSyncTrigger((prev) => prev + 1);
-    } else if (sessionId !== currentSessionId) {
+    } else if (sessionIdChanged) {
       // Navigating to a different existing session - load from DB
       setCurrentSessionId(sessionId);
       isNewChatRef.current = false;
     }
-  }, [sessionId, currentSessionId]);
-
-  // Fallback handler for session ID via transient data (kept for future AI SDK compatibility)
-  // Note: onData may not work with DefaultChatTransport in current AI SDK v6
-  // Primary approach uses X-Session-Id response header via customFetch above
-  const handleSessionData = useCallback(
-    (dataPart: unknown) => {
-      console.log("[DEBUG] onData called with:", dataPart);
-      // Check if this is a session data part from the server
-      if (
-        dataPart &&
-        typeof dataPart === "object" &&
-        "type" in dataPart &&
-        (dataPart as { type: string }).type === "data-session" &&
-        "data" in dataPart
-      ) {
-        const data = (dataPart as { data: unknown }).data;
-        if (
-          data &&
-          typeof data === "object" &&
-          "sessionId" in data &&
-          typeof (data as { sessionId: unknown }).sessionId === "string"
-        ) {
-          const newSessionId = (data as { sessionId: string }).sessionId;
-          console.log("[DEBUG] Received sessionId from server:", newSessionId);
-
-          // Only update if we don't have a session ID yet (new chat)
-          if (!currentSessionId && isNewChatRef.current) {
-            console.log("[DEBUG] Updating currentSessionId to:", newSessionId);
-            setCurrentSessionId(newSessionId);
-            setStoreCurrentSession(newSessionId);
-            isNewChatRef.current = false;
-
-            // Mark that we need to refresh sessions after response completes
-            shouldRefreshOnFinishRef.current = true;
-
-            // Update URL without triggering navigation
-            window.history.replaceState(null, "", `/chat/${newSessionId}`);
-          }
-        }
-      }
-    },
-    [currentSessionId, setStoreCurrentSession],
-  );
+  }, [sessionId, newChatCounter]); // React to sessionId prop and newChatCounter
 
   const {
     messages,
@@ -270,9 +264,7 @@ export function useChatMessages({
     id: internalChatId,
     messages: initialMessages,
     transport,
-    onData: handleSessionData,
     onFinish: async () => {
-      console.log("[DEBUG] onFinish called");
       setIsGenerating(false);
       // Refresh session list if this was a new chat (to show AI-generated title)
       if (shouldRefreshOnFinishRef.current) {
@@ -281,16 +273,10 @@ export function useChatMessages({
       }
     },
     onError: (err) => {
-      console.log("[DEBUG] onError called:", err.message);
       setIsGenerating(false);
       setStoreError(err.message);
     },
   });
-
-  // Debug: log status and messages changes
-  useEffect(() => {
-    console.log("[DEBUG] useAIChat state:", { status, messageCount: messages.length, messages });
-  }, [status, messages]);
 
   // Track streaming state
   useEffect(() => {
@@ -321,7 +307,6 @@ export function useChatMessages({
 
   const sendMessage = useCallback(
     async (content: string, files?: FileUIPart[]) => {
-      console.log("[DEBUG] sendMessage called:", { content, hasFiles: !!files?.length });
       const hasText = content.trim().length > 0;
       const hasFiles = files && files.length > 0;
 
@@ -342,11 +327,8 @@ export function useChatMessages({
         parts.push({ type: "text", text: content });
       }
 
-      console.log("[DEBUG] Calling aiSendMessage with parts:", parts);
-      // Send to AI using the AI SDK sendMessage
-      // Session ID will be received from server via X-Session-Id header for new chats
+      // Send to AI - session ID will be received from server via X-Session-Id header
       aiSendMessage({ parts });
-      console.log("[DEBUG] aiSendMessage called");
     },
     [aiSendMessage],
   );
