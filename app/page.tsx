@@ -1,9 +1,8 @@
-import { redirect } from "next/navigation";
+import { ArenaPage } from "@/components/arena/ArenaPage";
 
 /**
- * Home page - always redirects to chat.
- * Users can chat as guests or sign in from the chat interface.
+ * Home page - renders the Alpha Arena trading dashboard.
  */
 export default function Home() {
-  redirect("/chat");
+  return <ArenaPage />;
 }

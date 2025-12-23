@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
-import { AppSidebar } from "@/components/layout/AppSidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { WalletProvider } from "@/components/account/WalletProvider";
 import { ThemeProvider } from "@/components/layout/ThemeProvider";
@@ -18,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AIMO Chat",
-  description: "Open-source chat UI for LLMs - Bring Your Own Key",
+  title: "Alpha Arena",
+  description: "AI Trading Competition Platform",
 };
 
 export default function RootLayout({
@@ -39,12 +37,9 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <WalletProvider>
-            <SidebarProvider>
-              <AppSidebar />
-              <SidebarInset className="h-screen overflow-hidden">
-                {children}
-              </SidebarInset>
-            </SidebarProvider>
+            <main className="h-screen overflow-hidden">
+              {children}
+            </main>
             <Toaster />
           </WalletProvider>
         </ThemeProvider>
