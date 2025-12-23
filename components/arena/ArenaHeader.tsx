@@ -1,6 +1,6 @@
 "use client";
 
-import { Settings, Play, Pause, RotateCcw } from "lucide-react";
+import { Settings, Play, Pause, RotateCcw, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -10,6 +10,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { MarketTicker } from "./MarketTicker";
+import { useTheme } from "next-themes";
 
 interface ArenaHeaderProps {
   sessionStatus?: "setup" | "running" | "paused" | "completed";
@@ -24,6 +26,8 @@ export function ArenaHeader({
   onPause,
   onReset,
 }: ArenaHeaderProps) {
+  const { theme, setTheme } = useTheme();
+
   const getStatusBadge = () => {
     const statusStyles = {
       setup: "bg-muted text-muted-foreground",
@@ -49,12 +53,19 @@ export function ArenaHeader({
   };
 
   return (
-    <header className="flex items-center justify-between px-6 py-4 border-b">
-      <div className="flex items-center gap-4">
-        <h1 className="text-2xl font-bold">Alpha Arena</h1>
+    <header className="flex items-center justify-between px-4 py-3 border-b bg-background">
+      {/* Left: Title + Status */}
+      <div className="flex items-center gap-3">
+        <h1 className="text-xl font-bold">Alpha Arena</h1>
         {getStatusBadge()}
       </div>
 
+      {/* Center: Market Ticker */}
+      <div className="hidden md:flex">
+        <MarketTicker />
+      </div>
+
+      {/* Right: Controls */}
       <div className="flex items-center gap-2">
         {/* Session controls */}
         {sessionStatus === "setup" || sessionStatus === "paused" ? (
@@ -65,7 +76,9 @@ export function ArenaHeader({
             className="gap-2"
           >
             <Play className="h-4 w-4" />
-            {sessionStatus === "setup" ? "Start Session" : "Resume"}
+            <span className="hidden sm:inline">
+              {sessionStatus === "setup" ? "Start" : "Resume"}
+            </span>
           </Button>
         ) : sessionStatus === "running" ? (
           <Button
@@ -75,7 +88,7 @@ export function ArenaHeader({
             className="gap-2"
           >
             <Pause className="h-4 w-4" />
-            Pause
+            <span className="hidden sm:inline">Pause</span>
           </Button>
         ) : null}
 
@@ -87,9 +100,20 @@ export function ArenaHeader({
             className="gap-2"
           >
             <RotateCcw className="h-4 w-4" />
-            Reset
+            <span className="hidden sm:inline">Reset</span>
           </Button>
         )}
+
+        {/* Theme toggle */}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+        >
+          <Sun className="h-5 w-5 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+          <Moon className="absolute h-5 w-5 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+          <span className="sr-only">Toggle theme</span>
+        </Button>
 
         {/* Settings dropdown */}
         <DropdownMenu>
