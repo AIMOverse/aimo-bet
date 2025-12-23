@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
-import { WalletProvider } from "@/components/account/WalletProvider";
 import { ThemeProvider } from "@/components/layout/ThemeProvider";
 
 const geistSans = Geist({
@@ -36,12 +35,8 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <WalletProvider>
-            <main className="h-screen overflow-hidden">
-              {children}
-            </main>
-            <Toaster />
-          </WalletProvider>
+          <main className="h-screen overflow-hidden">{children}</main>
+          <Toaster />
         </ThemeProvider>
       </body>
     </html>
