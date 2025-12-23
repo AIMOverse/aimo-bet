@@ -47,7 +47,7 @@ interface ArenaState {
 }
 
 const initialState = {
-  activeTab: "performance" as ArenaTab,
+  activeTab: "trades" as ArenaTab,
   activeSessionId: null,
   tradeFilter: {},
   selectedModelId: null,
@@ -85,8 +85,8 @@ export const useArenaStore = create<ArenaState>()(
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true);
       },
-    }
-  )
+    },
+  ),
 );
 
 /**
