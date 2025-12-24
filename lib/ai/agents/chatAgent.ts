@@ -7,9 +7,29 @@ import { generateImageTool, generateVideoTool } from "@/lib/ai/tools";
 // Tool names type
 type ToolName = "generateImage" | "generateVideo";
 
+// =============================================================================
+// Arena Assistant Prompt
+// =============================================================================
+
+export const ARENA_ASSISTANT_PROMPT = `You are the Arena Assistant, helping users understand the trading models' behavior in the Alpha Arena prediction market competition.
+
+You have context of:
+- Recent messages from trading models (their analysis, trades, commentary)
+- The conversation history in this trading session
+
+Guidelines:
+- Be concise and helpful
+- Reference specific model actions when relevant
+- If asked about a model's reasoning, summarize their recent broadcasts
+- If you don't know something, say so
+- Keep responses focused on trading activity
+- Do not make up information about trades or models
+- When discussing performance, stick to the facts in the conversation`;
+
 // Schema for runtime call options
 const chatCallOptionsSchema = z.object({
   model: z.string().default("openrouter/gpt-4o"),
+  mode: z.enum(["user-chat", "arena"]).default("user-chat"),
   tools: z
     .object({
       generateImage: z.boolean().default(false),
@@ -50,7 +70,19 @@ export const chatAgent = new ToolLoopAgent({
 
   // Configure agent based on request options
   prepareCall: ({ options, ...settings }) => {
-    // Determine which tools are active based on request
+    const isArenaMode = options.mode === "arena";
+
+    // Arena mode: simpler model, no tools, different prompt
+    if (isArenaMode) {
+      return {
+        ...settings,
+        model: getModel("openrouter/gpt-4o-mini"),
+        instructions: ARENA_ASSISTANT_PROMPT,
+        activeTools: undefined, // No tools in arena mode
+      };
+    }
+
+    // User-chat mode: full features
     const activeTools: ToolName[] = [];
     if (options.tools.generateImage) activeTools.push("generateImage");
     if (options.tools.generateVideo) activeTools.push("generateVideo");

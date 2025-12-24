@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { UIMessage, FileUIPart } from "ai";
 import { useChatStore } from "@/store/chatStore";
 import { DEFAULT_MODEL_ID } from "@/config/defaults";
-import { getCachedMessages, setCachedMessages } from "@/lib/cache/messages";
+import { getCachedMessages, setCachedMessages } from "@/lib/cache/chat";
 
 interface UseChatMessagesOptions {
   /** Session ID to load messages for (null for new chat) */

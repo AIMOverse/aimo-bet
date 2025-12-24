@@ -12,6 +12,8 @@ import type {
   TradeAction,
   BroadcastType,
 } from "@/types/arena";
+import type { UIMessage } from "ai";
+import type { ArenaChatMetadata, ArenaChatMessage } from "@/types/chat";
 import { DEFAULT_STARTING_CAPITAL } from "@/lib/arena/constants";
 
 // ============================================================================
@@ -511,6 +513,81 @@ export async function createBroadcast(
 }
 
 // ============================================================================
+// ARENA CHAT MESSAGES
+// ============================================================================
+
+export async function getArenaChatMessages(
+  sessionId: string,
+  limit = 100
+): Promise<ArenaChatMessage[]> {
+  const client = getSupabaseClient();
+  if (!client) return [];
+
+  const { data, error } = await client
+    .from("arena_chat_messages")
+    .select("*")
+    .eq("session_id", sessionId)
+    .order("created_at", { ascending: true })
+    .limit(limit);
+
+  if (error) {
+    console.error("Failed to fetch arena chat messages:", error);
+    throw error;
+  }
+
+  return (data || []).map(mapArenaChatMessage);
+}
+
+export async function saveArenaChatMessage(
+  message: ArenaChatMessage
+): Promise<void> {
+  const client = getSupabaseClient();
+  if (!client) throw new Error("Supabase not configured");
+
+  const { error } = await client
+    .from("arena_chat_messages")
+    .upsert(
+      {
+        id: message.id,
+        session_id: message.metadata?.sessionId,
+        role: message.role,
+        parts: message.parts,
+        metadata: message.metadata,
+      },
+      { onConflict: "id" }
+    );
+
+  if (error) {
+    console.error("Failed to save arena chat message:", error);
+    throw error;
+  }
+}
+
+export async function saveArenaChatMessages(
+  messages: ArenaChatMessage[]
+): Promise<void> {
+  const client = getSupabaseClient();
+  if (!client) throw new Error("Supabase not configured");
+
+  const inserts = messages.map((msg) => ({
+    id: msg.id,
+    session_id: msg.metadata?.sessionId,
+    role: msg.role,
+    parts: msg.parts,
+    metadata: msg.metadata,
+  }));
+
+  const { error } = await client
+    .from("arena_chat_messages")
+    .upsert(inserts, { onConflict: "id" });
+
+  if (error) {
+    console.error("Failed to save arena chat messages:", error);
+    throw error;
+  }
+}
+
+// ============================================================================
 // PERFORMANCE SNAPSHOTS
 // ============================================================================
 
@@ -679,5 +756,14 @@ function mapPerformanceSnapshot(row: Record<string, unknown>): PerformanceSnapsh
     modelId: row.model_id as string,
     accountValue: Number(row.account_value),
     timestamp: new Date(row.timestamp as string),
+  };
+}
+
+function mapArenaChatMessage(row: Record<string, unknown>): ArenaChatMessage {
+  return {
+    id: row.id as string,
+    role: row.role as "user" | "assistant",
+    parts: row.parts as UIMessage["parts"],
+    metadata: row.metadata as ArenaChatMetadata,
   };
 }
