@@ -1,20 +1,21 @@
 "use client";
 
+import { useMemo } from "react";
 import { MessageSquare } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { BroadcastCard } from "./BroadcastCard";
 import type { BroadcastWithModel } from "@/types/arena";
-import { useArenaStore } from "@/store/arenaStore";
-import { useMemo } from "react";
 
 interface BroadcastFeedProps {
   broadcasts: BroadcastWithModel[];
+  selectedModelId: string | null;
 }
 
-export function BroadcastFeed({ broadcasts }: BroadcastFeedProps) {
-  const { selectedModelId } = useArenaStore();
-
+export function BroadcastFeed({
+  broadcasts,
+  selectedModelId,
+}: BroadcastFeedProps) {
   // Filter broadcasts by selected model
   const filteredBroadcasts = useMemo(() => {
     if (!selectedModelId) return broadcasts;

@@ -9,43 +9,50 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useArenaStore } from "@/store/arenaStore";
 import { DEFAULT_ARENA_MODELS } from "@/lib/arena/constants";
 import type { ArenaTab } from "@/types/arena";
 
-const ARENA_TABS: { value: ArenaTab; label: string; icon: React.ReactNode }[] =
-  [
-    {
-      value: "trades",
-      label: "Trades",
-      icon: <ArrowRightLeft className="h-4 w-4" />,
-    },
-    {
-      value: "chat",
-      label: "Model Chat",
-      icon: <MessageSquare className="h-4 w-4" />,
-    },
-    {
-      value: "positions",
-      label: "Positions",
-      icon: <Briefcase className="h-4 w-4" />,
-    },
-  ];
+const APP_TABS: { value: ArenaTab; label: string; icon: React.ReactNode }[] = [
+  {
+    value: "trades",
+    label: "Trades",
+    icon: <ArrowRightLeft className="h-4 w-4" />,
+  },
+  {
+    value: "chat",
+    label: "Model Chat",
+    icon: <MessageSquare className="h-4 w-4" />,
+  },
+  {
+    value: "positions",
+    label: "Positions",
+    icon: <Briefcase className="h-4 w-4" />,
+  },
+];
 
-export function ArenaTabs() {
-  const { activeTab, setActiveTab, selectedModelId, setSelectedModel } =
-    useArenaStore();
+interface AppTabsProps {
+  activeTab: ArenaTab;
+  onTabChange: (tab: ArenaTab) => void;
+  selectedModelId: string | null;
+  onModelChange: (modelId: string | null) => void;
+}
 
+export function AppTabs({
+  activeTab,
+  onTabChange,
+  selectedModelId,
+  onModelChange,
+}: AppTabsProps) {
   return (
     <div className="border-b px-4 py-2 bg-muted/30">
       <div className="flex items-center justify-between gap-2">
         {/* Tabs */}
         <Tabs
           value={activeTab}
-          onValueChange={(value) => setActiveTab(value as ArenaTab)}
+          onValueChange={(value) => onTabChange(value as ArenaTab)}
         >
           <TabsList className="h-9">
-            {ARENA_TABS.map((tab) => (
+            {APP_TABS.map((tab) => (
               <TabsTrigger
                 key={tab.value}
                 value={tab.value}
@@ -62,10 +69,10 @@ export function ArenaTabs() {
         <Select
           value={selectedModelId || "all"}
           onValueChange={(value) =>
-            setSelectedModel(value === "all" ? null : value)
+            onModelChange(value === "all" ? null : value)
           }
         >
-          <SelectTrigger className="w-[140px] h-9 text-xs">
+          <SelectTrigger className="w-35 h-9 text-xs">
             <Filter className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
             <SelectValue placeholder="All Models" />
           </SelectTrigger>

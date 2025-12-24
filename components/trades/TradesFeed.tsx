@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useMemo } from "react";
 import { ArrowRightLeft, Filter } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,18 +14,17 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TradeCard } from "./TradeCard";
-import type { TradeWithModel } from "@/types/arena";
-import { useArenaStore } from "@/store/arenaStore";
-import { DEFAULT_ARENA_MODELS } from "@/lib/arena/constants";
-import { useMemo } from "react";
+import type { TradeWithModel, TradeFilter } from "@/types/arena";
 
 interface TradesFeedProps {
   trades: TradeWithModel[];
+  selectedModelId: string | null;
 }
 
-export function TradesFeed({ trades }: TradesFeedProps) {
-  const { tradeFilter, setTradeFilter, clearTradeFilter, selectedModelId } =
-    useArenaStore();
+export function TradesFeed({ trades, selectedModelId }: TradesFeedProps) {
+  const [tradeFilter, setTradeFilter] = useState<TradeFilter>({});
+
+  const clearTradeFilter = () => setTradeFilter({});
 
   // Filter trades
   const filteredTrades = useMemo(() => {
@@ -42,8 +42,7 @@ export function TradesFeed({ trades }: TradesFeedProps) {
     });
   }, [trades, selectedModelId, tradeFilter]);
 
-  const hasFilters =
-    selectedModelId || tradeFilter.action || tradeFilter.side;
+  const hasFilters = selectedModelId || tradeFilter.action || tradeFilter.side;
 
   return (
     <Card className="h-full flex flex-col">
@@ -67,21 +66,25 @@ export function TradesFeed({ trades }: TradesFeedProps) {
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuLabel>Filter by Action</DropdownMenuLabel>
             <DropdownMenuItem
-              onClick={() => setTradeFilter({ action: "buy" })}
+              onClick={() => setTradeFilter({ ...tradeFilter, action: "buy" })}
             >
               Buy only
             </DropdownMenuItem>
             <DropdownMenuItem
-              onClick={() => setTradeFilter({ action: "sell" })}
+              onClick={() => setTradeFilter({ ...tradeFilter, action: "sell" })}
             >
               Sell only
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuLabel>Filter by Side</DropdownMenuLabel>
-            <DropdownMenuItem onClick={() => setTradeFilter({ side: "yes" })}>
+            <DropdownMenuItem
+              onClick={() => setTradeFilter({ ...tradeFilter, side: "yes" })}
+            >
               YES positions
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setTradeFilter({ side: "no" })}>
+            <DropdownMenuItem
+              onClick={() => setTradeFilter({ ...tradeFilter, side: "no" })}
+            >
               NO positions
             </DropdownMenuItem>
             <DropdownMenuSeparator />

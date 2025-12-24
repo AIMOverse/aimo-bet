@@ -9,16 +9,25 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
+  Legend,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import type { ChartDataPoint } from "@/types/arena";
-import { DEFAULT_ARENA_MODELS, DEFAULT_STARTING_CAPITAL, CHART_CONFIG } from "@/lib/arena/constants";
+import type { ChartDataPoint, LeaderboardEntry } from "@/types/arena";
+import {
+  DEFAULT_ARENA_MODELS,
+  DEFAULT_STARTING_CAPITAL,
+  CHART_CONFIG,
+} from "@/lib/arena/constants";
 import { useMemo, useState } from "react";
+import { TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface PerformanceChartProps {
   data: ChartDataPoint[];
   title?: string;
+  latestValues?: Map<string, number>;
+  leaderboard?: LeaderboardEntry[];
 }
 
 type TimeRange = "24H" | "72H" | "ALL";
@@ -88,12 +97,105 @@ function CustomTooltip({
   );
 }
 
+// Get change indicator component
+function ChangeIndicator({ change }: { change: number }) {
+  if (change > 0) {
+    return <TrendingUp className="h-3 w-3 text-green-500" />;
+  }
+  if (change < 0) {
+    return <TrendingDown className="h-3 w-3 text-red-500" />;
+  }
+  return <Minus className="h-3 w-3 text-muted-foreground" />;
+}
+
+// Custom legend component
+interface CustomLegendProps {
+  payload?: Array<{ value: string; color: string; dataKey: string }>;
+  latestValues?: Map<string, number>;
+  leaderboard?: LeaderboardEntry[];
+  hoveredModel: string | null;
+  onModelHover: (modelName: string | null) => void;
+}
+
+function CustomLegend({
+  payload,
+  latestValues,
+  leaderboard,
+  hoveredModel,
+  onModelHover,
+}: CustomLegendProps) {
+  if (!payload || payload.length === 0) return null;
+
+  // Build model data with rankings
+  const modelsWithData = payload.map((entry, index) => {
+    const value = latestValues?.get(entry.value) || DEFAULT_STARTING_CAPITAL;
+    const leaderboardEntry = leaderboard?.find(
+      (e) => e.model.name === entry.value,
+    );
+    return {
+      name: entry.value,
+      color: entry.color,
+      value,
+      rank: leaderboardEntry?.rank || index + 1,
+      change: leaderboardEntry?.change || 0,
+    };
+  });
+
+  // Sort by rank
+  const sortedModels = [...modelsWithData].sort((a, b) => a.rank - b.rank);
+
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 pt-2">
+      {sortedModels.map((model) => {
+        const isPositive = model.value >= DEFAULT_STARTING_CAPITAL;
+        const isHovered = hoveredModel === model.name;
+        const isDimmed = hoveredModel !== null && !isHovered;
+        const changePercent =
+          ((model.value - DEFAULT_STARTING_CAPITAL) /
+            DEFAULT_STARTING_CAPITAL) *
+          100;
+
+        return (
+          <div
+            key={model.name}
+            className={cn(
+              "flex items-center gap-1 px-1 rounded transition-opacity cursor-default text-xs",
+              "hover:bg-muted/50",
+              isDimmed && "opacity-30",
+            )}
+            onMouseEnter={() => onModelHover(model.name)}
+            onMouseLeave={() => onModelHover(null)}
+          >
+            <div
+              className="w-2 h-2 rounded-full shrink-0"
+              style={{ backgroundColor: model.color }}
+            />
+            <span className="font-medium">{model.name}</span>
+            <span
+              className={cn(
+                "font-medium",
+                isPositive ? "text-green-500" : "text-red-500",
+              )}
+            >
+              {changePercent >= 0 ? "+" : ""}
+              {changePercent.toFixed(1)}%
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function PerformanceChart({
   data,
   title = "Account Value Over Time",
+  latestValues,
+  leaderboard,
 }: PerformanceChartProps) {
   const [timeRange, setTimeRange] = useState<TimeRange>("ALL");
   const [valueDisplay, setValueDisplay] = useState<ValueDisplay>("dollar");
+  const [hoveredModel, setHoveredModel] = useState<string | null>(null);
 
   // Get model names from data keys (excluding timestamp)
   const modelNames = useMemo(() => {
@@ -129,7 +231,8 @@ export function PerformanceChart({
       const converted: ChartDataPoint = { timestamp: point.timestamp };
       modelNames.forEach((name) => {
         const value = point[name] as number;
-        converted[name] = ((value - DEFAULT_STARTING_CAPITAL) / DEFAULT_STARTING_CAPITAL) * 100;
+        converted[name] =
+          ((value - DEFAULT_STARTING_CAPITAL) / DEFAULT_STARTING_CAPITAL) * 100;
       });
       return converted;
     });
@@ -194,7 +297,9 @@ export function PerformanceChart({
             <ToggleGroup
               type="single"
               value={valueDisplay}
-              onValueChange={(val) => val && setValueDisplay(val as ValueDisplay)}
+              onValueChange={(val) =>
+                val && setValueDisplay(val as ValueDisplay)
+              }
               size="sm"
             >
               <ToggleGroupItem value="dollar" className="text-xs px-2">
@@ -247,19 +352,33 @@ export function PerformanceChart({
               />
               {modelNames.map((name) => {
                 const color = colorMap.get(name) || "#6366f1";
+                const isHovered = hoveredModel === name;
+                const isDimmed = hoveredModel !== null && !isHovered;
                 return (
                   <Line
                     key={name}
                     type="monotone"
                     dataKey={name}
                     stroke={color}
-                    strokeWidth={2}
+                    strokeWidth={isHovered ? 3 : 2}
+                    strokeOpacity={isDimmed ? 0.2 : 1}
                     dot={false}
                     activeDot={{ r: 4 }}
                     animationDuration={CHART_CONFIG.animationDuration}
                   />
                 );
               })}
+              <Legend
+                content={
+                  <CustomLegend
+                    latestValues={latestValues}
+                    leaderboard={leaderboard}
+                    hoveredModel={hoveredModel}
+                    onModelHover={setHoveredModel}
+                  />
+                }
+                verticalAlign="bottom"
+              />
             </LineChart>
           </ResponsiveContainer>
         </div>
