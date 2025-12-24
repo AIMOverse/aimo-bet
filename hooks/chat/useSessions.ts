@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import type { ChatSession } from "@/types/chat";
 import { useChatStore } from "@/store/chatStore";
-import { clearCachedMessages } from "@/lib/cache/messages";
+import { clearCachedMessages } from "@/lib/cache/chat";
 
 // Module-level state to prevent duplicate fetches across component instances
 let globalSessionsPromise: Promise<ChatSession[]> | null = null;
