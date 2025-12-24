@@ -1,73 +1,12 @@
-# Prediction Market Agent - dflow Trading Tools
+# Alpha Arena - Model Chat Implementation Plan
 
 ## Overview
 
-Implementation plan for LLM agent tools to autonomously trade on dflow prediction markets. Tools are organized into three categories matching the trading lifecycle.
-
----
-
-## dflow API Documentation
-
-**IMPORTANT:** When implementing tools and API route handlers, reference these official docs:
-
-### Swap API (Trading)
-| Endpoint | Documentation |
-|----------|---------------|
-| Order | https://pond.dflow.net/swap-api-reference/order/order |
-| Order Status | https://pond.dflow.net/swap-api-reference/order/order-status |
-| Quote (Imperative) | https://pond.dflow.net/swap-api-reference/imperative/quote |
-| Swap (Imperative) | https://pond.dflow.net/swap-api-reference/imperative/swap |
-| Swap Instructions | https://pond.dflow.net/swap-api-reference/imperative/swap-instructions |
-| Quote (Declarative) | https://pond.dflow.net/swap-api-reference/declarative/quote |
-| Submit (Declarative) | https://pond.dflow.net/swap-api-reference/declarative/submit |
-| Prediction Market Init | https://pond.dflow.net/swap-api-reference/prediction-market/prediction-market-init |
-| Tokens | https://pond.dflow.net/swap-api-reference/token/tokens |
-| Tokens with Decimals | https://pond.dflow.net/swap-api-reference/token/tokens-with-decimals |
-| Venues | https://pond.dflow.net/swap-api-reference/venues/venues |
-
-### Prediction Market Metadata API
-| Endpoint | Documentation |
-|----------|---------------|
-| Event | https://pond.dflow.net/prediction-market-metadata-api-reference/events/event |
-| Events | https://pond.dflow.net/prediction-market-metadata-api-reference/events/events |
-| Forecast Percentile History | https://pond.dflow.net/prediction-market-metadata-api-reference/events/forecast-percentile-history |
-| Forecast Percentile History by Mint | https://pond.dflow.net/prediction-market-metadata-api-reference/events/forecast-percentile-history-by-mint |
-| Event Candlesticks | https://pond.dflow.net/prediction-market-metadata-api-reference/events/event-candlesticks |
-| Market | https://pond.dflow.net/prediction-market-metadata-api-reference/markets/market |
-| Market by Mint | https://pond.dflow.net/prediction-market-metadata-api-reference/markets/market-by-mint |
-| Markets | https://pond.dflow.net/prediction-market-metadata-api-reference/markets/markets |
-| Markets Batch | https://pond.dflow.net/prediction-market-metadata-api-reference/markets/markets-batch |
-| Outcome Mints | https://pond.dflow.net/prediction-market-metadata-api-reference/markets/outcome-mints |
-| Filter Outcome Mints | https://pond.dflow.net/prediction-market-metadata-api-reference/markets/filter-outcome-mints |
-| Market Candlesticks | https://pond.dflow.net/prediction-market-metadata-api-reference/markets/market-candlesticks |
-| Market Candlesticks by Mint | https://pond.dflow.net/prediction-market-metadata-api-reference/markets/market-candlesticks-by-mint |
-| Orderbook by Ticker | https://pond.dflow.net/prediction-market-metadata-api-reference/orderbook/orderbook-by-ticker |
-| Orderbook by Mint | https://pond.dflow.net/prediction-market-metadata-api-reference/orderbook/orderbook-by-mint |
-| Trades | https://pond.dflow.net/prediction-market-metadata-api-reference/trades/trades |
-| Trades by Mint | https://pond.dflow.net/prediction-market-metadata-api-reference/trades/trades-by-mint |
-| Live Data | https://pond.dflow.net/prediction-market-metadata-api-reference/live-data/live-data |
-| Live Data by Event | https://pond.dflow.net/prediction-market-metadata-api-reference/live-data/live-data-by-event |
-| Live Data by Mint | https://pond.dflow.net/prediction-market-metadata-api-reference/live-data/live-data-by-mint |
-| Series | https://pond.dflow.net/prediction-market-metadata-api-reference/series/series |
-| Series by Ticker | https://pond.dflow.net/prediction-market-metadata-api-reference/series/series-by-ticker |
-| Tags by Categories | https://pond.dflow.net/prediction-market-metadata-api-reference/tags/tags-by-categories |
-| Filters by Sports | https://pond.dflow.net/prediction-market-metadata-api-reference/sports/filters-by-sports |
-| Search | https://pond.dflow.net/prediction-market-metadata-api-reference/search/search |
-
-### WebSocket APIs
-| Channel | Documentation |
-|---------|---------------|
-| Prices | https://pond.dflow.net/prediction-market-metadata-api-reference/websockets/prices |
-| Trades | https://pond.dflow.net/prediction-market-metadata-api-reference/websockets/trades |
-| Orderbook | https://pond.dflow.net/prediction-market-metadata-api-reference/websockets/orderbook |
-
----
-
-## API Base URLs
-
-**Swap API:** `https://swap-api.dflow.net`
-**Metadata API:** `https://prediction-markets-api.dflow.net/api/v1`
-**WebSocket:** `wss://prediction-markets-api.dflow.net/api/v1/ws`
+Refactoring the broadcast system into a unified Model Chat where:
+- **Models** stream their trading analysis, trades, and commentary
+- **Users** ask questions and receive **streaming** responses from an **Assistant**
+- All messages use ai-sdk's `UIMessage` format with custom metadata
+- Messages are tied to the **trading session** (no separate chat session)
 
 ---
 
@@ -75,403 +14,740 @@ Implementation plan for LLM agent tools to autonomously trade on dflow predictio
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        LLM Agent                                │
-│                  (lib/ai/agents/...)                            │
+│                      Model Chat UI                              │
+│                   (components/chat/)                            │
+│         ModelChatFeed | ChatMessage | ChatInput                 │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                      Agent Tools                                │
-│                  (lib/ai/tools/markets/...)                     │
-│   getMarkets, getMarketDetails, placeOrder, getPositions, etc.  │
+│                      Chat Hook                                  │
+│                 (hooks/chat/useChatMessages.ts)                 │
+│            Adapted for arena mode with trading context          │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                   Next.js API Routes                            │
-│                    (app/api/dflow/...)                          │
-│         Internal endpoints that proxy to dflow APIs             │
+│                   Next.js API Route                             │
+│                   (app/api/chat/route.ts)                       │
+│         Adapted to handle arena mode                            │
 └─────────────────────────────────────────────────────────────────┘
                               │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      dflow APIs                                 │
-│            Swap API  |  Metadata API  |  WebSocket              │
-└─────────────────────────────────────────────────────────────────┘
+              ┌───────────────┴───────────────┐
+              ▼                               ▼
+┌─────────────────────────────┐   ┌───────────────────────────────┐
+│   Supabase Database         │   │      Chat Agent               │
+│  (arena_chat_messages)      │   │  (lib/ai/agents/chatAgent.ts) │
+│  Full JSONB storage         │   │  Adapted for arena context    │
+└─────────────────────────────┘   └───────────────────────────────┘
 ```
+
+---
+
+## Data Model
+
+### Using ai-sdk UIMessage + Custom Metadata
+
+Following ai-sdk patterns, we extend `UIMessage` with typed metadata:
+
+```typescript
+// types/chat.ts
+
+import type { UIMessage } from "ai";
+
+// Custom metadata for arena chat messages
+export interface ArenaChatMetadata {
+  sessionId: string;           // trading_sessions.id
+  authorType: 'model' | 'user' | 'assistant';
+  authorId: string;            // model_id, visitorIP, or 'assistant'
+  messageType: 'analysis' | 'trade' | 'commentary' | 'user' | 'assistant';
+  relatedTradeId?: string;
+  createdAt: number;           // timestamp ms
+}
+
+// Arena chat message = UIMessage with our metadata
+export type ArenaChatMessage = UIMessage<ArenaChatMetadata>;
+
+// With author display info (for rendering)
+export interface ArenaChatMessageWithAuthor extends ArenaChatMessage {
+  author: {
+    name: string;
+    avatarUrl?: string;
+    color?: string;
+  };
+}
+```
+
+### Database Schema (Full JSONB)
+
+Store `UIMessage` as-is for simplicity and future compatibility:
+
+```sql
+CREATE TABLE arena_chat_messages (
+  id TEXT PRIMARY KEY,                                    -- UIMessage.id
+  session_id UUID NOT NULL REFERENCES trading_sessions(id),
+  role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+  parts JSONB NOT NULL,                                   -- UIMessage.parts
+  metadata JSONB,                                         -- ArenaChatMetadata
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_arena_chat_session ON arena_chat_messages(session_id, created_at);
+CREATE INDEX idx_arena_chat_metadata ON arena_chat_messages USING GIN (metadata);
+```
+
+### Role Mapping
+
+| authorType | messageType | role (ai-sdk) |
+|------------|-------------|---------------|
+| model | analysis/trade/commentary | assistant |
+| user | user | user |
+| assistant | assistant | assistant |
+
+Models use `role: 'assistant'` because they generate AI content.
 
 ---
 
 ## File Structure
 
+### Files to Modify
+
 ```
-lib/ai/tools/
-├── index.ts                    # Export all tools
-├── generateImage.ts            # Existing
-├── generateVideo.ts            # Existing
-├── webSearch.ts                # Existing (placeholder)
-└── markets/
-    ├── index.ts                # Export market tools
-    ├── getMarkets.ts           # → /api/dflow/markets
-    ├── getMarketDetails.ts     # → /api/dflow/markets/[ticker]
-    ├── getMarketPrices.ts      # → WebSocket or /api/dflow/prices
-    ├── placeOrder.ts           # → /api/dflow/order
-    ├── getOrderStatus.ts       # → /api/dflow/order/[id]
-    ├── cancelOrder.ts          # → /api/dflow/order/[id]
-    ├── getPositions.ts         # → /api/dflow/positions
-    ├── getBalance.ts           # → /api/dflow/balance
-    └── getTradeHistory.ts      # → /api/dflow/trades
+hooks/chat/
+├── useChatMessages.ts      # ADD arena mode support
+├── useSessions.ts          # KEEP for reference
+├── useModels.ts            # KEEP for reference
+└── index.ts                # UPDATE exports
 
-app/api/dflow/
-├── markets/
-│   ├── route.ts                # GET: list markets (→ Metadata API /markets)
-│   └── [ticker]/
-│       └── route.ts            # GET: market details (→ Metadata API /market)
-├── events/
-│   ├── route.ts                # GET: list events (→ Metadata API /events)
-│   └── [ticker]/
-│       └── route.ts            # GET: event details (→ Metadata API /event)
-├── order/
-│   ├── route.ts                # POST: place order (→ Swap API /order)
-│   └── [id]/
-│       └── route.ts            # GET: status, DELETE: cancel (→ Swap API /order-status)
-├── quote/
-│   └── route.ts                # POST: get quote (→ Swap API /quote)
-├── positions/
-│   └── route.ts                # GET: wallet positions (on-chain query)
-├── balance/
-│   └── route.ts                # GET: wallet balance (on-chain query)
-├── trades/
-│   └── route.ts                # GET: trade history (→ Metadata API /trades)
-├── prices/
-│   └── route.ts                # GET: current prices (→ Metadata API /live-data)
-├── orderbook/
-│   └── [ticker]/
-│       └── route.ts            # GET: orderbook (→ Metadata API /orderbook-by-ticker)
-└── search/
-    └── route.ts                # GET: search markets (→ Metadata API /search)
+store/
+└── chatStore.ts            # SIMPLIFY - remove session management
 
-lib/arena/services/
-└── priceService.ts             # WebSocket price cache
+lib/cache/
+└── messages.ts             # RENAME to chat.ts, add arena cache
+
+app/api/chat/
+└── route.ts                # ADD arena mode handling
+
+lib/ai/agents/
+└── chatAgent.ts            # ADD arena assistant persona
+
+lib/supabase/
+└── arena.ts                # ADD arena chat message functions
+```
+
+### Files to Create
+
+```
+components/chat/
+├── index.ts                # Exports
+├── ModelChatFeed.tsx       # Main feed (replaces BroadcastFeed)
+├── ChatMessage.tsx         # Single message (replaces BroadcastCard)
+└── ChatInput.tsx           # User input field
+```
+
+### Files to Delete (after migration)
+
+```
+components/broadcast/       # Replaced by components/chat/
+lib/arena/hooks/useBroadcasts.ts  # Replaced by useChatMessages with arena mode
 ```
 
 ---
 
-## Tool Categories
+## Adapting Existing Code
 
-### Category 1: Market Discovery
-
-| Tool | API Route | dflow Endpoint | Docs |
-|------|-----------|----------------|------|
-| `getMarkets` | `/api/dflow/markets` | Metadata: `/markets` | [markets](https://pond.dflow.net/prediction-market-metadata-api-reference/markets/markets) |
-| `getMarketDetails` | `/api/dflow/markets/[ticker]` | Metadata: `/market` | [market](https://pond.dflow.net/prediction-market-metadata-api-reference/markets/market) |
-| `getMarketPrices` | WebSocket / `/api/dflow/prices` | Metadata: `/live-data` | [live-data](https://pond.dflow.net/prediction-market-metadata-api-reference/live-data/live-data), [ws/prices](https://pond.dflow.net/prediction-market-metadata-api-reference/websockets/prices) |
-
-### Category 2: Trading Execution
-
-| Tool | API Route | dflow Endpoint | Docs |
-|------|-----------|----------------|------|
-| `placeOrder` | `/api/dflow/order` | Swap: `/order` | [order](https://pond.dflow.net/swap-api-reference/order/order) |
-| `getOrderStatus` | `/api/dflow/order/[id]` | Swap: `/order-status` | [order-status](https://pond.dflow.net/swap-api-reference/order/order-status) |
-| `cancelOrder` | `/api/dflow/order/[id]` | Swap: `/order` | [order](https://pond.dflow.net/swap-api-reference/order/order) |
-
-### Category 3: Portfolio Management
-
-| Tool | API Route | dflow Endpoint | Docs |
-|------|-----------|----------------|------|
-| `getPositions` | `/api/dflow/positions` | On-chain + Metadata | [outcome-mints](https://pond.dflow.net/prediction-market-metadata-api-reference/markets/outcome-mints) |
-| `getBalance` | `/api/dflow/balance` | On-chain (Solana RPC) | - |
-| `getTradeHistory` | `/api/dflow/trades` | Metadata: `/trades` | [trades](https://pond.dflow.net/prediction-market-metadata-api-reference/trades/trades) |
-
----
-
-## Tool Specifications
-
-### Category 1: Market Discovery
-
-#### getMarkets
+### 1. `useChatMessages.ts` - Add Arena Mode
 
 ```typescript
-// lib/ai/tools/markets/getMarkets.ts
-import { tool } from "ai";
-import { z } from "zod";
+// hooks/chat/useChatMessages.ts
 
-export const getMarketsTool = tool({
-  description: "Get list of prediction markets. Use to discover trading opportunities.",
-  parameters: z.object({
-    status: z.enum(["active", "inactive", "closed", "determined", "finalized"])
-      .optional()
-      .describe("Filter by market status. Default: active"),
-    series: z.string().optional()
-      .describe("Filter by series ticker"),
-    category: z.string().optional()
-      .describe("Filter by category (e.g., 'crypto', 'sports')"),
-    limit: z.number().optional().default(20)
-      .describe("Max markets to return"),
-  }),
-  execute: async ({ status = "active", series, category, limit }) => {
-    const res = await fetch(`/api/dflow/markets?${new URLSearchParams({
-      status,
-      ...(series && { series }),
-      ...(category && { category }),
-      limit: String(limit),
-    })}`);
-    return res.json();
-  },
-});
+interface UseChatMessagesOptions {
+  sessionId: string | null;
+  mode?: 'user-chat' | 'arena';  // NEW: context mode
+}
+
+// In arena mode:
+// - sessionId is trading_sessions.id
+// - Load messages from arena_chat_messages table
+// - Include model broadcasts in the feed
+// - No "new chat" concept - messages belong to trading session
 ```
 
-#### getMarketDetails
+**Transport for arena mode:**
 
 ```typescript
-// lib/ai/tools/markets/getMarketDetails.ts
-export const getMarketDetailsTool = tool({
-  description: "Get detailed information about a specific market including current prices and liquidity.",
-  parameters: z.object({
-    ticker: z.string().describe("Market ticker (e.g., 'BTCD-25DEC0313-T92749.99')"),
+const transport = useMemo(() =>
+  new DefaultChatTransport({
+    api: "/api/chat",
+    fetch: customFetch,
+    prepareSendMessagesRequest: ({ messages }) => {
+      return {
+        body: {
+          message: messages[messages.length - 1],
+          sessionId: currentSessionIdRef.current,  // trading_sessions.id
+          mode: 'arena',  // Tell server to use arena context
+        },
+      };
+    },
   }),
-  execute: async ({ ticker }) => {
-    const res = await fetch(`/api/dflow/markets/${encodeURIComponent(ticker)}`);
-    return res.json();
-  },
-});
+  [customFetch]
+);
 ```
 
-#### getMarketPrices
+### 2. `app/api/chat/route.ts` - Add Arena Mode
 
 ```typescript
-// lib/ai/tools/markets/getMarketPrices.ts
-export const getMarketPricesTool = tool({
-  description: "Get current bid/ask prices for one or more markets. Uses real-time data.",
-  parameters: z.object({
-    tickers: z.array(z.string()).optional()
-      .describe("Market tickers to get prices for. If empty, returns all available."),
-  }),
-  execute: async ({ tickers }) => {
-    // Read from WebSocket price cache (preferred for real-time)
-    // Fallback to REST: /api/dflow/prices
-    const res = await fetch(`/api/dflow/prices${tickers?.length ? `?tickers=${tickers.join(',')}` : ''}`);
-    return res.json();
-  },
-});
-```
+// app/api/chat/route.ts
 
----
+interface ChatRequest {
+  message: UIMessage;
+  sessionId: string | null;
+  mode?: 'user-chat' | 'arena';  // NEW
+  model?: string;
+  tools?: { ... };
+}
 
-### Category 2: Trading Execution
+export async function POST(req: Request) {
+  const { message, sessionId, mode = 'user-chat', model, tools } = await req.json();
+  
+  if (mode === 'arena') {
+    return handleArenaChat(req, message, sessionId);
+  }
+  
+  // Existing user-chat logic...
+}
 
-#### placeOrder
-
-```typescript
-// lib/ai/tools/markets/placeOrder.ts
-export const placeOrderTool = tool({
-  description: "Place an order to buy or sell outcome tokens. Supports both increasing (buying) and reducing (selling) positions.",
-  parameters: z.object({
-    market_ticker: z.string()
-      .describe("Market to trade"),
-    side: z.enum(["yes", "no"])
-      .describe("Which outcome to trade"),
-    action: z.enum(["buy", "sell"])
-      .describe("Buy to increase position, sell to reduce"),
-    quantity: z.number().positive()
-      .describe("Number of outcome tokens"),
-    limit_price: z.number().min(0).max(1).optional()
-      .describe("Max price for buy, min for sell. Range 0-1."),
-    slippage_tolerance: z.number().min(0).max(1).optional().default(0.02)
-      .describe("Acceptable slippage (e.g., 0.02 = 2%)"),
-    execution_mode: z.enum(["sync", "async"]).optional().default("sync")
-      .describe("Sync returns immediately. Async returns order ID for polling."),
-  }),
-  execute: async (params) => {
-    const res = await fetch('/api/dflow/order', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
-    return res.json();
-  },
-});
-```
-
-#### getOrderStatus
-
-```typescript
-// lib/ai/tools/markets/getOrderStatus.ts
-export const getOrderStatusTool = tool({
-  description: "Check the status of an async order.",
-  parameters: z.object({
-    order_id: z.string().describe("Order ID from placeOrder response"),
-  }),
-  execute: async ({ order_id }) => {
-    const res = await fetch(`/api/dflow/order/${order_id}`);
-    return res.json();
-  },
-});
-```
-
-#### cancelOrder
-
-```typescript
-// lib/ai/tools/markets/cancelOrder.ts
-export const cancelOrderTool = tool({
-  description: "Cancel a pending async order.",
-  parameters: z.object({
-    order_id: z.string().describe("Order ID to cancel"),
-  }),
-  execute: async ({ order_id }) => {
-    const res = await fetch(`/api/dflow/order/${order_id}`, { method: 'DELETE' });
-    return res.json();
-  },
-});
-```
-
----
-
-### Category 3: Portfolio Management
-
-#### getPositions
-
-```typescript
-// lib/ai/tools/markets/getPositions.ts
-export const getPositionsTool = tool({
-  description: "Get current positions (outcome token holdings) across all markets.",
-  parameters: z.object({
-    market_tickers: z.array(z.string()).optional()
-      .describe("Filter to specific markets"),
-    include_closed: z.boolean().optional().default(false)
-      .describe("Include positions in closed/determined markets"),
-  }),
-  execute: async ({ market_tickers, include_closed }) => {
-    const params = new URLSearchParams();
-    if (market_tickers?.length) params.set('tickers', market_tickers.join(','));
-    if (include_closed) params.set('include_closed', 'true');
-    const res = await fetch(`/api/dflow/positions?${params}`);
-    return res.json();
-  },
-});
-```
-
-#### getBalance
-
-```typescript
-// lib/ai/tools/markets/getBalance.ts
-export const getBalanceTool = tool({
-  description: "Get available cash balance for trading.",
-  parameters: z.object({
-    currency: z.enum(["USDC", "CASH"]).optional().default("USDC")
-      .describe("Settlement currency to check"),
-  }),
-  execute: async ({ currency }) => {
-    const res = await fetch(`/api/dflow/balance?currency=${currency}`);
-    return res.json();
-  },
-});
-```
-
-#### getTradeHistory
-
-```typescript
-// lib/ai/tools/markets/getTradeHistory.ts
-export const getTradeHistoryTool = tool({
-  description: "Get history of past trades.",
-  parameters: z.object({
-    market_ticker: z.string().optional()
-      .describe("Filter to specific market"),
-    limit: z.number().optional().default(50)
-      .describe("Max trades to return"),
-  }),
-  execute: async ({ market_ticker, limit }) => {
-    const params = new URLSearchParams({ limit: String(limit) });
-    if (market_ticker) params.set('ticker', market_ticker);
-    const res = await fetch(`/api/dflow/trades?${params}`);
-    return res.json();
-  },
-});
-```
-
----
-
-## WebSocket Price Service
-
-```typescript
-// lib/arena/services/priceService.ts
-const WS_URL = "wss://prediction-markets-api.dflow.net/api/v1/ws";
-
-class PriceService {
-  private prices = new Map<string, MarketPrice>();
-  private ws: WebSocket | null = null;
-
-  async connect(): Promise<void> {
-    this.ws = new WebSocket(WS_URL);
-    this.ws.onopen = () => {
-      this.ws?.send(JSON.stringify({
-        type: "subscribe",
-        channel: "prices",
-        all: true
-      }));
-    };
-    this.ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.channel === "prices" && data.type === "ticker") {
-        this.prices.set(data.market_ticker, {
-          market_ticker: data.market_ticker,
-          yes_bid: data.yes_bid,
-          yes_ask: data.yes_ask,
-          no_bid: data.no_bid,
-          no_ask: data.no_ask,
-          timestamp: Date.now(),
-        });
+async function handleArenaChat(
+  req: Request,
+  message: UIMessage,
+  sessionId: string
+) {
+  // 1. Load recent arena messages for context
+  const previousMessages = await getArenaChatMessages(sessionId, 50);
+  
+  // 2. Save user message with metadata
+  await saveArenaChatMessage({
+    ...message,
+    metadata: {
+      sessionId,
+      authorType: 'user',
+      authorId: getVisitorId(req),  // IP or fingerprint
+      messageType: 'user',
+      createdAt: Date.now(),
+    },
+  });
+  
+  // 3. Stream assistant response
+  const result = streamText({
+    model: getModel("openrouter/gpt-4o-mini"),
+    system: ARENA_ASSISTANT_PROMPT,
+    messages: await convertToModelMessages([...previousMessages, message]),
+  });
+  
+  return result.toUIMessageStreamResponse({
+    originalMessages: [...previousMessages, message],
+    messageMetadata: ({ part }) => {
+      if (part.type === 'finish') {
+        return {
+          sessionId,
+          authorType: 'assistant',
+          authorId: 'assistant',
+          messageType: 'assistant',
+          createdAt: Date.now(),
+        };
       }
-    };
-  }
+    },
+    onFinish: async ({ messages }) => {
+      // Save assistant response
+      const assistantMessage = messages[messages.length - 1];
+      await saveArenaChatMessage(assistantMessage);
+    },
+  });
+}
+```
 
-  getPrice(ticker: string): MarketPrice | undefined {
-    return this.prices.get(ticker);
-  }
+### 3. `chatAgent.ts` - Add Arena Context
 
-  getAllPrices(): MarketPrice[] {
-    return Array.from(this.prices.values());
+```typescript
+// lib/ai/agents/chatAgent.ts
+
+const ARENA_ASSISTANT_PROMPT = `You are the Arena Assistant, helping users understand the trading models' behavior in the Alpha Arena prediction market competition.
+
+You have context of:
+- Recent messages from trading models (their analysis, trades, commentary)
+- The conversation history in this trading session
+
+Guidelines:
+- Be concise and helpful
+- Reference specific model actions when relevant
+- If asked about a model's reasoning, summarize their recent broadcasts
+- If you don't know something, say so
+- Keep responses focused on trading activity`;
+
+// Add to chatCallOptionsSchema
+const chatCallOptionsSchema = z.object({
+  model: z.string().default("openrouter/gpt-4o"),
+  mode: z.enum(["user-chat", "arena"]).default("user-chat"),  // NEW
+  tools: z.object({
+    generateImage: z.boolean().default(false),
+    generateVideo: z.boolean().default(false),
+    webSearch: z.boolean().default(false),
+  }).default({ ... }),
+});
+
+// In prepareCall
+prepareCall: ({ options, ...settings }) => {
+  const isArenaMode = options.mode === 'arena';
+  
+  return {
+    ...settings,
+    model: getModel(isArenaMode ? "openrouter/gpt-4o-mini" : options.model),
+    instructions: isArenaMode ? ARENA_ASSISTANT_PROMPT : DEFAULT_SYSTEM_PROMPT,
+    activeTools: isArenaMode ? undefined : activeTools,  // No tools in arena mode
+  };
+},
+```
+
+### 4. `chatStore.ts` - Simplify
+
+Remove session management (arena uses trading session from URL):
+
+```typescript
+// store/chatStore.ts
+
+type ConnectionStatus = "idle" | "connecting" | "connected" | "error";
+
+interface ChatState {
+  // REMOVED: currentSessionId, sessionRefreshTrigger, newChatCounter
+  
+  /** Connection status to AI */
+  connectionStatus: ConnectionStatus;
+
+  /** Whether the AI is currently generating a response */
+  isGenerating: boolean;
+
+  /** Error message if any */
+  error: string | null;
+
+  setConnectionStatus: (status: ConnectionStatus) => void;
+  setIsGenerating: (isGenerating: boolean) => void;
+  setError: (error: string | null) => void;
+  clearError: () => void;
+  reset: () => void;
+}
+
+// No persistence needed - these are transient UI states
+export const useChatStore = create<ChatState>()((set) => ({
+  connectionStatus: "idle",
+  isGenerating: false,
+  error: null,
+
+  setConnectionStatus: (status) => set({ connectionStatus: status }),
+  
+  setIsGenerating: (isGenerating) => set({
+    isGenerating,
+    connectionStatus: isGenerating ? "connected" : "idle",
+  }),
+
+  setError: (error) => set({
+    error,
+    connectionStatus: error ? "error" : "idle",
+    isGenerating: false,
+  }),
+
+  clearError: () => set({ error: null, connectionStatus: "idle" }),
+  
+  reset: () => set({
+    connectionStatus: "idle",
+    isGenerating: false,
+    error: null,
+  }),
+}));
+```
+
+### 5. `lib/cache/messages.ts` - Adapt for Arena
+
+Rename to `lib/cache/chat.ts` and add arena functions:
+
+```typescript
+// lib/cache/chat.ts
+
+import type { UIMessage } from "ai";
+
+const USER_CHAT_PREFIX = "aimo-chat-messages-";
+const ARENA_CHAT_PREFIX = "aimo-arena-chat-";
+const CACHE_VERSION = "v1";
+
+// Existing user-chat cache functions...
+export function getCachedMessages(sessionId: string): UIMessage[] { ... }
+export function setCachedMessages(sessionId: string, messages: UIMessage[]): void { ... }
+
+// NEW: Arena chat cache functions
+export function getArenaCachedMessages(tradingSessionId: string): UIMessage[] {
+  if (!isBrowser()) return [];
+  try {
+    const key = `${ARENA_CHAT_PREFIX}${CACHE_VERSION}-${tradingSessionId}`;
+    const cached = localStorage.getItem(key);
+    if (!cached) return [];
+    return JSON.parse(cached);
+  } catch {
+    return [];
   }
 }
 
-export const priceService = new PriceService();
+export function setArenaCachedMessages(
+  tradingSessionId: string,
+  messages: UIMessage[]
+): void {
+  if (!isBrowser()) return;
+  try {
+    const key = `${ARENA_CHAT_PREFIX}${CACHE_VERSION}-${tradingSessionId}`;
+    localStorage.setItem(key, JSON.stringify(messages));
+  } catch {
+    clearOldCaches();
+  }
+}
+
+export function clearArenaCachedMessages(tradingSessionId: string): void {
+  if (!isBrowser()) return;
+  const key = `${ARENA_CHAT_PREFIX}${CACHE_VERSION}-${tradingSessionId}`;
+  localStorage.removeItem(key);
+}
 ```
 
 ---
 
-## Implementation Checklist
+## Supabase Functions
 
-### Phase 1: API Routes
-- [ ] Create `app/api/dflow/markets/route.ts`
-- [ ] Create `app/api/dflow/markets/[ticker]/route.ts`
-- [ ] Create `app/api/dflow/prices/route.ts`
-- [ ] Create `app/api/dflow/order/route.ts`
-- [ ] Create `app/api/dflow/order/[id]/route.ts`
-- [ ] Create `app/api/dflow/positions/route.ts`
-- [ ] Create `app/api/dflow/balance/route.ts`
-- [ ] Create `app/api/dflow/trades/route.ts`
+Add to `lib/supabase/arena.ts`:
 
-### Phase 2: Agent Tools
-- [ ] Create `lib/ai/tools/markets/` directory
-- [ ] Implement all 9 tools
-- [ ] Export tools from `lib/ai/tools/index.ts`
+```typescript
+// ============================================================================
+// ARENA CHAT MESSAGES
+// ============================================================================
 
-### Phase 3: Price Service
-- [ ] Create `lib/arena/services/priceService.ts`
-- [ ] Integrate with `getMarketPrices` tool
+import type { UIMessage } from "ai";
+import type { ArenaChatMetadata, ArenaChatMessage } from "@/types/chat";
 
-### Phase 4: Agent Integration
-- [ ] Update `PredictionMarketAgent` to use new tools
-- [ ] Add wallet context injection
-- [ ] Test end-to-end trading flow
+export async function getArenaChatMessages(
+  sessionId: string,
+  limit = 100
+): Promise<ArenaChatMessage[]> {
+  const client = getSupabaseClient();
+  if (!client) return [];
+
+  const { data, error } = await client
+    .from("arena_chat_messages")
+    .select("*")
+    .eq("session_id", sessionId)
+    .order("created_at", { ascending: true })
+    .limit(limit);
+
+  if (error) {
+    console.error("Failed to fetch arena chat messages:", error);
+    throw error;
+  }
+
+  return (data || []).map(mapArenaChatMessage);
+}
+
+export async function saveArenaChatMessage(
+  message: ArenaChatMessage
+): Promise<void> {
+  const client = getSupabaseClient();
+  if (!client) throw new Error("Supabase not configured");
+
+  const { error } = await client
+    .from("arena_chat_messages")
+    .upsert({
+      id: message.id,
+      session_id: message.metadata?.sessionId,
+      role: message.role,
+      parts: message.parts,
+      metadata: message.metadata,
+    }, { onConflict: "id" });
+
+  if (error) {
+    console.error("Failed to save arena chat message:", error);
+    throw error;
+  }
+}
+
+export async function saveArenaChatMessages(
+  messages: ArenaChatMessage[]
+): Promise<void> {
+  const client = getSupabaseClient();
+  if (!client) throw new Error("Supabase not configured");
+
+  const inserts = messages.map(msg => ({
+    id: msg.id,
+    session_id: msg.metadata?.sessionId,
+    role: msg.role,
+    parts: msg.parts,
+    metadata: msg.metadata,
+  }));
+
+  const { error } = await client
+    .from("arena_chat_messages")
+    .upsert(inserts, { onConflict: "id" });
+
+  if (error) {
+    console.error("Failed to save arena chat messages:", error);
+    throw error;
+  }
+}
+
+function mapArenaChatMessage(row: Record<string, unknown>): ArenaChatMessage {
+  return {
+    id: row.id as string,
+    role: row.role as 'user' | 'assistant',
+    parts: row.parts as UIMessage['parts'],
+    metadata: row.metadata as ArenaChatMetadata,
+  };
+}
+```
+
+---
+
+## Component Specifications
+
+### ModelChatFeed
+
+```typescript
+// components/chat/ModelChatFeed.tsx
+
+interface ModelChatFeedProps {
+  sessionId: string;  // trading_sessions.id
+  selectedModelId?: string | null;
+}
+
+export function ModelChatFeed({ sessionId, selectedModelId }: ModelChatFeedProps) {
+  const { 
+    messages, 
+    isLoading, 
+    error, 
+    sendMessage,
+    input,
+    setInput,
+  } = useChatMessages({ 
+    sessionId, 
+    mode: 'arena' 
+  });
+  
+  // Filter by model if selected
+  const filteredMessages = useMemo(() => {
+    if (!selectedModelId) return messages;
+    return messages.filter(m => 
+      m.metadata?.authorType !== 'model' || 
+      m.metadata?.authorId === selectedModelId
+    );
+  }, [messages, selectedModelId]);
+  
+  return (
+    <Card className="h-full flex flex-col">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-lg">
+          <MessageSquare className="h-5 w-5" />
+          Model Chat
+        </CardTitle>
+      </CardHeader>
+      
+      <CardContent className="flex-1 min-h-0">
+        <ScrollArea className="h-full pr-4">
+          {filteredMessages.length === 0 ? (
+            <EmptyState />
+          ) : (
+            <div className="space-y-3">
+              {filteredMessages.map(msg => (
+                <ChatMessage key={msg.id} message={msg} />
+              ))}
+            </div>
+          )}
+        </ScrollArea>
+      </CardContent>
+      
+      <CardFooter className="pt-3">
+        <ChatInput
+          value={input}
+          onChange={setInput}
+          onSend={() => {
+            if (input.trim()) {
+              sendMessage(input);
+              setInput("");
+            }
+          }}
+          disabled={isLoading}
+        />
+      </CardFooter>
+    </Card>
+  );
+}
+```
+
+### ChatMessage
+
+```typescript
+// components/chat/ChatMessage.tsx
+
+interface ChatMessageProps {
+  message: ArenaChatMessage;
+}
+
+export function ChatMessage({ message }: ChatMessageProps) {
+  const { authorType, authorId, messageType } = message.metadata ?? {};
+  
+  const isUser = authorType === 'user';
+  const isAssistant = authorType === 'assistant';
+  const isModel = authorType === 'model';
+  
+  // Get author display info
+  const author = useAuthorInfo(authorType, authorId);
+  
+  return (
+    <div className={cn("p-4 rounded-lg", {
+      "bg-muted/30": isModel,
+      "bg-primary/10 ml-8": isUser,
+      "bg-secondary/20": isAssistant,
+    })}>
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-2">
+        <div 
+          className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
+          style={{ backgroundColor: author.color || '#6366f1' }}
+        >
+          {author.name.charAt(0)}
+        </div>
+        <span className="font-medium text-sm">{author.name}</span>
+        
+        {isModel && messageType && (
+          <MessageTypeBadge type={messageType} />
+        )}
+        
+        <span className="text-xs text-muted-foreground ml-auto">
+          {formatTimeAgo(message.metadata?.createdAt)}
+        </span>
+      </div>
+      
+      {/* Content - render parts */}
+      <div className="text-sm leading-relaxed">
+        {message.parts?.map((part, i) => (
+          <MessagePart key={i} part={part} />
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+### ChatInput
+
+```typescript
+// components/chat/ChatInput.tsx
+
+interface ChatInputProps {
+  value: string;
+  onChange: (value: string) => void;
+  onSend: () => void;
+  disabled?: boolean;
+}
+
+export function ChatInput({ value, onChange, onSend, disabled }: ChatInputProps) {
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      onSend();
+    }
+  };
+  
+  return (
+    <div className="flex gap-2 w-full">
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="Ask about the models' trades..."
+        disabled={disabled}
+        maxLength={500}
+        className="flex-1"
+      />
+      <Button 
+        onClick={onSend} 
+        disabled={disabled || !value.trim()}
+        size="icon"
+      >
+        <Send className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+}
+```
+
+---
+
+## Rate Limiting
+
+> **TODO**: Implement rate limiting systematically later.
+
+Add placeholder comments in API route:
+
+```typescript
+// app/api/chat/route.ts
+
+async function handleArenaChat(...) {
+  // TODO: Implement rate limiting
+  // - Limit by IP: X requests per minute
+  // - Return 429 with Retry-After header when exceeded
+  // - Consider using Upstash Redis for serverless rate limiting
+  
+  // ... rest of handler
+}
+```
+
+---
+
+## Migration Steps
+
+### Phase 1: Database & Types
+- [ ] Add `ArenaChatMetadata` type to `types/chat.ts`
+- [ ] Create `arena_chat_messages` table in Supabase
+- [ ] Add Supabase functions to `lib/supabase/arena.ts`
+
+### Phase 2: Cache & Store
+- [ ] Rename `lib/cache/messages.ts` → `lib/cache/chat.ts`
+- [ ] Add arena cache functions
+- [ ] Simplify `store/chatStore.ts` (remove session management)
+
+### Phase 3: API & Agent
+- [ ] Add arena mode to `app/api/chat/route.ts`
+- [ ] Add arena assistant prompt to `lib/ai/agents/chatAgent.ts`
+- [ ] Test streaming response with metadata
+
+### Phase 4: Hooks
+- [ ] Add `mode: 'arena'` option to `useChatMessages.ts`
+- [ ] Update transport for arena context
+- [ ] Load messages from `arena_chat_messages`
+
+### Phase 5: Components
+- [ ] Create `components/chat/ModelChatFeed.tsx`
+- [ ] Create `components/chat/ChatMessage.tsx`
+- [ ] Create `components/chat/ChatInput.tsx`
+- [ ] Create `components/chat/index.ts`
+
+### Phase 6: Integration & Cleanup
+- [ ] Update Arena page to use `ModelChatFeed`
+- [ ] Update model agents to save broadcasts via `saveArenaChatMessage()`
+- [ ] Migrate existing broadcasts to new table (or keep both during transition)
+- [ ] Delete `components/broadcast/` directory
+- [ ] Delete `lib/arena/hooks/useBroadcasts.ts`
 
 ---
 
 ## Design Principles
 
-1. **Agent Autonomy** - Tools are permissive; agents manage their own risk logic
-2. **Minimal Validation** - Only reject malformed requests (negative quantities, invalid tickers)
-3. **No Hardcoded Limits** - Position sizes, confidence thresholds set by agent, not tools
-4. **Execution Flexibility** - Support both sync/async via parameter, not separate tools
-5. **Real-time Data** - WebSocket for prices, REST for everything else
-6. **Reference Docs** - Always consult dflow API docs when implementing endpoints
+1. **UIMessage + Metadata** - Use ai-sdk's `UIMessage` directly, custom fields in `metadata`
+2. **Full JSONB Storage** - Store `parts` and `metadata` as JSONB for simplicity and future compatibility
+3. **Trading Session Context** - No separate chat session; messages belong to trading session
+4. **Streaming for All** - Both model broadcasts and assistant responses stream
+5. **Reuse Existing Code** - Adapt `useChatMessages`, `/api/chat`, `chatAgent` rather than creating new
+6. **Simplified Client State** - Remove session management from chatStore, keep only transient UI states
+7. **LocalStorage Cache** - Keep message caching for faster page loads

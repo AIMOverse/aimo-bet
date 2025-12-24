@@ -5,8 +5,7 @@ import { DefaultChatTransport } from "ai";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { UIMessage, FileUIPart } from "ai";
 import { useChatStore } from "@/store/chatStore";
-import { useModelStore } from "@/store/modelStore";
-import { useToolStore } from "@/store/toolStore";
+import { DEFAULT_MODEL_ID } from "@/config/defaults";
 import { getCachedMessages, setCachedMessages } from "@/lib/cache/messages";
 
 interface UseChatMessagesOptions {
@@ -73,9 +72,12 @@ export function useChatMessages({
   // Ref for session update callback (avoids stale closure in fetch wrapper)
   const sessionUpdateRef = useRef<(sessionId: string) => void>(() => {});
 
-  const selectedModelId = useModelStore((s) => s.selectedModelId);
-  const { generateImageEnabled, generateVideoEnabled, webSearchEnabled } =
-    useToolStore.getState();
+  // Use default model - user selection removed
+  const selectedModelId = DEFAULT_MODEL_ID;
+  // Tools always enabled by default
+  const generateImageEnabled = true;
+  const generateVideoEnabled = true;
+  const webSearchEnabled = true;
 
   // Refs for dynamic values used in transport (read at request time, not transport creation)
   // This keeps the transport stable and prevents useAIChat from resetting
