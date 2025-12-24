@@ -5,7 +5,7 @@ import { AppHeader } from "@/components/layout/AppHeader";
 import { AppTabs } from "@/components/layout/AppTabs";
 import { PerformanceChart } from "@/components/index/PerformanceChart";
 import { TradesFeed } from "@/components/trades/TradesFeed";
-import { BroadcastFeed } from "@/components/broadcast/BroadcastFeed";
+import { ModelChatFeed } from "@/components/chat/ModelChatFeed";
 import { PositionsTable } from "@/components/positions/PositionsTable";
 import {
   generateMockChartData,
@@ -14,10 +14,12 @@ import {
 } from "@/lib/arena/mock/performance";
 import {
   generateMockTradesWithModels,
-  generateMockBroadcasts,
   generateMockPositions,
 } from "@/lib/arena/mock/trades";
 import type { ArenaTab } from "@/types/arena";
+
+// Mock session ID for development (in production, this would come from routing/state)
+const MOCK_SESSION_ID = "00000000-0000-0000-0000-000000000001";
 
 /**
  * Home page - renders the Alpha Arena trading dashboard.
@@ -30,10 +32,6 @@ export default function Home() {
   const chartData = useMemo(() => generateMockChartData(24, 30), []);
   const leaderboard = useMemo(() => generateMockLeaderboard(), []);
   const trades = useMemo(() => generateMockTradesWithModels(5), []);
-  const broadcasts = useMemo(
-    () => generateMockBroadcasts("mock-session", 20),
-    [],
-  );
   const positions = useMemo(() => generateMockPositions("mock-portfolio"), []);
   const latestValues = useMemo(
     () => getLatestModelValues(chartData),
@@ -47,8 +45,8 @@ export default function Home() {
         return <TradesFeed trades={trades} selectedModelId={selectedModelId} />;
       case "chat":
         return (
-          <BroadcastFeed
-            broadcasts={broadcasts}
+          <ModelChatFeed
+            sessionId={MOCK_SESSION_ID}
             selectedModelId={selectedModelId}
           />
         );

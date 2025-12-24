@@ -1,5 +1,13 @@
+// Performance and models
 export { usePerformance, useArenaModels } from "./usePerformance";
-export { useTrades } from "./useTrades";
-export { usePositions, useSessionPositions } from "./usePositions";
-export { useBroadcasts } from "./useBroadcasts";
+
+// Trades (dflow-based)
+export { useTrades, useSessionTrades } from "./useTrades";
+export type { DflowTrade, DflowTradeWithModel } from "./useTrades";
+
+// Positions (dflow-based)
+export { usePositions, useSessionPositions, usePortfolioPositions } from "./usePositions";
+export type { DflowPosition } from "./usePositions";
+
+// Market prices (WebSocket)
 export { useMarketPrices } from "./useMarketPrices";

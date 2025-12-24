@@ -4,6 +4,7 @@ export interface ArenaModel {
   name: string;
   provider: string;
   modelIdentifier: string;
+  walletAddress?: string;  // Public wallet address for on-chain trading
   avatarUrl?: string;
   chartColor: string;
   enabled: boolean;
@@ -162,7 +163,7 @@ export interface TradingDecision {
 export interface PredictionMarketAgentConfig {
   modelId: string;
   modelIdentifier: string;
-  portfolioId: string;
+  walletAddress: string;  // Agent's trading wallet (public address)
   sessionId: string;
 }
 

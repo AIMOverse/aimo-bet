@@ -53,6 +53,7 @@ export async function POST(req: Request) {
       name,
       provider,
       modelIdentifier,
+      walletAddress,
       avatarUrl,
       chartColor = DEFAULT_CHART_COLOR,
       enabled = true,
@@ -69,6 +70,7 @@ export async function POST(req: Request) {
       name,
       provider,
       modelIdentifier,
+      walletAddress,
       avatarUrl,
       chartColor,
       enabled,
@@ -101,12 +103,13 @@ export async function PATCH(req: Request) {
     }
 
     const body = await req.json();
-    const { name, provider, modelIdentifier, avatarUrl, chartColor, enabled } = body;
+    const { name, provider, modelIdentifier, walletAddress, avatarUrl, chartColor, enabled } = body;
 
     await updateArenaModel(id, {
       name,
       provider,
       modelIdentifier,
+      walletAddress,
       avatarUrl,
       chartColor,
       enabled,
