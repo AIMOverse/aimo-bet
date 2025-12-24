@@ -7,8 +7,40 @@ import type {
   TradingDecision,
   Trade,
   PredictionMarket,
-  PositionSide,
 } from "@/types/arena";
+
+// Import dflow trading tools
+import {
+  getMarketsTool,
+  getMarketDetailsTool,
+  getMarketPricesTool,
+  placeOrderTool,
+  getOrderStatusTool,
+  cancelOrderTool,
+  getPositionsTool,
+  getBalanceTool,
+  getTradeHistoryTool,
+} from "@/lib/ai/tools/markets";
+
+// ============================================================================
+// DFLOW TOOLS - Available for agent use with AI SDK tool-calling
+// ============================================================================
+
+/**
+ * Collection of dflow trading tools that can be used by agents via AI SDK.
+ * These tools are designed to be passed to generateText/streamText with tools option.
+ */
+export const dflowTools = {
+  getMarkets: getMarketsTool,
+  getMarketDetails: getMarketDetailsTool,
+  getMarketPrices: getMarketPricesTool,
+  placeOrder: placeOrderTool,
+  getOrderStatus: getOrderStatusTool,
+  cancelOrder: cancelOrderTool,
+  getPositions: getPositionsTool,
+  getBalance: getBalanceTool,
+  getTradeHistory: getTradeHistoryTool,
+};
 
 // ============================================================================
 // ABSTRACT BASE CLASS
@@ -199,7 +231,7 @@ export class DefaultPredictionMarketAgent extends PredictionMarketAgent {
   private async analyzeMarket(
     market: PredictionMarket,
     cashBalance: number,
-    recentTrades: Trade[]
+    _recentTrades: Trade[]
   ): Promise<MarketAnalysis> {
     const model = getModel(this.config.modelIdentifier);
 
@@ -232,7 +264,7 @@ Only suggest trading if you have strong conviction. Be conservative with positio
       const { text } = await generateText({
         model,
         prompt,
-        maxTokens: 500,
+        maxOutputTokens: 500,
       });
 
       // Parse the JSON response
@@ -305,6 +337,7 @@ Only suggest trading if you have strong conviction. Be conservative with positio
 
 /**
  * Create a prediction market agent for the given configuration.
+ * @param config - Agent configuration
  */
 export function createPredictionMarketAgent(
   config: PredictionMarketAgentConfig
