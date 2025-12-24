@@ -1,5 +1,6 @@
 import { generateText } from "ai";
 import { getModel } from "@/lib/ai/registry";
+import { nanoid } from "nanoid";
 import type {
   PredictionMarketAgentConfig,
   MarketContext,
@@ -8,6 +9,8 @@ import type {
   Trade,
   PredictionMarket,
 } from "@/types/arena";
+import type { ArenaChatMessage, ArenaChatMessageType } from "@/types/chat";
+import { saveArenaChatMessage } from "@/lib/supabase/arena";
 
 // Import dflow trading tools
 import {
@@ -83,7 +86,7 @@ export abstract class PredictionMarketAgent {
 
   /**
    * Main execution loop for the trading agent.
-   * Analyzes markets, makes decisions, and generates broadcasts.
+   * Analyzes markets, makes decisions, and generates chat messages.
    */
   async executeTradingLoop(context: MarketContext): Promise<{
     decision: TradingDecision;
@@ -96,8 +99,12 @@ export abstract class PredictionMarketAgent {
     // Step 2: Make trading decision
     const decision = await this.makeDecision(context, analyses);
 
-    // Step 3: Generate broadcast
+    // Step 3: Generate broadcast message
     const broadcast = await this.generateBroadcast(decision, context);
+
+    // Step 4: Save to arena chat (replaces old broadcast system)
+    const messageType = decision.action === "hold" ? "commentary" : "trade";
+    await this.saveChatMessage(broadcast, messageType);
 
     return { decision, broadcast, analyses };
   }
@@ -114,6 +121,32 @@ export abstract class PredictionMarketAgent {
    */
   getModelIdentifier(): string {
     return this.config.modelIdentifier;
+  }
+
+  /**
+   * Save a chat message to the arena chat.
+   * This replaces the old broadcast system.
+   */
+  async saveChatMessage(
+    content: string,
+    messageType: ArenaChatMessageType,
+    relatedTradeId?: string
+  ): Promise<void> {
+    const message: ArenaChatMessage = {
+      id: nanoid(),
+      role: "assistant", // Models use assistant role
+      parts: [{ type: "text", text: content }],
+      metadata: {
+        sessionId: this.config.sessionId,
+        authorType: "model",
+        authorId: this.config.modelId,
+        messageType,
+        relatedTradeId,
+        createdAt: Date.now(),
+      },
+    };
+
+    await saveArenaChatMessage(message);
   }
 }
 
