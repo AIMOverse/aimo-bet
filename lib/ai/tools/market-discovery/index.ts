@@ -4,4 +4,4 @@
 
 export { getMarketsTool } from "./getMarkets";
 export { getMarketDetailsTool } from "./getMarketDetails";
-export { getMarketPricesTool } from "./getMarketPrices";
+export { getLiveDataTool } from "./getLiveData";

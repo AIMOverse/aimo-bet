@@ -34,16 +34,16 @@ export function MarketTicker() {
   return (
     <div className="flex items-center gap-6 text-sm">
       {displayMarkets.map((market: MarketPrice) => (
-        <div key={market.market_ticker} className="flex items-center gap-1.5">
+        <div key={market.marketTicker} className="flex items-center gap-1.5">
           <span className="text-muted-foreground font-medium truncate max-w-32">
-            {market.market_ticker}
+            {market.marketTicker}
           </span>
           <span className="font-semibold text-green-500">
-            {market.yes_bid ?? "-"}
+            {market.yesBid ?? "-"}
           </span>
           <span className="text-muted-foreground">/</span>
           <span className="font-semibold text-red-500">
-            {market.yes_ask ?? "-"}
+            {market.yesAsk ?? "-"}
           </span>
         </div>
       ))}

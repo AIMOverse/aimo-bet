@@ -8,9 +8,7 @@ import { z } from "zod";
 export const getBalanceTool = tool({
   description: "Get available cash balance for trading.",
   inputSchema: z.object({
-    wallet: z
-      .string()
-      .describe("Wallet address to get balance for"),
+    wallet: z.string().describe("Wallet address to get balance for"),
     currency: z
       .enum(["USDC", "CASH"])
       .optional()
@@ -25,8 +23,9 @@ export const getBalanceTool = tool({
       params.set("wallet", wallet);
       params.set("currency", currency || "USDC");
 
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-      const response = await fetch(`${baseUrl}/api/dflow/balance?${params}`);
+      const baseUrl =
+        process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+      const response = await fetch(`${baseUrl}/api/solana/balance?${params}`);
 
       if (!response.ok) {
         const errorText = await response.text();

@@ -46,7 +46,9 @@ The implementation follows the architecture defined in `CLAUDE.md`, providing a 
 |----------|--------|-------------|
 | `/api/dflow/markets` | GET | List prediction markets with filtering |
 | `/api/dflow/markets/[ticker]` | GET | Get detailed market information |
-| `/api/dflow/prices` | GET | Get live bid/ask prices |
+| `/api/dflow/markets/batch` | POST | Get multiple markets by tickers/mints |
+| `/api/dflow/markets/filter-outcome-mints` | POST | Filter addresses to outcome mints |
+| `/api/dflow/live-data` | GET | Get live data by milestoneIds |
 
 ### Trading Execution
 
@@ -60,9 +62,11 @@ The implementation follows the architecture defined in `CLAUDE.md`, providing a 
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/dflow/positions` | GET | Get wallet token positions |
-| `/api/dflow/balance` | GET | Get wallet balance (USDC/CASH) |
+| `/api/solana/balance` | GET | Get wallet balance (SOL/USDC/CASH) |
 | `/api/dflow/trades` | GET | Get trade history |
+
+> **Note:** Positions are now fetched using the 3-step flow: RPC query → filter-outcome-mints → markets/batch
+> **Note:** Balance endpoint moved to `/api/solana/balance` - uses Solana RPC directly for on-chain queries
 
 ## Agent Tools
 
@@ -93,15 +97,17 @@ Get detailed information about a specific market.
 }
 ```
 
-#### `getMarketPricesTool`
-Get real-time bid/ask prices for markets.
+#### `getLiveDataTool`
+Get live market data (prices, orderbook) for specific milestones.
 
 ```typescript
 // Parameters
 {
-  tickers?: string[]  // Market tickers (empty = all markets)
+  milestoneIds: string[]  // Array of milestone IDs (max 100). Get these from market data.
 }
 ```
+
+> **Note:** Use `getMarketsTool` first to obtain milestoneIds, then call `getLiveDataTool` with those IDs.
 
 ### Trading Execution Tools
 
@@ -144,16 +150,16 @@ Cancel a pending async order.
 ### Portfolio Management Tools
 
 #### `getPositionsTool`
-Get current positions (outcome token holdings).
+Get current positions (outcome token holdings) using the 3-step flow.
 
 ```typescript
 // Parameters
 {
-  wallet: string,
-  market_tickers?: string[],
-  include_closed?: boolean  // Default: false
+  wallet: string  // Wallet address to get positions for
 }
 ```
+
+> **Note:** This tool internally uses: RPC query → filter-outcome-mints → markets/batch
 
 #### `getBalanceTool`
 Get available cash balance for trading.
@@ -252,30 +258,43 @@ See `CLAUDE.md` for the complete API documentation reference.
 app/api/dflow/
 ├── markets/
 │   ├── route.ts              # GET: list markets
-│   └── [ticker]/
-│       └── route.ts          # GET: market details
-├── prices/
-│   └── route.ts              # GET: live prices
+│   ├── [ticker]/
+│   │   └── route.ts          # GET: market details
+│   ├── batch/
+│   │   └── route.ts          # POST: get multiple markets
+│   └── filter-outcome-mints/
+│       └── route.ts          # POST: filter to outcome mints
+├── live-data/
+│   └── route.ts              # GET: live data by milestoneIds
 ├── order/
 │   ├── route.ts              # POST: place order
 │   └── [id]/
 │       └── route.ts          # GET: status, DELETE: cancel
-├── positions/
-│   └── route.ts              # GET: wallet positions
-├── balance/
-│   └── route.ts              # GET: wallet balance
 └── trades/
     └── route.ts              # GET: trade history
 
-lib/ai/tools/markets/
+app/api/solana/
+└── balance/
+    └── route.ts              # GET: wallet balance (SOL/USDC/CASH)
+
+lib/solana/
+└── client.ts                 # Solana RPC client utilities
+
+lib/ai/tools/market-discovery/
 ├── index.ts                  # Export all tools
 ├── getMarkets.ts
 ├── getMarketDetails.ts
-├── getMarketPrices.ts
+└── getLiveData.ts
+
+lib/ai/tools/trade-execution/
+├── index.ts
 ├── placeOrder.ts
 ├── getOrderStatus.ts
-├── cancelOrder.ts
-├── getPositions.ts
+└── cancelOrder.ts
+
+lib/ai/tools/portfolio-management/
+├── index.ts
+├── getPositions.ts           # Uses 3-step flow internally
 ├── getBalance.ts
 └── getTradeHistory.ts
 

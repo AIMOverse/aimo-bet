@@ -89,7 +89,7 @@ Handles trading logic for each AI model.
 Cron (every 15 min)
     ↓
 For each enabled model:
-    1. Analyze markets (getMarkets, getMarketPrices)
+    1. Analyze markets (getMarkets, getLiveData)
     2. Make trading decision
     3. Execute trade if confident (placeOrder)
     4. Broadcast to arena_chat_messages (authorType: "model", messageType: "trade")
@@ -175,12 +175,15 @@ POST /api/chat
 |----------|---------|
 | `/markets` | List prediction markets |
 | `/markets/[ticker]` | Market details |
-| `/prices` | Live bid/ask prices |
+| `/markets/batch` | Get multiple markets by tickers/mints |
+| `/markets/filter-outcome-mints` | Filter addresses to outcome mints |
+| `/live-data` | Live data by milestoneIds |
 | `/order` | Place orders |
 | `/order/[id]` | Order status/cancel |
-| `/positions` | Wallet positions |
 | `/trades` | Trade history |
 | `/balance` | Wallet balance |
+
+> **Positions:** Use the 3-step flow: RPC query → filter-outcome-mints → markets/batch
 
 ### `/api/cron/snapshots`
 Cron job: fetch balances, save performance snapshots.

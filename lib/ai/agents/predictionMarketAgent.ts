@@ -16,7 +16,7 @@ import { saveChatMessage } from "@/lib/supabase/db";
 import {
   getMarketsTool,
   getMarketDetailsTool,
-  getMarketPricesTool,
+  getLiveDataTool,
 } from "@/lib/ai/tools/market-discovery";
 import {
   placeOrderTool,
@@ -40,7 +40,7 @@ import {
 export const dflowTools = {
   getMarkets: getMarketsTool,
   getMarketDetails: getMarketDetailsTool,
-  getMarketPrices: getMarketPricesTool,
+  getLiveData: getLiveDataTool,
   placeOrder: placeOrderTool,
   getOrderStatus: getOrderStatusTool,
   cancelOrder: cancelOrderTool,

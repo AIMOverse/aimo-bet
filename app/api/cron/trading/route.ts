@@ -125,6 +125,149 @@ export async function GET(req: Request) {
 // Helper Functions
 // ============================================================================
 
+// Solana RPC endpoint
+const SOLANA_RPC_URL =
+  process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+
+// Token-2022 Program ID
+const TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+
+// Market type for batch response
+interface MarketData {
+  ticker: string;
+  title: string;
+  accounts?: {
+    yesMint?: string;
+    noMint?: string;
+  };
+}
+
+/**
+ * Fetch positions using the 3-step flow:
+ * 1. RPC query for token accounts
+ * 2. Filter to outcome mints
+ * 3. Get market details
+ */
+async function fetchPositions(
+  baseUrl: string,
+  walletAddress: string,
+): Promise<MarketContext["portfolio"]["positions"]> {
+  // Step 1: Get all token accounts from wallet
+  const rpcResponse = await fetch(SOLANA_RPC_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "getTokenAccountsByOwner",
+      params: [
+        walletAddress,
+        { programId: TOKEN_2022_PROGRAM_ID },
+        { encoding: "jsonParsed" },
+      ],
+    }),
+  });
+
+  const rpcResult = await rpcResponse.json();
+  if (rpcResult.error) {
+    console.error("[cron/trading] RPC error:", rpcResult.error);
+    return [];
+  }
+
+  const accounts = rpcResult.result?.value || [];
+  const tokenAccounts: { mint: string; amount: number }[] = [];
+
+  for (const account of accounts) {
+    const parsed = account.account?.data?.parsed?.info;
+    if (parsed) {
+      const amount = parseInt(parsed.tokenAmount?.amount || "0", 10);
+      const decimals = parsed.tokenAmount?.decimals || 0;
+      const quantity = amount / Math.pow(10, decimals);
+      if (quantity > 0) {
+        tokenAccounts.push({ mint: parsed.mint, amount: quantity });
+      }
+    }
+  }
+
+  if (tokenAccounts.length === 0) return [];
+
+  // Step 2: Filter to prediction market outcome mints
+  const filterRes = await fetch(
+    `${baseUrl}/api/dflow/markets/filter-outcome-mints`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ addresses: tokenAccounts.map((t) => t.mint) }),
+    },
+  );
+
+  if (!filterRes.ok) {
+    console.error(
+      "[cron/trading] filter-outcome-mints error:",
+      filterRes.status,
+    );
+    return [];
+  }
+
+  const filterData = await filterRes.json();
+  const outcomeMints = filterData.outcomeMints || [];
+
+  if (outcomeMints.length === 0) return [];
+
+  // Step 3: Get market details
+  const batchRes = await fetch(`${baseUrl}/api/dflow/markets/batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      mints: outcomeMints.map((m: { mint: string }) => m.mint),
+    }),
+  });
+
+  if (!batchRes.ok) {
+    console.error("[cron/trading] markets/batch error:", batchRes.status);
+    return [];
+  }
+
+  const batchData = await batchRes.json();
+  const markets = batchData.markets || [];
+
+  // Build market lookup by mint
+  const marketByMint = new Map<string, MarketData>();
+  for (const market of markets as MarketData[]) {
+    if (market.accounts?.yesMint)
+      marketByMint.set(market.accounts.yesMint, market);
+    if (market.accounts?.noMint)
+      marketByMint.set(market.accounts.noMint, market);
+  }
+
+  // Build positions
+  const tokenBalanceMap = new Map(tokenAccounts.map((t) => [t.mint, t.amount]));
+  const positions: MarketContext["portfolio"]["positions"] = [];
+
+  for (const outcomeMint of outcomeMints) {
+    const market = marketByMint.get(outcomeMint.mint);
+    const quantity = tokenBalanceMap.get(outcomeMint.mint) || 0;
+
+    // Determine YES or NO based on mint
+    const side: "yes" | "no" =
+      market?.accounts?.noMint === outcomeMint.mint ? "no" : "yes";
+
+    positions.push({
+      id: outcomeMint.mint,
+      portfolioId: "",
+      marketTicker: market?.ticker || outcomeMint.marketTicker,
+      marketTitle: market?.title || outcomeMint.marketTicker,
+      side,
+      quantity,
+      avgEntryPrice: 0, // Not available from on-chain data
+      status: "open" as const,
+      openedAt: new Date(),
+    });
+  }
+
+  return positions;
+}
+
 async function fetchMarkets(baseUrl: string): Promise<PredictionMarket[]> {
   try {
     const res = await fetch(`${baseUrl}/api/dflow/markets`);
@@ -160,7 +303,7 @@ async function buildMarketContext(
   let cashBalance = startingCapital;
   try {
     const balanceRes = await fetch(
-      `${baseUrl}/api/dflow/balance?wallet=${walletAddress}`,
+      `${baseUrl}/api/solana/balance?wallet=${walletAddress}`,
     );
     const balanceData = await balanceRes.json();
     cashBalance = parseFloat(balanceData.formatted) || startingCapital;
@@ -168,37 +311,11 @@ async function buildMarketContext(
     console.error("[cron/trading] Failed to fetch balance:", error);
   }
 
-  // Fetch positions
+  // Fetch positions using the new 3-step flow
   const positions: MarketContext["portfolio"]["positions"] = [];
   try {
-    const positionsRes = await fetch(
-      `${baseUrl}/api/dflow/positions?wallet=${walletAddress}`,
-    );
-    const positionsData = await positionsRes.json();
-    if (positionsData.positions && Array.isArray(positionsData.positions)) {
-      positions.push(
-        ...positionsData.positions.map(
-          (p: {
-            id: string;
-            market_ticker: string;
-            market_title: string;
-            outcome: string;
-            quantity: number;
-            avg_price: number;
-          }) => ({
-            id: p.id,
-            portfolioId: "",
-            marketTicker: p.market_ticker,
-            marketTitle: p.market_title,
-            side: p.outcome as "yes" | "no",
-            quantity: p.quantity,
-            avgEntryPrice: p.avg_price,
-            status: "open" as const,
-            openedAt: new Date(),
-          }),
-        ),
-      );
-    }
+    const positionsData = await fetchPositions(baseUrl, walletAddress);
+    positions.push(...positionsData);
   } catch (error) {
     console.error("[cron/trading] Failed to fetch positions:", error);
   }

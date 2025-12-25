@@ -27,7 +27,7 @@ export async function GET(
     console.log("[dflow/markets/ticker] Fetching market:", ticker);
 
     const response = await dflowMetadataFetch(
-      `/market?ticker=${encodeURIComponent(ticker)}`,
+      `/market/${encodeURIComponent(ticker)}`,
     );
 
     if (!response.ok) {

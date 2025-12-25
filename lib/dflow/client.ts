@@ -4,7 +4,7 @@
 // ============================================================================
 
 const DFLOW_METADATA_API = "https://prediction-markets-api.dflow.net/api/v1";
-const DFLOW_SWAP_API = "https://swap-api.dflow.net";
+const DFLOW_QUOTE_API = "https://quote-api.dflow.net";
 
 /**
  * Get the dflow API key from environment
@@ -23,7 +23,7 @@ function getApiKey(): string {
  */
 export async function dflowMetadataFetch(
   path: string,
-  options?: RequestInit
+  options?: RequestInit,
 ): Promise<Response> {
   const apiKey = getApiKey();
   const url = `${DFLOW_METADATA_API}${path}`;
@@ -41,17 +41,18 @@ export async function dflowMetadataFetch(
 }
 
 /**
- * Fetch from dflow Swap API with authentication
- * Used for: order, order-status
+ * Fetch from dflow Quote API with authentication
+ * Used for: order (GET quote + transaction), order-status
+ * Docs: https://pond.dflow.net/swap-api-reference/order/order
  */
-export async function dflowSwapFetch(
+export async function dflowQuoteFetch(
   path: string,
-  options?: RequestInit
+  options?: RequestInit,
 ): Promise<Response> {
   const apiKey = getApiKey();
-  const url = `${DFLOW_SWAP_API}${path}`;
+  const url = `${DFLOW_QUOTE_API}${path}`;
 
-  console.log("[dflow/client] Swap API request:", url);
+  console.log("[dflow/client] Quote API request:", url);
 
   return fetch(url, {
     ...options,

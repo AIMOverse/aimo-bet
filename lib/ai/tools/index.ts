@@ -6,7 +6,7 @@
 export {
   getMarketsTool,
   getMarketDetailsTool,
-  getMarketPricesTool,
+  getLiveDataTool,
 } from "./market-discovery";
 
 // Trade Execution - Place and manage orders

@@ -14,16 +14,20 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status") || "active";
-    const series = searchParams.get("series");
-    const category = searchParams.get("category");
     const limit = searchParams.get("limit") || "20";
+    const cursor = searchParams.get("cursor");
+    const isInitialized = searchParams.get("isInitialized");
+    const sort = searchParams.get("sort");
+    const order = searchParams.get("order");
 
     // Build query params for dflow API
     const params = new URLSearchParams();
     params.set("status", status);
-    if (series) params.set("series", series);
-    if (category) params.set("category", category);
     params.set("limit", limit);
+    if (cursor) params.set("cursor", cursor);
+    if (isInitialized) params.set("isInitialized", isInitialized);
+    if (sort) params.set("sort", sort);
+    if (order) params.set("order", order);
 
     console.log(
       "[dflow/markets] Fetching markets with params:",

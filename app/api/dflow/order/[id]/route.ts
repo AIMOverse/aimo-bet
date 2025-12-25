@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
-import { dflowSwapFetch } from "@/lib/dflow/client";
+import { dflowQuoteFetch } from "@/lib/dflow/client";
 
 // ============================================================================
-// dflow Swap API - Order Status
+// dflow Quote API - Order Status
 // Docs: https://pond.dflow.net/swap-api-reference/order/order-status
 // ============================================================================
 
 // ============================================================================
-// GET /api/dflow/order/[id] - Get order status
+// GET /api/dflow/order/[id] - Get order status by transaction signature
+// The [id] parameter is the Base58-encoded transaction signature
 // ============================================================================
 
 export async function GET(
@@ -15,92 +16,59 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { id } = await params;
+    const { id: signature } = await params;
 
-    if (!id) {
+    if (!signature) {
       return NextResponse.json(
-        { error: "Order ID is required" },
+        { error: "Transaction signature is required" },
         { status: 400 },
       );
     }
 
-    console.log("[dflow/order/id] Fetching order status:", id);
+    // Get optional lastValidBlockHeight from query params
+    const { searchParams } = new URL(req.url);
+    const lastValidBlockHeight = searchParams.get("lastValidBlockHeight");
 
-    const response = await dflowSwapFetch(
-      `/order-status?order_id=${encodeURIComponent(id)}`,
-    );
+    console.log("[dflow/order/status] Fetching order status:", { signature });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("[dflow/order/id] API error:", response.status, errorText);
-      return NextResponse.json(
-        { error: `dflow API error: ${response.status}` },
-        { status: response.status },
-      );
+    // Build query string
+    const queryParams = new URLSearchParams();
+    queryParams.set("signature", signature);
+
+    if (lastValidBlockHeight) {
+      queryParams.set("lastValidBlockHeight", lastValidBlockHeight);
     }
 
-    const data = await response.json();
-    console.log("[dflow/order/id] Order status:", data);
-
-    return NextResponse.json(data);
-  } catch (error) {
-    console.error("[dflow/order/id] Failed to fetch order status:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch order status" },
-      { status: 500 },
+    const response = await dflowQuoteFetch(
+      `/order-status?${queryParams.toString()}`,
     );
-  }
-}
-
-// ============================================================================
-// DELETE /api/dflow/order/[id] - Cancel order
-// ============================================================================
-
-export async function DELETE(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  try {
-    const { id } = await params;
-
-    if (!id) {
-      return NextResponse.json(
-        { error: "Order ID is required" },
-        { status: 400 },
-      );
-    }
-
-    console.log("[dflow/order/id] Cancelling order:", id);
-
-    const response = await dflowSwapFetch("/order", {
-      method: "DELETE",
-      body: JSON.stringify({ order_id: id }),
-    });
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error(
-        "[dflow/order/id] Cancel error:",
+        "[dflow/order/status] API error:",
         response.status,
         errorText,
       );
       return NextResponse.json(
-        { error: `dflow API error: ${response.status}` },
+        { error: `dflow Quote API error: ${response.status} - ${errorText}` },
         { status: response.status },
       );
     }
 
     const data = await response.json();
-    console.log("[dflow/order/id] Cancel result:", data);
-
-    return NextResponse.json({
-      success: true,
-      result: data,
+    console.log("[dflow/order/status] Order status:", {
+      status: data.status,
+      inAmount: data.inAmount,
+      outAmount: data.outAmount,
+      fillsCount: data.fills?.length ?? 0,
     });
+
+    return NextResponse.json(data);
   } catch (error) {
-    console.error("[dflow/order/id] Failed to cancel order:", error);
+    console.error("[dflow/order/status] Failed to fetch order status:", error);
     return NextResponse.json(
-      { error: "Failed to cancel order" },
+      { error: "Failed to fetch order status" },
       { status: 500 },
     );
   }

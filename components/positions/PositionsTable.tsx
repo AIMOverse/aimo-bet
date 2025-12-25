@@ -18,7 +18,7 @@ function PositionRow({ position }: { position: DflowPosition }) {
       {/* Market ticker and side badge */}
       <div className="flex items-start justify-between gap-2 mb-2">
         <p className="text-sm font-medium font-mono line-clamp-2 flex-1">
-          {position.market_ticker}
+          {position.marketTicker}
         </p>
         <span
           className={cn(
@@ -46,9 +46,9 @@ function PositionRow({ position }: { position: DflowPosition }) {
         )}
       </div>
 
-      {/* Wallet address (truncated) */}
+      {/* Mint address (truncated) */}
       <div className="mt-2 text-xs text-muted-foreground font-mono">
-        {position.wallet.slice(0, 4)}...{position.wallet.slice(-4)}
+        {position.mint.slice(0, 4)}...{position.mint.slice(-4)}
       </div>
     </div>
   );
@@ -98,7 +98,7 @@ export function PositionsTable({ positions }: PositionsTableProps) {
             <div className="space-y-3">
               {positions.map((position, index) => (
                 <PositionRow
-                  key={`${position.market_ticker}-${position.outcome}-${index}`}
+                  key={`${position.marketTicker}-${position.outcome}-${index}`}
                   position={position}
                 />
               ))}
