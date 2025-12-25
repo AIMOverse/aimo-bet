@@ -1,4 +1,4 @@
-import { generateText, type CoreTool, type ToolCallPart, type ToolResultPart } from "ai";
+import { generateText, stepCountIs, type StepResult, type ToolSet } from "ai";
 import { getModel } from "@/lib/ai/models";
 import { nanoid } from "nanoid";
 import type {
@@ -75,7 +75,7 @@ export class PredictionMarketAgent {
 
   /**
    * Main agentic loop - LLM autonomously decides what to do.
-   * Uses AI SDK generateText with tools and maxSteps.
+   * Uses AI SDK generateText with tools and stopWhen for multi-step reasoning.
    */
   async executeTradingLoop(
     context: MarketContext,
@@ -122,15 +122,15 @@ export class PredictionMarketAgent {
         model,
         system: this.getSystemPrompt(),
         prompt: contextPrompt,
-        tools: this.tools as Record<string, CoreTool>,
-        maxSteps: 5,
-        onStepFinish: ({ text, toolCalls, toolResults }) => {
+        tools: this.tools,
+        stopWhen: stepCountIs(5),
+        onStepFinish: (step) => {
           console.log(`[Agent:${this.config.modelId}] Step finished:`, {
-            hasText: !!text,
-            toolCallCount: toolCalls?.length ?? 0,
+            hasText: !!step.text,
+            toolCallCount: step.toolCalls?.length ?? 0,
           });
-          if (toolCalls && toolCalls.length > 0) {
-            for (const call of toolCalls) {
+          if (step.toolCalls && step.toolCalls.length > 0) {
+            for (const call of step.toolCalls) {
               console.log(`[Agent:${this.config.modelId}] Tool call: ${call.toolName}`);
             }
           }
@@ -186,21 +186,18 @@ export class PredictionMarketAgent {
    * Extract steps from the generateText result
    */
   protected extractSteps(
-    steps: Array<{
-      text: string;
-      toolCalls: ToolCallPart[];
-      toolResults: ToolResultPart[];
-    }>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    steps: Array<StepResult<any>>
   ): AgentStep[] {
     return steps.map((step, index) => ({
       stepNumber: index + 1,
       text: step.text || undefined,
       toolCalls: step.toolCalls?.map((call) => ({
         toolName: call.toolName,
-        args: call.args as Record<string, unknown>,
+        args: (call as { input?: Record<string, unknown> }).input || {},
         result: step.toolResults?.find(
           (r) => r.toolCallId === call.toolCallId
-        )?.result,
+        )?.output,
       })),
     }));
   }
@@ -209,11 +206,8 @@ export class PredictionMarketAgent {
    * Extract executed trades from step results.
    */
   protected extractTradesFromSteps(
-    steps: Array<{
-      text: string;
-      toolCalls: ToolCallPart[];
-      toolResults: ToolResultPart[];
-    }>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    steps: Array<StepResult<any>>
   ): Trade[] {
     const trades: Trade[] = [];
 
@@ -226,12 +220,13 @@ export class PredictionMarketAgent {
           const resultPart = step.toolResults.find(
             (r) => r.toolCallId === call.toolCallId
           );
-          const result = resultPart?.result as
+          const result = resultPart?.output as
             | { success: boolean; order?: { id: string; price?: number }; quantity?: number }
             | undefined;
 
           if (result?.success) {
-            const args = call.args as {
+            const input = (call as { input?: Record<string, unknown> }).input || {};
+            const args = input as {
               market_ticker: string;
               side: PositionSide;
               action: TradeAction;
