@@ -23,6 +23,7 @@ export const MODELS: ModelDefinition[] = [
     outputModalities: ["text"],
     // Arena config
     chartColor: "#10b981", // Emerald
+    walletAddress: process.env.WALLET_GPT4O_PUBLIC,
     enabled: true,
   },
   // GPT-4o Mini
@@ -38,6 +39,7 @@ export const MODELS: ModelDefinition[] = [
     outputModalities: ["text"],
     // Arena config
     chartColor: "#22c55e", // Green
+    walletAddress: process.env.WALLET_GPT4O_MINI_PUBLIC,
     enabled: true,
   },
   // Claude Sonnet 4
@@ -53,6 +55,7 @@ export const MODELS: ModelDefinition[] = [
     outputModalities: ["text"],
     // Arena config
     chartColor: "#f97316", // Orange
+    walletAddress: process.env.WALLET_CLAUDE_SONNET_PUBLIC,
     enabled: true,
   },
   // Claude 3.5 Haiku
@@ -68,6 +71,7 @@ export const MODELS: ModelDefinition[] = [
     outputModalities: ["text"],
     // Arena config
     chartColor: "#fb923c", // Amber
+    walletAddress: process.env.WALLET_CLAUDE_HAIKU_PUBLIC,
     enabled: true,
   },
   // Gemini 2.0 Flash
@@ -83,6 +87,7 @@ export const MODELS: ModelDefinition[] = [
     outputModalities: ["text"],
     // Arena config
     chartColor: "#3b82f6", // Blue
+    walletAddress: process.env.WALLET_GEMINI_FLASH_PUBLIC,
     enabled: true,
   },
   // DeepSeek Chat
@@ -98,6 +103,7 @@ export const MODELS: ModelDefinition[] = [
     outputModalities: ["text"],
     // Arena config
     chartColor: "#8b5cf6", // Violet
+    walletAddress: process.env.WALLET_DEEPSEEK_PUBLIC,
     enabled: true,
   },
   // Llama 3.3 70B
@@ -113,6 +119,7 @@ export const MODELS: ModelDefinition[] = [
     outputModalities: ["text"],
     // Arena config
     chartColor: "#ec4899", // Pink
+    walletAddress: process.env.WALLET_LLAMA_PUBLIC,
     enabled: true,
   },
   // Mistral Large
@@ -128,6 +135,7 @@ export const MODELS: ModelDefinition[] = [
     outputModalities: ["text"],
     // Arena config
     chartColor: "#06b6d4", // Cyan
+    walletAddress: process.env.WALLET_MISTRAL_PUBLIC,
     enabled: true,
   },
 ];
@@ -207,4 +215,27 @@ export function getModelColorMap(): Map<string, string> {
  */
 export function getModelsWithWallets(): ModelDefinition[] {
   return MODELS.filter((m) => m.enabled && m.walletAddress);
+}
+
+/**
+ * Wallet private key environment variable mapping.
+ * Maps model ID to corresponding private key env var.
+ */
+const WALLET_PRIVATE_KEY_MAP: Record<string, string | undefined> = {
+  "openrouter/gpt-4o": process.env.WALLET_GPT4O_PRIVATE,
+  "openrouter/gpt-4o-mini": process.env.WALLET_GPT4O_MINI_PRIVATE,
+  "openrouter/claude-sonnet-4": process.env.WALLET_CLAUDE_SONNET_PRIVATE,
+  "openrouter/claude-3.5-haiku": process.env.WALLET_CLAUDE_HAIKU_PRIVATE,
+  "openrouter/gemini-2.0-flash": process.env.WALLET_GEMINI_FLASH_PRIVATE,
+  "openrouter/deepseek-chat": process.env.WALLET_DEEPSEEK_PRIVATE,
+  "openrouter/llama-3.3-70b": process.env.WALLET_LLAMA_PRIVATE,
+  "openrouter/mistral-large": process.env.WALLET_MISTRAL_PRIVATE,
+};
+
+/**
+ * Get wallet private key for a model (for transaction signing).
+ * Private keys are stored in environment variables and never exposed to client.
+ */
+export function getWalletPrivateKey(modelId: string): string | undefined {
+  return WALLET_PRIVATE_KEY_MAP[modelId];
 }

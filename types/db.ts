@@ -164,6 +164,7 @@ export interface PredictionMarketAgentConfig {
   modelId: string;
   modelIdentifier: string;
   walletAddress: string;  // Agent's trading wallet (public address)
+  walletPrivateKey?: string;  // Private key for signing transactions (server-side only)
   sessionId: string;
 }
 

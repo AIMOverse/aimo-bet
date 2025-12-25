@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 import { getGlobalSession } from "@/lib/supabase/db";
-import { MODELS } from "@/lib/ai/models/catalog";
+import { getModelsWithWallets, getWalletPrivateKey } from "@/lib/ai/models/catalog";
 import {
-  createPredictionMarketAgent,
-  type PredictionMarketAgent,
+  PredictionMarketAgent,
+  type PriceSwing,
 } from "@/lib/ai/agents/predictionMarketAgent";
+import {
+  syncPricesAndDetectSwings,
+  type MarketPrice,
+} from "@/lib/supabase/prices";
+import { TRADING_CONFIG } from "@/lib/config";
 import type {
   MarketContext,
   PredictionMarket,
@@ -14,7 +19,7 @@ import type {
 
 // ============================================================================
 // Cron Job: Run Trading Loop for Each Model
-// Triggered by Vercel Cron every 15 minutes
+// Triggered by Vercel Cron every 1 minute (requires Pro plan)
 // ============================================================================
 
 export async function GET(req: Request) {
@@ -28,46 +33,74 @@ export async function GET(req: Request) {
   try {
     console.log("[cron/trading] Starting trading cron job");
 
-    // Get the global session
-    const session = await getGlobalSession();
-    console.log(`[cron/trading] Using session: ${session.id}`);
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
 
-    // Get all enabled models with wallet addresses
-    const enabledModels = MODELS.filter((m) => m.enabled && m.walletAddress);
+    // 1. Fetch current prices from dflow
+    const markets = await fetchMarkets(baseUrl);
+    if (markets.length === 0) {
+      console.log("[cron/trading] No markets available");
+      return NextResponse.json({
+        message: "No markets available",
+        swings: 0,
+        modelsRun: 0,
+      });
+    }
 
+    // Convert to MarketPrice format for swing detection
+    const currentPrices: MarketPrice[] = markets.map((m) => ({
+      ticker: m.ticker,
+      yes_bid: m.yesPrice,
+      yes_ask: m.yesPrice,
+      no_bid: m.noPrice,
+      no_ask: m.noPrice,
+    }));
+
+    // 2. Sync prices and detect swings
+    const swings = await syncPricesAndDetectSwings(
+      currentPrices,
+      TRADING_CONFIG.swingThreshold
+    );
+
+    console.log(`[cron/trading] Detected ${swings.length} price swings`);
+
+    // 3. If no significant swings, skip agent runs (save cost)
+    if (swings.length === 0) {
+      return NextResponse.json({
+        message: "No significant price movements",
+        swings: 0,
+        modelsRun: 0,
+      });
+    }
+
+    // 4. Get models with wallets configured
+    const enabledModels = getModelsWithWallets();
     if (enabledModels.length === 0) {
       console.log("[cron/trading] No enabled models with wallets");
       return NextResponse.json({
-        message: "No enabled models with wallets",
-        count: 0,
+        message: "No models with wallets configured",
+        swings: swings.length,
+        modelsRun: 0,
       });
     }
 
     console.log(`[cron/trading] Processing ${enabledModels.length} models`);
 
-    // Fetch available markets
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
-    const markets = await fetchMarkets(baseUrl);
+    // 5. Get global session
+    const session = await getGlobalSession();
+    console.log(`[cron/trading] Using session: ${session.id}`);
 
-    if (markets.length === 0) {
-      console.log("[cron/trading] No markets available");
-      return NextResponse.json({
-        message: "No markets available",
-        count: 0,
-      });
-    }
-
-    // Run trading loop for each model
+    // 6. Run agent for each model
     const results = await Promise.allSettled(
       enabledModels.map(async (model) => {
         try {
           console.log(`[cron/trading] Processing model: ${model.name}`);
 
-          // Create agent for this model
-          const agent = createPredictionMarketAgent({
+          // Create agent with wallet context
+          const agent = new PredictionMarketAgent({
             modelId: model.id,
             modelIdentifier: model.id,
             walletAddress: model.walletAddress!,
+            walletPrivateKey: getWalletPrivateKey(model.id),
             sessionId: session.id,
           });
 
@@ -76,26 +109,27 @@ export async function GET(req: Request) {
             baseUrl,
             model.walletAddress!,
             markets,
-            session.startingCapital,
+            session.startingCapital
           );
 
-          // Execute trading loop
-          const result = await agent.executeTradingLoop(context);
+          // Execute agentic trading loop with swing info
+          const result = await agent.executeTradingLoop(context, swings);
 
           console.log(
-            `[cron/trading] Model ${model.name} decision: ${result.decision.action}`,
+            `[cron/trading] Model ${model.name} completed. Trades: ${result.trades.length}`
           );
 
           return {
             modelId: model.id,
-            decision: result.decision,
-            broadcast: result.broadcast,
+            reasoning: result.reasoning,
+            trades: result.trades.length,
+            steps: result.steps.length,
           };
         } catch (error) {
           console.error(`[cron/trading] Error for model ${model.id}:`, error);
           throw error;
         }
-      }),
+      })
     );
 
     // Count successes and failures
@@ -103,12 +137,14 @@ export async function GET(req: Request) {
     const failures = results.filter((r) => r.status === "rejected").length;
 
     console.log(
-      `[cron/trading] Completed: ${successes} successes, ${failures} failures`,
+      `[cron/trading] Completed: ${successes} successes, ${failures} failures`
     );
 
     return NextResponse.json({
       success: true,
-      modelsProcessed: successes,
+      swings: swings.length,
+      modelsRun: enabledModels.length,
+      successes,
       failures,
       timestamp: new Date().toISOString(),
     });
@@ -116,7 +152,7 @@ export async function GET(req: Request) {
     console.error("[cron/trading] Trading cron failed:", error);
     return NextResponse.json(
       { error: "Failed to run trading cron" },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
@@ -150,7 +186,7 @@ interface MarketData {
  */
 async function fetchPositions(
   baseUrl: string,
-  walletAddress: string,
+  walletAddress: string
 ): Promise<MarketContext["portfolio"]["positions"]> {
   // Step 1: Get all token accounts from wallet
   const rpcResponse = await fetch(SOLANA_RPC_URL, {
@@ -198,13 +234,13 @@ async function fetchPositions(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ addresses: tokenAccounts.map((t) => t.mint) }),
-    },
+    }
   );
 
   if (!filterRes.ok) {
     console.error(
       "[cron/trading] filter-outcome-mints error:",
-      filterRes.status,
+      filterRes.status
     );
     return [];
   }
@@ -297,13 +333,13 @@ async function buildMarketContext(
   baseUrl: string,
   walletAddress: string,
   availableMarkets: PredictionMarket[],
-  startingCapital: number,
+  startingCapital: number
 ): Promise<MarketContext> {
   // Fetch balance
   let cashBalance = startingCapital;
   try {
     const balanceRes = await fetch(
-      `${baseUrl}/api/solana/balance?wallet=${walletAddress}`,
+      `${baseUrl}/api/solana/balance?wallet=${walletAddress}`
     );
     const balanceData = await balanceRes.json();
     cashBalance = parseFloat(balanceData.formatted) || startingCapital;
@@ -324,7 +360,7 @@ async function buildMarketContext(
   const recentTrades: Trade[] = [];
   try {
     const tradesRes = await fetch(
-      `${baseUrl}/api/dflow/trades?wallet=${walletAddress}&limit=10`,
+      `${baseUrl}/api/dflow/trades?wallet=${walletAddress}&limit=10`
     );
     const tradesData = await tradesRes.json();
     if (tradesData.trades && Array.isArray(tradesData.trades)) {
@@ -349,8 +385,8 @@ async function buildMarketContext(
             price: t.price,
             notional: t.quantity * t.price,
             createdAt: new Date(t.created_at),
-          }),
-        ),
+          })
+        )
       );
     }
   } catch (error) {
