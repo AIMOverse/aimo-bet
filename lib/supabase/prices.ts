@@ -48,7 +48,8 @@ export async function getStoredPrices(): Promise<Map<string, StoredPrice>> {
     return new Map();
   }
 
-  const { data, error } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any)
     .from("market_prices")
     .select("ticker, yes_bid, yes_ask, no_bid, no_ask, updated_at");
 
@@ -57,7 +58,7 @@ export async function getStoredPrices(): Promise<Map<string, StoredPrice>> {
     return new Map();
   }
 
-  return new Map((data || []).map((p) => [p.ticker, p as StoredPrice]));
+  return new Map((data || []).map((p: StoredPrice) => [p.ticker, p]));
 }
 
 /**
@@ -82,7 +83,9 @@ export async function updateStoredPrices(
     updated_at: now,
   }));
 
-  const { error } = await supabase
+  // Note: market_prices table needs to be created in database
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (supabase as any)
     .from("market_prices")
     .upsert(records, { onConflict: "ticker" });
 
@@ -107,7 +110,8 @@ export async function savePriceHistory(prices: MarketPrice[]): Promise<void> {
     recorded_at: now,
   }));
 
-  const { error } = await supabase.from("market_price_history").insert(records);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (supabase as any).from("market_price_history").insert(records);
 
   if (error) {
     console.error("[prices] Failed to save price history:", error);
@@ -206,7 +210,8 @@ export async function cleanupPriceHistory(): Promise<void> {
 
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-  const { error } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (supabase as any)
     .from("market_price_history")
     .delete()
     .lt("recorded_at", cutoff);

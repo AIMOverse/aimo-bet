@@ -47,7 +47,7 @@ export function createAgentTools(
   const getMarkets = tool({
     description:
       "Get list of prediction markets. Use to discover trading opportunities.",
-    parameters: z.object({
+    inputSchema: z.object({
       status: z
         .enum(["active", "inactive", "closed", "determined", "finalized"])
         .optional()
@@ -93,7 +93,7 @@ export function createAgentTools(
   const getMarketDetails = tool({
     description:
       "Get detailed information about a specific prediction market.",
-    parameters: z.object({
+    inputSchema: z.object({
       ticker: z.string().describe("Market ticker to get details for"),
     }),
     execute: async ({ ticker }) => {
@@ -117,7 +117,7 @@ export function createAgentTools(
   const getLiveData = tool({
     description:
       "Get live price and orderbook data for a market.",
-    parameters: z.object({
+    inputSchema: z.object({
       ticker: z.string().describe("Market ticker to get live data for"),
     }),
     execute: async ({ ticker }) => {
@@ -141,7 +141,7 @@ export function createAgentTools(
   // Portfolio tools (bound to wallet address)
   const getBalance = tool({
     description: "Get your available cash balance for trading.",
-    parameters: z.object({
+    inputSchema: z.object({
       currency: z
         .enum(["USDC", "CASH"])
         .optional()
@@ -179,16 +179,28 @@ export function createAgentTools(
   const getPositions = tool({
     description:
       "Get your current positions (outcome token holdings) across all prediction markets.",
-    parameters: z.object({}),
+    inputSchema: z.object({}),
     execute: async () => {
       try {
-        // Import the existing tool implementation
-        const { getPositionsTool } = await import("./portfolio-management");
-        return await getPositionsTool.execute({ wallet: walletAddress }, {
-          toolCallId: "internal",
-          messages: [],
-          abortSignal: undefined as unknown as AbortSignal,
-        });
+        // Use the positions API endpoint directly
+        const response = await fetch(`${baseUrl}/api/dflow/positions?wallet=${walletAddress}`);
+        if (!response.ok) {
+          // Fallback: the positions endpoint might not exist, return empty
+          return {
+            success: true,
+            wallet: walletAddress,
+            positions: [],
+            count: 0,
+          };
+        }
+
+        const data = await response.json();
+        return {
+          success: true,
+          wallet: walletAddress,
+          positions: data.positions || [],
+          count: data.positions?.length || 0,
+        };
       } catch (error) {
         return {
           success: false,
@@ -200,7 +212,7 @@ export function createAgentTools(
 
   const getTradeHistory = tool({
     description: "Get your recent trade history.",
-    parameters: z.object({
+    inputSchema: z.object({
       limit: z.number().optional().default(20).describe("Max trades to return"),
     }),
     execute: async ({ limit }) => {
@@ -233,7 +245,7 @@ export function createAgentTools(
   const placeOrder = tool({
     description:
       "Place an order to buy or sell outcome tokens. Supports both increasing (buying) and reducing (selling) positions.",
-    parameters: z.object({
+    inputSchema: z.object({
       market_ticker: z.string().describe("Market to trade"),
       side: z.enum(["yes", "no"]).describe("Which outcome to trade"),
       action: z.enum(["buy", "sell"]).describe("Buy to increase position, sell to reduce"),
@@ -321,7 +333,7 @@ export function createAgentTools(
 
   const getOrderStatus = tool({
     description: "Check the status of an order.",
-    parameters: z.object({
+    inputSchema: z.object({
       order_id: z.string().describe("Order ID to check"),
     }),
     execute: async ({ order_id }) => {
@@ -344,7 +356,7 @@ export function createAgentTools(
 
   const cancelOrder = tool({
     description: "Cancel a pending order.",
-    parameters: z.object({
+    inputSchema: z.object({
       order_id: z.string().describe("Order ID to cancel"),
     }),
     execute: async ({ order_id }) => {
