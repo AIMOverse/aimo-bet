@@ -7,30 +7,19 @@ import {
 } from "ai";
 import { chatAgent } from "@/lib/ai/agents";
 import {
-  saveChat,
-  loadMessages,
-  generateSessionId,
-} from "@/lib/supabase/messages";
-import {
+  getGlobalSession,
   getArenaChatMessages,
   saveArenaChatMessage,
 } from "@/lib/supabase/arena";
-import type { ArenaChatMessage, ArenaChatMetadata } from "@/types/chat";
+import type { ArenaChatMessage } from "@/types/chat";
 
 // ============================================================================
 // Types
 // ============================================================================
 
-type ChatMode = "user-chat" | "arena";
-
 interface ChatRequest {
   message: UIMessage;
-  sessionId: string | null;
-  mode?: ChatMode;
-  model?: string;
-  tools?: {
-    webSearch?: boolean;
-  };
+  sessionId?: string | null;
 }
 
 // ============================================================================
@@ -39,13 +28,7 @@ interface ChatRequest {
 
 export async function POST(req: Request) {
   try {
-    const {
-      message,
-      sessionId,
-      mode = "user-chat",
-      model = "openrouter/gpt-4o",
-      tools = {},
-    }: ChatRequest = await req.json();
+    const { message, sessionId }: ChatRequest = await req.json();
 
     // Validate message
     if (!message) {
@@ -63,12 +46,89 @@ export async function POST(req: Request) {
       });
     }
 
-    // Route to appropriate handler based on mode
-    if (mode === "arena") {
-      return handleArenaChat(req, message, sessionId);
+    // Get session - use global session if none provided
+    let finalSessionId = sessionId;
+    if (!finalSessionId) {
+      const globalSession = await getGlobalSession();
+      finalSessionId = globalSession.id;
     }
 
-    return handleUserChat(message, sessionId, model, tools);
+    // Validate UUID format
+    const isValidUUID =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        finalSessionId,
+      );
+    if (!isValidUUID) {
+      return new Response(
+        JSON.stringify({ error: "Invalid session ID format" }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    // Get visitor ID from request
+    const visitorId = getVisitorId(req);
+
+    // Load recent arena messages for context
+    const previousMessages = await getArenaChatMessages(finalSessionId, 50);
+
+    // Create user message with metadata
+    const userMessage: ArenaChatMessage = {
+      ...message,
+      metadata: {
+        sessionId: finalSessionId,
+        authorType: "user",
+        authorId: visitorId,
+        messageType: "user",
+        createdAt: Date.now(),
+      },
+    };
+
+    // Save user message
+    await saveArenaChatMessage(userMessage);
+
+    const uiMessages = [...previousMessages, userMessage];
+
+    const generateMessageId = createIdGenerator({
+      prefix: "arena-msg",
+      size: 16,
+    });
+
+    // Create the stream
+    const stream = createUIMessageStream({
+      generateId: generateMessageId,
+      execute: async ({ writer }) => {
+        // Stream response from agent
+        const agentStream = await createAgentUIStream({
+          agent: chatAgent,
+          uiMessages,
+          options: {},
+        });
+
+        writer.merge(agentStream);
+      },
+      onFinish: async ({ messages: responseMessages }) => {
+        try {
+          // Save assistant response messages with metadata
+          for (const msg of responseMessages) {
+            const arenaMessage: ArenaChatMessage = {
+              ...msg,
+              metadata: {
+                sessionId: finalSessionId,
+                authorType: "assistant",
+                authorId: "assistant",
+                messageType: "assistant",
+                createdAt: Date.now(),
+              },
+            };
+            await saveArenaChatMessage(arenaMessage);
+          }
+        } catch (error) {
+          console.error("Failed to save arena chat:", error);
+        }
+      },
+    });
+
+    return createUIMessageStreamResponse({ stream });
   } catch (error) {
     console.error("Chat API error:", error);
     if (error instanceof Error) {
@@ -91,187 +151,6 @@ export async function POST(req: Request) {
       { status: 500, headers: { "Content-Type": "application/json" } },
     );
   }
-}
-
-// ============================================================================
-// User Chat Handler
-// ============================================================================
-
-async function handleUserChat(
-  message: UIMessage,
-  sessionId: string | null,
-  model: string,
-  tools: ChatRequest["tools"],
-) {
-  // Server generates session ID for new chats (single source of truth)
-  const finalSessionId = sessionId ?? generateSessionId();
-  const isNewSession = sessionId === null;
-
-  // Validate UUID format
-  const isValidUUID =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-      finalSessionId,
-    );
-  if (!isValidUUID) {
-    return new Response(
-      JSON.stringify({ error: "Invalid session ID format" }),
-      { status: 400, headers: { "Content-Type": "application/json" } },
-    );
-  }
-
-  // Load previous messages from DB and append new message
-  const previousMessages = sessionId ? await loadMessages(sessionId) : [];
-  const uiMessages = [...previousMessages, message];
-
-  const generateMessageId = createIdGenerator({
-    prefix: "msg",
-    size: 16,
-  });
-
-  // Create the stream - session ID is sent via X-Session-Id header
-  const stream = createUIMessageStream({
-    generateId: generateMessageId,
-    execute: async ({ writer }) => {
-      // Stream response from agent
-      const agentStream = await createAgentUIStream({
-        agent: chatAgent,
-        uiMessages,
-        options: {
-          model,
-          mode: "user-chat",
-          tools: {
-            webSearch: tools?.webSearch ?? false,
-          },
-        },
-      });
-
-      // Pipe agent stream to the writer
-      writer.merge(agentStream);
-    },
-    onFinish: async ({ messages: responseMessages }) => {
-      try {
-        // Combine user messages with AI response messages
-        const allMessages = [...uiMessages, ...responseMessages];
-        await saveChat({
-          sessionId: finalSessionId,
-          messages: allMessages,
-          modelId: model,
-        });
-      } catch (error) {
-        console.error("Failed to save chat:", error);
-      }
-    },
-  });
-
-  // Return the stream as a proper SSE response
-  // Include session ID in header for new sessions (more reliable than transient data)
-  return createUIMessageStreamResponse({
-    stream,
-    headers: isNewSession ? { "X-Session-Id": finalSessionId } : undefined,
-  });
-}
-
-// ============================================================================
-// Arena Chat Handler
-// ============================================================================
-
-async function handleArenaChat(
-  req: Request,
-  message: UIMessage,
-  sessionId: string | null,
-) {
-  // Arena mode requires a trading session ID
-  if (!sessionId) {
-    return new Response(
-      JSON.stringify({
-        error: "Trading session ID is required for arena mode",
-      }),
-      { status: 400, headers: { "Content-Type": "application/json" } },
-    );
-  }
-
-  // Validate UUID format
-  const isValidUUID =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-      sessionId,
-    );
-  if (!isValidUUID) {
-    return new Response(
-      JSON.stringify({ error: "Invalid trading session ID format" }),
-      { status: 400, headers: { "Content-Type": "application/json" } },
-    );
-  }
-
-  // Get visitor ID from request (for user identification)
-  const visitorId = getVisitorId(req);
-
-  // Load recent arena messages for context
-  const previousMessages = await getArenaChatMessages(sessionId, 50);
-
-  // Create user message with metadata
-  const userMessage: ArenaChatMessage = {
-    ...message,
-    metadata: {
-      sessionId,
-      authorType: "user",
-      authorId: visitorId,
-      messageType: "user",
-      createdAt: Date.now(),
-    },
-  };
-
-  // Save user message
-  await saveArenaChatMessage(userMessage);
-
-  const uiMessages = [...previousMessages, userMessage];
-
-  const generateMessageId = createIdGenerator({
-    prefix: "arena-msg",
-    size: 16,
-  });
-
-  // Create the stream
-  const stream = createUIMessageStream({
-    generateId: generateMessageId,
-    execute: async ({ writer }) => {
-      // Stream response from agent in arena mode
-      const agentStream = await createAgentUIStream({
-        agent: chatAgent,
-        uiMessages,
-        options: {
-          mode: "arena",
-          model: "openrouter/gpt-4o-mini",
-          tools: {
-            webSearch: false,
-          },
-        },
-      });
-
-      writer.merge(agentStream);
-    },
-    onFinish: async ({ messages: responseMessages }) => {
-      try {
-        // Save assistant response messages with metadata
-        for (const msg of responseMessages) {
-          const arenaMessage: ArenaChatMessage = {
-            ...msg,
-            metadata: {
-              sessionId,
-              authorType: "assistant",
-              authorId: "assistant",
-              messageType: "assistant",
-              createdAt: Date.now(),
-            },
-          };
-          await saveArenaChatMessage(arenaMessage);
-        }
-      } catch (error) {
-        console.error("Failed to save arena chat:", error);
-      }
-    },
-  });
-
-  return createUIMessageStreamResponse({ stream });
 }
 
 // ============================================================================
