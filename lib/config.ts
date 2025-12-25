@@ -73,3 +73,24 @@ export const BROADCAST_FEED_CONFIG = {
   pageSize: 20,
   maxItems: 50,
 } as const;
+
+// =============================================================================
+// Trading Configuration
+// =============================================================================
+
+/** Configuration for autonomous trading loop */
+export const TRADING_CONFIG = {
+  // Swing detection thresholds
+  swingThreshold: 0.05, // 5% price change triggers agents
+  lookbackMinutes: 5, // Compare to price N minutes ago
+
+  // Agent execution
+  maxStepsPerAgent: 5, // Max tool calls per agent run
+
+  // Risk limits (enforced in prompt, can add code checks)
+  maxPositionPercent: 0.2, // Max 20% of portfolio per position
+  minConfidence: 0.7, // Only trade with 70%+ conviction
+
+  // Cooldowns
+  minTimeBetweenRuns: 60, // Seconds between cron runs
+} as const;

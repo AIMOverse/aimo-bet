@@ -1,144 +1,277 @@
-import { generateText } from "ai";
+import { generateText, type CoreTool, type ToolCallPart, type ToolResultPart } from "ai";
 import { getModel } from "@/lib/ai/models";
 import { nanoid } from "nanoid";
 import type {
   PredictionMarketAgentConfig,
   MarketContext,
-  MarketAnalysis,
-  TradingDecision,
   Trade,
-  PredictionMarket,
+  PositionSide,
+  TradeAction,
 } from "@/types/db";
 import type { ChatMessage, ChatMessageType } from "@/types/chat";
 import { saveChatMessage } from "@/lib/supabase/db";
-
-// Import dflow trading tools
+import { createAgentTools, type AgentTools } from "@/lib/ai/tools";
 import {
-  getMarketsTool,
-  getMarketDetailsTool,
-  getLiveDataTool,
-} from "@/lib/ai/tools/market-discovery";
-import {
-  placeOrderTool,
-  getOrderStatusTool,
-  cancelOrderTool,
-} from "@/lib/ai/tools/trade-execution";
-import {
-  getPositionsTool,
-  getBalanceTool,
-  getTradeHistoryTool,
-} from "@/lib/ai/tools/portfolio-management";
+  TRADING_SYSTEM_PROMPT,
+  buildContextPrompt,
+} from "./prompts/tradingPrompt";
 
 // ============================================================================
-// DFLOW TOOLS - Available for agent use with AI SDK tool-calling
+// Types
 // ============================================================================
 
 /**
- * Collection of dflow trading tools that can be used by agents via AI SDK.
- * These tools are designed to be passed to generateText/streamText with tools option.
+ * Result from executing the trading loop
  */
-export const dflowTools = {
-  getMarkets: getMarketsTool,
-  getMarketDetails: getMarketDetailsTool,
-  getLiveData: getLiveDataTool,
-  placeOrder: placeOrderTool,
-  getOrderStatus: getOrderStatusTool,
-  cancelOrder: cancelOrderTool,
-  getPositions: getPositionsTool,
-  getBalance: getBalanceTool,
-  getTradeHistory: getTradeHistoryTool,
-};
+export interface AgentExecutionResult {
+  reasoning: string;
+  trades: Trade[];
+  steps: AgentStep[];
+}
+
+/**
+ * A step in the agent's execution
+ */
+export interface AgentStep {
+  stepNumber: number;
+  text?: string;
+  toolCalls?: Array<{
+    toolName: string;
+    args: Record<string, unknown>;
+    result?: unknown;
+  }>;
+}
+
+/**
+ * Price swing information
+ */
+export interface PriceSwing {
+  ticker: string;
+  previousPrice: number;
+  currentPrice: number;
+  changePercent: number;
+}
 
 // ============================================================================
-// ABSTRACT BASE CLASS
+// PREDICTION MARKET AGENT
 // ============================================================================
 
 /**
- * Abstract base class for prediction market trading agents.
- * Extend this class to create custom trading strategies.
+ * Prediction market trading agent using AI SDK agentic loop.
+ * Instantiated per model, encapsulates wallet and session context.
  */
-export abstract class PredictionMarketAgent {
+export class PredictionMarketAgent {
   protected config: PredictionMarketAgentConfig;
+  protected tools: AgentTools;
 
   constructor(config: PredictionMarketAgentConfig) {
     this.config = config;
+    // Create tools with wallet context injected
+    this.tools = createAgentTools(
+      config.walletAddress,
+      config.walletPrivateKey
+    );
   }
 
   /**
-   * Analyze available markets and return analysis for each.
-   * Override this method to implement custom market analysis.
+   * Main agentic loop - LLM autonomously decides what to do.
+   * Uses AI SDK generateText with tools and maxSteps.
    */
-  abstract analyzeMarkets(context: MarketContext): Promise<MarketAnalysis[]>;
-
-  /**
-   * Make a trading decision based on market analysis.
-   * Override this method to implement custom decision logic.
-   */
-  abstract makeDecision(
+  async executeTradingLoop(
     context: MarketContext,
-    analyses: MarketAnalysis[],
-  ): Promise<TradingDecision>;
+    priceSwings?: PriceSwing[]
+  ): Promise<AgentExecutionResult> {
+    const model = getModel(this.config.modelIdentifier);
 
-  /**
-   * Generate a broadcast message explaining the decision.
-   * Override this method to customize broadcast content.
-   */
-  abstract generateBroadcast(
-    decision: TradingDecision,
-    context: MarketContext,
-  ): Promise<string>;
+    console.log(
+      `[Agent:${this.config.modelId}] Starting trading loop with ${context.availableMarkets.length} markets`
+    );
 
-  /**
-   * Main execution loop for the trading agent.
-   * Analyzes markets, makes decisions, and generates chat messages.
-   */
-  async executeTradingLoop(context: MarketContext): Promise<{
-    decision: TradingDecision;
-    broadcast: string;
-    analyses: MarketAnalysis[];
-  }> {
-    // Step 1: Analyze markets
-    const analyses = await this.analyzeMarkets(context);
+    // Build context for the prompt
+    const contextPrompt = buildContextPrompt({
+      availableMarkets: context.availableMarkets.map((m) => ({
+        ticker: m.ticker,
+        title: m.title,
+        yesPrice: m.yesPrice,
+        noPrice: m.noPrice,
+        volume: m.volume,
+        status: m.status,
+      })),
+      portfolio: {
+        cashBalance: context.portfolio.cashBalance,
+        totalValue: context.portfolio.totalValue,
+        positions: context.portfolio.positions.map((p) => ({
+          marketTicker: p.marketTicker,
+          marketTitle: p.marketTitle,
+          side: p.side,
+          quantity: p.quantity,
+        })),
+      },
+      recentTrades: context.recentTrades.map((t) => ({
+        marketTicker: t.marketTicker,
+        side: t.side,
+        action: t.action,
+        quantity: t.quantity,
+        price: t.price,
+      })),
+      priceSwings,
+    });
 
-    // Step 2: Make trading decision
-    const decision = await this.makeDecision(context, analyses);
+    try {
+      const result = await generateText({
+        model,
+        system: this.getSystemPrompt(),
+        prompt: contextPrompt,
+        tools: this.tools as Record<string, CoreTool>,
+        maxSteps: 5,
+        onStepFinish: ({ text, toolCalls, toolResults }) => {
+          console.log(`[Agent:${this.config.modelId}] Step finished:`, {
+            hasText: !!text,
+            toolCallCount: toolCalls?.length ?? 0,
+          });
+          if (toolCalls && toolCalls.length > 0) {
+            for (const call of toolCalls) {
+              console.log(`[Agent:${this.config.modelId}] Tool call: ${call.toolName}`);
+            }
+          }
+        },
+      });
 
-    // Step 3: Generate broadcast message
-    const broadcast = await this.generateBroadcast(decision, context);
+      // Extract steps information
+      const steps = this.extractSteps(result.steps);
 
-    // Step 4: Save to chat (replaces old broadcast system)
-    const messageType = decision.action === "hold" ? "commentary" : "trade";
-    await this.saveMessage(broadcast, messageType);
+      // Extract trades from tool call results
+      const trades = this.extractTradesFromSteps(result.steps);
 
-    return { decision, broadcast, analyses };
+      // Get the final reasoning text
+      const reasoning = result.text || "No reasoning provided.";
+
+      console.log(
+        `[Agent:${this.config.modelId}] Trading loop complete. Trades: ${trades.length}`
+      );
+
+      // Save broadcast to chat
+      const messageType: ChatMessageType =
+        trades.length > 0 ? "trade" : "commentary";
+      await this.saveMessage(reasoning, messageType, trades[0]?.id);
+
+      return { reasoning, trades, steps };
+    } catch (error) {
+      console.error(`[Agent:${this.config.modelId}] Trading loop error:`, error);
+
+      // Save error message
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error occurred";
+      await this.saveMessage(
+        `Trading analysis failed: ${errorMessage}`,
+        "commentary"
+      );
+
+      return {
+        reasoning: `Error: ${errorMessage}`,
+        trades: [],
+        steps: [],
+      };
+    }
   }
 
   /**
-   * Get the model ID for this agent
+   * System prompt defining agent behavior and guidelines.
    */
-  getModelId(): string {
-    return this.config.modelId;
+  protected getSystemPrompt(): string {
+    return TRADING_SYSTEM_PROMPT;
   }
 
   /**
-   * Get the model identifier (e.g., "openai/gpt-4o")
+   * Extract steps from the generateText result
    */
-  getModelIdentifier(): string {
-    return this.config.modelIdentifier;
+  protected extractSteps(
+    steps: Array<{
+      text: string;
+      toolCalls: ToolCallPart[];
+      toolResults: ToolResultPart[];
+    }>
+  ): AgentStep[] {
+    return steps.map((step, index) => ({
+      stepNumber: index + 1,
+      text: step.text || undefined,
+      toolCalls: step.toolCalls?.map((call) => ({
+        toolName: call.toolName,
+        args: call.args as Record<string, unknown>,
+        result: step.toolResults?.find(
+          (r) => r.toolCallId === call.toolCallId
+        )?.result,
+      })),
+    }));
+  }
+
+  /**
+   * Extract executed trades from step results.
+   */
+  protected extractTradesFromSteps(
+    steps: Array<{
+      text: string;
+      toolCalls: ToolCallPart[];
+      toolResults: ToolResultPart[];
+    }>
+  ): Trade[] {
+    const trades: Trade[] = [];
+
+    for (const step of steps) {
+      if (!step.toolCalls || !step.toolResults) continue;
+
+      for (const call of step.toolCalls) {
+        if (call.toolName === "placeOrder") {
+          // Find corresponding result
+          const resultPart = step.toolResults.find(
+            (r) => r.toolCallId === call.toolCallId
+          );
+          const result = resultPart?.result as
+            | { success: boolean; order?: { id: string; price?: number }; quantity?: number }
+            | undefined;
+
+          if (result?.success) {
+            const args = call.args as {
+              market_ticker: string;
+              side: PositionSide;
+              action: TradeAction;
+              quantity: number;
+              limit_price?: number;
+            };
+
+            trades.push({
+              id: result.order?.id || nanoid(),
+              portfolioId: "",
+              marketTicker: args.market_ticker,
+              marketTitle: args.market_ticker, // Title will be enriched later
+              side: args.side,
+              action: args.action,
+              quantity: args.quantity,
+              price: result.order?.price || args.limit_price || 0,
+              notional:
+                args.quantity * (result.order?.price || args.limit_price || 0),
+              createdAt: new Date(),
+            });
+          }
+        }
+      }
+    }
+
+    return trades;
   }
 
   /**
    * Save a chat message.
    * This replaces the old broadcast system.
    */
-  async saveMessage(
+  protected async saveMessage(
     content: string,
     messageType: ChatMessageType,
-    relatedTradeId?: string,
+    relatedTradeId?: string
   ): Promise<void> {
     const message: ChatMessage = {
       id: nanoid(),
-      role: "assistant", // Models use assistant role
+      role: "assistant",
       parts: [{ type: "text", text: content }],
       metadata: {
         sessionId: this.config.sessionId,
@@ -152,235 +285,19 @@ export abstract class PredictionMarketAgent {
 
     await saveChatMessage(message);
   }
-}
 
-// ============================================================================
-// DEFAULT IMPLEMENTATION
-// ============================================================================
-
-/**
- * Default prediction market agent implementation using LLM for analysis.
- * Uses the configured model to analyze markets and make trading decisions.
- */
-export class DefaultPredictionMarketAgent extends PredictionMarketAgent {
-  private maxAnalysisMarkets = 5;
-  private maxPositionSize = 100;
-  private minConfidence = 0.6;
-
-  async analyzeMarkets(context: MarketContext): Promise<MarketAnalysis[]> {
-    const { availableMarkets, portfolio, recentTrades } = context;
-
-    // Select markets to analyze (prioritize by volume and opportunity)
-    const marketsToAnalyze = this.selectMarketsToAnalyze(
-      availableMarkets,
-      this.maxAnalysisMarkets,
-    );
-
-    const analyses: MarketAnalysis[] = [];
-
-    for (const market of marketsToAnalyze) {
-      try {
-        const analysis = await this.analyzeMarket(
-          market,
-          portfolio.cashBalance,
-          recentTrades,
-        );
-        analyses.push(analysis);
-      } catch (error) {
-        console.error(`Failed to analyze market ${market.ticker}:`, error);
-      }
-    }
-
-    return analyses;
-  }
-
-  async makeDecision(
-    context: MarketContext,
-    analyses: MarketAnalysis[],
-  ): Promise<TradingDecision> {
-    const { portfolio } = context;
-
-    // Filter to high-confidence analyses
-    const highConfidence = analyses.filter(
-      (a) => a.confidence >= this.minConfidence,
-    );
-
-    if (highConfidence.length === 0) {
-      return {
-        action: "hold",
-        reasoning: "No markets with sufficient confidence level for trading.",
-        confidence: 0.5,
-      };
-    }
-
-    // Select the best opportunity
-    const bestOpportunity = highConfidence.reduce((best, current) =>
-      current.confidence > best.confidence ? current : best,
-    );
-
-    // Check if we have enough capital
-    if (!bestOpportunity.suggestedPosition) {
-      return {
-        action: "hold",
-        reasoning: `Analysis complete for ${bestOpportunity.marketTicker}, but no actionable position suggested.`,
-        confidence: bestOpportunity.confidence,
-      };
-    }
-
-    const { side, quantity, maxPrice } = bestOpportunity.suggestedPosition;
-    const estimatedCost = quantity * maxPrice;
-
-    if (estimatedCost > portfolio.cashBalance * 0.3) {
-      // Don't risk more than 30% on a single trade
-      return {
-        action: "hold",
-        reasoning:
-          "Position size exceeds risk limits. Waiting for better opportunity.",
-        confidence: bestOpportunity.confidence,
-      };
-    }
-
-    return {
-      action: "buy",
-      marketTicker: bestOpportunity.marketTicker,
-      side,
-      quantity,
-      limitPrice: maxPrice,
-      reasoning: bestOpportunity.reasoning,
-      confidence: bestOpportunity.confidence,
-    };
-  }
-
-  async generateBroadcast(
-    decision: TradingDecision,
-    context: MarketContext,
-  ): Promise<string> {
-    const { action, marketTicker, side, quantity, reasoning, confidence } =
-      decision;
-
-    if (action === "hold") {
-      return reasoning;
-    }
-
-    const market = context.availableMarkets.find(
-      (m) => m.ticker === marketTicker,
-    );
-    const marketTitle = market?.title || marketTicker;
-
-    return (
-      `${action.toUpperCase()} ${quantity} ${side?.toUpperCase()} on "${marketTitle}". ` +
-      `Confidence: ${(confidence * 100).toFixed(0)}%. ` +
-      `Reasoning: ${reasoning}`
-    );
+  /**
+   * Get the model ID for this agent
+   */
+  getModelId(): string {
+    return this.config.modelId;
   }
 
   /**
-   * Analyze a single market using LLM
+   * Get the model identifier (e.g., "openrouter/gpt-4o")
    */
-  private async analyzeMarket(
-    market: PredictionMarket,
-    cashBalance: number,
-    _recentTrades: Trade[],
-  ): Promise<MarketAnalysis> {
-    const model = getModel(this.config.modelIdentifier);
-
-    const prompt = `You are a prediction market analyst. Analyze the following market:
-
-Market: ${market.title}
-Ticker: ${market.ticker}
-Category: ${market.category}
-Current YES price: $${market.yesPrice.toFixed(2)} (${(market.yesPrice * 100).toFixed(0)}%)
-Current NO price: $${market.noPrice.toFixed(2)} (${(market.noPrice * 100).toFixed(0)}%)
-Volume: $${market.volume.toLocaleString()}
-Expiration: ${market.expirationDate.toISOString().split("T")[0]}
-
-Your available capital: $${cashBalance.toFixed(2)}
-
-Provide your analysis in the following JSON format:
-{
-  "predictedOutcome": "yes" or "no",
-  "confidence": 0.0-1.0,
-  "reasoning": "brief explanation",
-  "shouldTrade": true/false,
-  "suggestedSide": "yes" or "no" (if shouldTrade is true),
-  "suggestedQuantity": number (if shouldTrade is true),
-  "maxPrice": number (if shouldTrade is true)
-}
-
-Only suggest trading if you have strong conviction. Be conservative with position sizes.`;
-
-    try {
-      const { text } = await generateText({
-        model,
-        prompt,
-        maxOutputTokens: 500,
-      });
-
-      // Parse the JSON response
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error("No JSON found in response");
-      }
-
-      const parsed = JSON.parse(jsonMatch[0]);
-
-      return {
-        marketTicker: market.ticker,
-        marketTitle: market.title,
-        confidence: Math.min(1, Math.max(0, parsed.confidence || 0.5)),
-        predictedOutcome: parsed.predictedOutcome === "yes" ? "yes" : "no",
-        reasoning: parsed.reasoning || "Analysis complete.",
-        suggestedPosition: parsed.shouldTrade
-          ? {
-              side: parsed.suggestedSide === "yes" ? "yes" : "no",
-              quantity: Math.min(
-                parsed.suggestedQuantity || 10,
-                this.maxPositionSize,
-              ),
-              maxPrice:
-                parsed.maxPrice ||
-                (parsed.suggestedSide === "yes"
-                  ? market.yesPrice
-                  : market.noPrice),
-            }
-          : undefined,
-      };
-    } catch (error) {
-      console.error("Failed to analyze market with LLM:", error);
-
-      // Return a neutral analysis on error
-      return {
-        marketTicker: market.ticker,
-        marketTitle: market.title,
-        confidence: 0.5,
-        predictedOutcome: "yes",
-        reasoning: "Unable to complete analysis. Defaulting to neutral stance.",
-      };
-    }
-  }
-
-  /**
-   * Select markets to analyze based on opportunity
-   */
-  private selectMarketsToAnalyze(
-    markets: PredictionMarket[],
-    count: number,
-  ): PredictionMarket[] {
-    // Score markets by opportunity (volatile prices near 50% = more opportunity)
-    const scored = markets
-      .filter((m) => m.status === "open")
-      .map((market) => {
-        const priceDistance = Math.abs(market.yesPrice - 0.5);
-        const volatilityScore = 1 - priceDistance; // Higher score for prices near 50%
-        const volumeScore = Math.log10(market.volume + 1) / 7; // Normalize volume
-        return {
-          market,
-          score: volatilityScore * 0.6 + volumeScore * 0.4,
-        };
-      })
-      .sort((a, b) => b.score - a.score);
-
-    return scored.slice(0, count).map((s) => s.market);
+  getModelIdentifier(): string {
+    return this.config.modelIdentifier;
   }
 }
 
@@ -393,7 +310,7 @@ Only suggest trading if you have strong conviction. Be conservative with positio
  * @param config - Agent configuration
  */
 export function createPredictionMarketAgent(
-  config: PredictionMarketAgentConfig,
+  config: PredictionMarketAgentConfig
 ): PredictionMarketAgent {
-  return new DefaultPredictionMarketAgent(config);
+  return new PredictionMarketAgent(config);
 }
