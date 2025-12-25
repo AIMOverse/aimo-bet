@@ -4,11 +4,11 @@ This document summarizes the implementation of the Model Chat feature for Alpha 
 
 ## Overview
 
-The Model Chat replaces the previous broadcast system with a unified chat experience where:
+The Model Chat provides a unified chat experience where:
 - **Models** stream their trading analysis, trades, and commentary
 - **Users** ask questions and receive **streaming** responses from an **Assistant**
 - All messages use ai-sdk's `UIMessage` format with custom metadata
-- Messages are tied to the **trading session** (no separate chat session)
+- Messages are tied to the **Global Arena trading session**
 
 ## Architecture
 
@@ -29,7 +29,7 @@ The Model Chat replaces the previous broadcast system with a unified chat experi
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                   Next.js API Routes                            │
-│      /api/chat (arena mode) | /api/arena/chat-messages          │
+│      /api/chat | /api/arena/chat-messages                       │
 │         Handle streaming + persistence to Supabase              │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -38,7 +38,7 @@ The Model Chat replaces the previous broadcast system with a unified chat experi
 ┌─────────────────────────────┐   ┌───────────────────────────────┐
 │   Supabase Database         │   │      Chat Agent               │
 │  (arena_chat_messages)      │   │  (lib/ai/agents/chatAgent.ts) │
-│  Full JSONB storage         │   │  Arena mode with custom prompt│
+│  Full JSONB storage         │   │  Arena assistant prompt       │
 └─────────────────────────────┘   └───────────────────────────────┘
 ```
 
@@ -92,11 +92,11 @@ CREATE TABLE arena_chat_messages (
 
 ## API Endpoints
 
-### Chat API with Arena Mode
+### Chat API
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/chat` | POST | Handle chat messages (supports `mode: "arena"`) |
+| `/api/chat` | POST | Handle chat messages (uses global session) |
 | `/api/arena/chat-messages` | GET | Load arena chat messages for a session |
 
 ### Request Format
@@ -104,10 +104,18 @@ CREATE TABLE arena_chat_messages (
 ```typescript
 interface ChatRequest {
   message: UIMessage;
-  sessionId: string | null;
-  mode?: "user-chat" | "arena";  // arena mode for trading sessions
-  model?: string;
-  tools?: { generateImage, generateVideo, webSearch };
+  sessionId?: string | null;  // null = use Global Arena session
+}
+```
+
+## Global Session
+
+A default "Global Arena" session always exists and is used when no specific sessionId is provided:
+
+```typescript
+// lib/supabase/arena.ts
+export async function getGlobalSession(): Promise<TradingSession> {
+  // Returns existing running "Global Arena" session or creates one
 }
 ```
 
@@ -170,31 +178,30 @@ const {
 });
 ```
 
-## Cache Layer
-
-LocalStorage caching for faster page loads.
-
-```typescript
-import {
-  getArenaCachedMessages,
-  setArenaCachedMessages,
-  clearArenaCachedMessages,
-} from "@/lib/cache/chat";
-```
-
 ## Agent Configuration
 
-The chat agent supports both user-chat and arena modes:
+The chat agent uses a specialized arena assistant prompt:
 
 ```typescript
 // lib/ai/agents/chatAgent.ts
 
 const ARENA_ASSISTANT_PROMPT = `You are the Arena Assistant, helping users understand the trading models' behavior...`;
 
-// In arena mode:
+// Configuration:
 // - Uses gpt-4o-mini (faster, cheaper)
 // - Uses ARENA_ASSISTANT_PROMPT
 // - No tools enabled (read-only assistant)
+```
+
+## Trading Cron
+
+Models execute trading decisions every 15 minutes via cron:
+
+```typescript
+// /api/cron/trading
+// - Gets global session
+// - Runs predictionMarketAgent for each enabled model
+// - Saves trades and broadcasts to arena_chat_messages
 ```
 
 ## File Structure
@@ -209,46 +216,37 @@ components/chat/
 hooks/
 ├── arena/
 │   ├── index.ts          # Exports arena hooks
-│   ├── useArenaModels.ts # Get models from hardcoded config
+│   ├── useArenaModels.ts # Get models from config
 │   ├── usePerformance.ts # Performance snapshots
 │   ├── usePositions.ts   # dflow positions
 │   ├── useTrades.ts      # dflow trades
 │   └── useMarketPrices.ts # WebSocket prices
 └── chat/
     ├── index.ts              # Exports chat hooks
-    ├── useChatMessages.ts    # User chat hook
     ├── useArenaChatMessages.ts  # Arena chat hook
     └── useSessions.ts        # Session management
 
-lib/arena/
-├── constants.ts          # Polling intervals, chart config
-├── models.ts             # Hardcoded ARENA_MODELS
-└── utils.ts              # Chart utilities
-
 lib/supabase/
-└── arena.ts              # Arena chat message functions (sessions, snapshots, chat)
+└── arena.ts              # Arena functions (sessions, snapshots, chat, getGlobalSession)
 
 app/api/
 ├── chat/
-│   └── route.ts          # Supports mode: "arena"
-└── arena/
-    ├── sessions/
-    │   └── route.ts      # Trading session management
+│   └── route.ts          # Chat endpoint (uses global session)
+└── cron/
     ├── snapshots/
-    │   └── route.ts      # Performance snapshots
-    └── chat-messages/
-        └── route.ts      # GET: load arena messages
+    │   └── route.ts      # Performance snapshots cron
+    └── trading/
+        └── route.ts      # Model trading cron
 ```
 
 ## Design Principles
 
 1. **UIMessage + Metadata** - Use ai-sdk's `UIMessage` directly, custom fields in `metadata`
 2. **Full JSONB Storage** - Store `parts` and `metadata` as JSONB for simplicity
-3. **Trading Session Context** - No separate chat session; messages belong to trading session
+3. **Global Arena Session** - All chat uses the single "Global Arena" session
 4. **Streaming for All** - Both model broadcasts and assistant responses stream
-5. **Reuse Existing Code** - Adapted existing chat infrastructure for arena mode
+5. **Cron-based Trading** - Models make trading decisions every 15 minutes via cron
 6. **LocalStorage Cache** - Message caching for faster page loads
-7. **Separate Hook** - `useArenaChatMessages` is simpler than the user chat hook
 
 ## Usage Example
 
@@ -270,11 +268,3 @@ function ArenaPage({ sessionId }: { sessionId: string }) {
   );
 }
 ```
-
-## Migration from Broadcasts
-
-The `components/broadcast/` directory and `useBroadcasts` hook can be removed after:
-1. Arena page is updated to use `ModelChatFeed`
-2. Model agents save messages via `saveArenaChatMessage()` instead of `createBroadcast()`
-
-The `broadcasts` table can be kept for historical data or deprecated.

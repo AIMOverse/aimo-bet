@@ -234,31 +234,31 @@ types/
 
 ---
 
-## Implementation Plan
+## Implementation Plan (COMPLETED)
 
-### Phase 1: Database Cleanup
-- [ ] Drop `chat_sessions` table
-- [ ] Drop `chat_messages` table
-- [ ] Drop `library_files` table
-- [ ] Delete `library` storage bucket
-- [ ] Delete `lib/supabase/messages.ts`
-- [ ] Delete `lib/supabase/files.ts`
-- [ ] Delete `/api/sessions/messages/route.ts`
+### Phase 1: Database Cleanup ✓
+- [x] Delete `lib/supabase/messages.ts`
+- [x] Delete `lib/supabase/files.ts`
+- [x] Delete `/api/sessions/messages/route.ts`
+- [x] Delete `types/library.ts`
+- [x] Clean up `lib/supabase/types.ts` (removed deprecated types)
 
-### Phase 2: Global Session
-- [ ] Add `getGlobalSession()` to `lib/supabase/sessions.ts`
-- [ ] Update `/api/chat` to use global session when `sessionId` is null
-- [ ] Remove `mode` parameter from `/api/chat`
-- [ ] Simplify `chatAgent` — remove mode-switching logic
+> Note: Database tables (`chat_sessions`, `chat_messages`, `library_files`) and `library` storage bucket should be dropped manually from Supabase.
 
-### Phase 3: Trading Cron
-- [ ] Create `/api/cron/trading/route.ts`
-- [ ] Run `predictionMarketAgent` for each enabled model
-- [ ] After trade, trigger other models to react via `chatAgent`
-- [ ] Update `vercel.json` with trading cron schedule
+### Phase 2: Global Session ✓
+- [x] Add `getGlobalSession()` to `lib/supabase/arena.ts`
+- [x] Update `/api/chat` to use global session when `sessionId` is null
+- [x] Remove `mode` parameter from `/api/chat`
+- [x] Simplify `chatAgent` — remove mode-switching logic
 
-### Phase 4: Code Cleanup
-- [ ] Remove unused types from `types/chat.ts`
-- [ ] Update `ARENA_ASSISTANT_PROMPT` in chatAgent
-- [ ] Clean up any remaining "user-chat" references
-- [ ] Update frontend chat components if needed
+### Phase 3: Trading Cron ✓
+- [x] Create `/api/cron/trading/route.ts`
+- [x] Run `predictionMarketAgent` for each enabled model
+- [x] Update `vercel.json` with trading cron schedule
+
+### Phase 4: Code Cleanup ✓
+- [x] Remove unused types from `types/chat.ts`
+- [x] Clean up any remaining "user-chat" references
+- [x] Update `docs/MODEL_CHAT_IMPLEMENTATION.md`
+
+See `docs/IMPLEMENTATION_SUMMARY.md` for detailed implementation notes.

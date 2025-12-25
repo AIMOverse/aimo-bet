@@ -8,114 +8,206 @@ The implementation follows the plan outlined in `CLAUDE.md`, migrating from a si
 
 ---
 
+## Recent Refactoring (December 2025)
+
+### Phase 1: Database Cleanup
+
+Removed deprecated tables and files:
+
+**Deleted Files:**
+- `lib/supabase/messages.ts` - Old user chat message functions
+- `lib/supabase/files.ts` - Library file management (unused)
+- `app/api/sessions/messages/route.ts` - Old messages API endpoint
+- `types/library.ts` - Library file types
+
+**Updated Files:**
+- `lib/supabase/types.ts` - Removed deprecated types (DbChatSession, DbChatMessage, DbLibraryFile, etc.)
+
+### Phase 2: Global Session
+
+Implemented the global session system:
+
+**New Functions (`lib/supabase/arena.ts`):**
+```typescript
+export async function getGlobalSession(): Promise<TradingSession>
+```
+- Returns existing running "Global Arena" session or creates one
+- Used when no specific sessionId is provided to `/api/chat`
+
+**Updated Chat API (`app/api/chat/route.ts`):**
+- Removed `mode` parameter (no more "user-chat" vs "arena")
+- Uses global session when `sessionId` is null
+- All messages saved to `arena_chat_messages` with metadata
+
+**Simplified Chat Agent (`lib/ai/agents/chatAgent.ts`):**
+- Removed mode-switching logic
+- Uses `ARENA_ASSISTANT_PROMPT` directly
+- Uses `gpt-4o-mini` as the default model
+
+### Phase 3: Trading Cron
+
+Created automated trading system:
+
+**New File (`app/api/cron/trading/route.ts`):**
+- Runs every 15 minutes via Vercel Cron
+- Gets global session via `getGlobalSession()`
+- Runs `predictionMarketAgent` for each enabled model with wallet
+- Saves trades and broadcasts to `arena_chat_messages`
+
+**Updated `vercel.json`:**
+```json
+{
+  "crons": [
+    { "path": "/api/cron/snapshots", "schedule": "*/15 * * * *" },
+    { "path": "/api/cron/trading", "schedule": "*/15 * * * *" }
+  ]
+}
+```
+
+### Phase 4: Code Cleanup
+
+- Updated `types/chat.ts` - Removed deprecated types, kept arena types only
+- Updated `docs/MODEL_CHAT_IMPLEMENTATION.md` - Removed user-chat references
+
+---
+
 ## Architecture
 
 ### Simplified Structure
 
 The codebase has been simplified with the following changes:
 
-1. **Hardcoded Models** - Arena models are now defined in `lib/arena/models.ts` instead of being stored in the database
-2. **Consolidated Hooks** - Arena hooks moved from `lib/arena/hooks/` to `hooks/arena/`
-3. **Removed Mock Data** - Deleted `lib/arena/mock/` directory (no longer needed with real dflow data)
-4. **Removed API Wrapper** - Deleted `lib/arena/api.ts` (hooks call API routes directly)
+1. **Hardcoded Models** - Arena models defined in `lib/ai/models/catalog.ts`
+2. **Consolidated Hooks** - Arena hooks in `hooks/arena/`
+3. **Global Session** - Single "Global Arena" session for all chat
+4. **Cron Trading** - Automated trading every 15 minutes
 
 ### Directory Structure
 
 ```
-lib/arena/
-├── constants.ts      # Polling intervals, chart config, starting capital
-├── models.ts         # Hardcoded ARENA_MODELS array + helper functions
-└── utils.ts          # Chart utilities (snapshotsToChartData, getLatestModelValues)
+lib/
+├── ai/
+│   ├── agents/
+│   │   ├── chatAgent.ts           # Arena assistant (simplified)
+│   │   └── predictionMarketAgent.ts
+│   └── models/
+│       └── catalog.ts             # Model definitions with wallets
+├── supabase/
+│   ├── arena.ts                   # getGlobalSession, chat, snapshots
+│   └── types.ts                   # Arena types only
+└── arena/
+    ├── constants.ts               # Polling intervals, chart config
+    └── utils.ts                   # Chart utilities
 
 hooks/
-├── arena/
-│   ├── index.ts          # Exports all arena hooks
-│   ├── useArenaModels.ts # Get models from hardcoded config
-│   ├── usePerformance.ts # Fetch snapshots, convert to chart data
-│   ├── usePositions.ts   # Fetch positions from dflow
-│   ├── useTrades.ts      # Fetch trades from dflow
-│   └── useMarketPrices.ts # WebSocket price subscription
+├── arena/                         # Arena-specific hooks
 └── chat/
-    ├── useChatMessages.ts      # User chat hook
-    ├── useArenaChatMessages.ts # Arena chat hook
-    └── useSessions.ts          # Chat session management
+    └── useArenaChatMessages.ts    # Arena chat hook
+
+app/api/
+├── chat/                          # Chat endpoint (global session)
+├── cron/
+│   ├── snapshots/                 # Performance snapshots
+│   └── trading/                   # Model trading loop
+└── dflow/                         # On-chain operations
 ```
 
 ### API Endpoints
 
 ```
-/api/arena/
-├── sessions/           # Trading session management
-├── snapshots/          # Performance history (cron-populated)
-└── chat-messages/      # Arena chat message retrieval
+/api/chat                   # Chat (uses global session if no sessionId)
 
-/api/chat/              # Chat endpoint with mode: "arena" support
+/api/arena/
+├── sessions/               # Trading session management
+├── snapshots/              # Performance history
+└── chat-messages/          # Arena chat message retrieval
 
 /api/dflow/
-├── markets/            # List prediction markets
-├── markets/[ticker]/   # Market details
-├── prices/             # Live bid/ask prices
-├── order/              # Place orders
-├── order/[id]/         # Order status/cancel
-├── positions/          # On-chain wallet positions
-├── trades/             # Trade history
-└── balance/            # On-chain wallet balance
+├── markets/                # List prediction markets
+├── markets/[ticker]/       # Market details
+├── prices/                 # Live bid/ask prices
+├── order/                  # Place orders
+├── order/[id]/             # Order status/cancel
+├── positions/              # On-chain wallet positions
+├── trades/                 # Trade history
+└── balance/                # On-chain wallet balance
 
 /api/cron/
-└── snapshots/          # Cron job for snapshot population
+├── snapshots/              # Snapshot population (every 15 min)
+└── trading/                # Model trading loop (every 15 min)
 ```
 
 ### Data Flow
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      Arena UI                                   │
-│    Performance | Positions | Trades | Chat                      │
+│                         Frontend                                │
+│     / (charts)  |  /chat  |  /positions  |  /trades            │
 └─────────────────────────────────────────────────────────────────┘
                               │
               ┌───────────────┼───────────────┐
               ▼               ▼               ▼
 ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│  /api/arena     │ │  /api/dflow     │ │  /api/chat      │
-│  (Supabase)     │ │  (On-chain)     │ │  (Streaming)    │
-│                 │ │                 │ │                 │
-│  - sessions     │ │  - markets      │ │  - arena mode   │
-│  - snapshots    │ │  - prices       │ │  - user chat    │
-│  - chat-msgs    │ │  - order        │ │                 │
-│                 │ │  - positions    │ │                 │
-│                 │ │  - trades       │ │                 │
-│                 │ │  - balance      │ │                 │
+│  /api/sessions  │ │  /api/dflow/*   │ │  /api/chat      │
+│  /api/performance│ │  (On-chain)     │ │  (Streaming)    │
 └─────────────────┘ └─────────────────┘ └─────────────────┘
-        │                     │
-        ▼                     ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Solana RPC / dflow APIs                      │
-└─────────────────────────────────────────────────────────────────┘
+        │                     │                   │
+        ▼                     ▼                   ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│    Supabase     │ │   dflow APIs    │ │   Chat Agent    │
+│                 │ │  Swap/Metadata  │ │                 │
+│ - trading_sessions │ └─────────────────┘ └─────────────────┘
+│ - performance_snapshots │
+│ - arena_chat_messages │
+└─────────────────┘
         ▲
         │
-┌─────────────────────────────────────────────────────────────────┐
-│                    Cron Job (Every 15 min)                      │
-│         Fetches balances from dflow → saves to snapshots        │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────┐
+│  Cron Jobs      │
+│ - snapshots     │
+│ - trading       │
+└─────────────────┘
 ```
 
 ---
 
-## Model Configuration
+## Database Schema (Current)
 
-Models are hardcoded in `lib/arena/models.ts`:
-
-```typescript
-import { ARENA_MODELS, getArenaModels, getArenaModel } from "@/lib/arena/models";
-
-// Get all enabled models
-const models = getArenaModels();
-
-// Get specific model by ID
-const model = getArenaModel("gpt-4o");
+### `trading_sessions`
+```sql
+id              UUID PRIMARY KEY
+name            TEXT                -- e.g., "Global Arena"
+status          TEXT                -- 'setup' | 'running' | 'paused' | 'completed'
+starting_capital NUMERIC            -- default 10000
+started_at      TIMESTAMPTZ
+ended_at        TIMESTAMPTZ
+created_at      TIMESTAMPTZ
 ```
 
-To add wallet addresses for trading, update the `walletAddress` field in the model config. Private keys are stored in environment variables (`ARENA_WALLET_<MODEL_ID>`).
+### `performance_snapshots`
+```sql
+id              UUID PRIMARY KEY
+session_id      UUID REFERENCES trading_sessions(id)
+model_id        TEXT                -- e.g., "openrouter/gpt-4o"
+account_value   NUMERIC
+timestamp       TIMESTAMPTZ
+```
+
+### `arena_chat_messages`
+```sql
+id              TEXT PRIMARY KEY    -- nanoid
+session_id      UUID REFERENCES trading_sessions(id)
+role            TEXT                -- 'user' | 'assistant' | 'system'
+parts           JSONB               -- UIMessage parts array
+metadata        JSONB               -- ArenaChatMetadata
+created_at      TIMESTAMPTZ
+```
+
+### Tables to DROP (deprecated)
+- `chat_sessions` - replaced by unified arena system
+- `chat_messages` - replaced by `arena_chat_messages`
+- `library_files` - unused
+- `library` storage bucket - unused
 
 ---
 
@@ -144,35 +236,6 @@ ARENA_WALLET_GPT_4O=<base58_private_key>
 ARENA_WALLET_CLAUDE_SONNET_4=<base58_private_key>
 # ... etc
 ```
-
----
-
-## Files Changed (Recent Refactoring)
-
-### New Files
-- `lib/arena/models.ts` - Hardcoded arena models
-- `lib/arena/utils.ts` - Chart utilities
-- `hooks/arena/` - All arena hooks (moved from lib/arena/hooks/)
-
-### Modified Files
-- `app/page.tsx` - Uses real hooks instead of mock data
-- `components/trades/TradesFeed.tsx` - Uses DflowTradeWithModel type
-- `components/trades/TradeCard.tsx` - Uses DflowTradeWithModel type
-- `components/positions/PositionsTable.tsx` - Uses DflowPosition type
-- `components/layout/AppTabs.tsx` - Uses ARENA_MODELS from models.ts
-- `components/index/PerformanceChart.tsx` - Uses ARENA_MODELS from models.ts
-- `components/index/MarketTicker.tsx` - Uses useMarketPrices from hooks/arena
-- `app/api/cron/snapshots/route.ts` - Uses ARENA_MODELS instead of DB
-- `app/api/arena/sessions/route.ts` - Removed portfolio creation
-- `lib/arena/constants.ts` - Removed MODEL_COLORS and DEFAULT_ARENA_MODELS
-- `lib/supabase/arena.ts` - Removed model CRUD functions
-- `lib/supabase/types.ts` - Added arena table types
-
-### Removed Files
-- `app/api/arena/models/` - No longer needed (hardcoded models)
-- `lib/arena/api.ts` - No longer needed (hooks call APIs directly)
-- `lib/arena/mock/` - No longer needed (real dflow data)
-- `lib/arena/hooks/` - Moved to hooks/arena/
 
 ---
 
@@ -210,37 +273,31 @@ const { prices, isConnected } = useMarketPrices();
 ### Chat Hooks (`hooks/chat/`)
 
 ```typescript
-import { useChatMessages, useArenaChatMessages, useSessions } from "@/hooks/chat";
+import { useArenaChatMessages } from "@/hooks/chat";
 
-// User chat
-const { messages, sendMessage } = useChatMessages({ sessionId });
-
-// Arena chat
+// Arena chat (uses global session)
 const { messages, sendMessage } = useArenaChatMessages({ sessionId });
-
-// Session management
-const { sessions, updateSession, deleteSession } = useSessions();
 ```
 
 ---
 
 ## Testing Recommendations
 
-1. **Wallet Configuration**
-   - Add wallet addresses to models in `lib/arena/models.ts`
+1. **Global Session**
+   - Verify `getGlobalSession()` creates session on first call
+   - Verify subsequent calls return the same session
+
+2. **Trading Cron**
+   - Test manually: `curl -H "Authorization: Bearer $CRON_SECRET" /api/cron/trading`
+   - Verify trades are being logged to arena_chat_messages
+
+3. **Chat System**
+   - Test chat without sessionId (should use global session)
+   - Verify messages are saved with correct metadata
+
+4. **Wallet Configuration**
+   - Add wallet addresses to models in `lib/ai/models/catalog.ts`
    - Set up wallet private keys in environment variables
-
-2. **Cron Job**
-   - Test manually: `curl -H "Authorization: Bearer $CRON_SECRET" /api/cron/snapshots`
-   - Verify snapshots are being created in database
-
-3. **On-Chain Queries**
-   - Test balance endpoint with a known wallet address
-   - Verify position quantities match on-chain state
-
-4. **Chat System**
-   - Test user message sending and assistant responses
-   - Verify model messages are saved with correct metadata
 
 ---
 

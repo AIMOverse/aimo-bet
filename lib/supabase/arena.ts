@@ -14,6 +14,63 @@ import type {
 } from "./types";
 
 // ============================================================================
+// CONSTANTS
+// ============================================================================
+
+const GLOBAL_SESSION_NAME = "Global Arena";
+
+// ============================================================================
+// GLOBAL SESSION
+// ============================================================================
+
+/**
+ * Get or create the global "Global Arena" session.
+ * This session always exists and is used when no specific sessionId is provided.
+ */
+export async function getGlobalSession(): Promise<TradingSession> {
+  const client = getSupabaseClient();
+  if (!client) throw new Error("Supabase not configured");
+
+  // Try to find existing running global session
+  const { data: existing, error: findError } = await client
+    .from("trading_sessions")
+    .select("*")
+    .eq("name", GLOBAL_SESSION_NAME)
+    .eq("status", "running")
+    .single();
+
+  if (existing && !findError) {
+    return mapTradingSession(existing);
+  }
+
+  // If no running session found (or error finding), create a new one
+  if (findError && findError.code !== "PGRST116") {
+    console.error("Error finding global session:", findError);
+  }
+
+  const insertData: DbTradingSessionInsert = {
+    name: GLOBAL_SESSION_NAME,
+    starting_capital: DEFAULT_STARTING_CAPITAL,
+    status: "running",
+    started_at: new Date().toISOString(),
+  };
+
+  const { data: newSession, error: createError } = await client
+    .from("trading_sessions")
+    .insert(insertData as never)
+    .select()
+    .single();
+
+  if (createError) {
+    console.error("Failed to create global session:", createError);
+    throw createError;
+  }
+
+  console.log("[arena] Created new Global Arena session:", newSession.id);
+  return mapTradingSession(newSession);
+}
+
+// ============================================================================
 // TRADING SESSIONS
 // ============================================================================
 
