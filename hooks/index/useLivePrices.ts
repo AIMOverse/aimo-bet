@@ -4,29 +4,55 @@ import useSWR from "swr";
 import { POLLING_INTERVALS } from "@/lib/config";
 
 // ============================================================================
-// Types for live market data
+// Types for live event/market data
 // ============================================================================
 
 export interface MarketPrice {
   marketTicker: string;
-  milestoneId: string;
+  eventTicker: string;
+  eventTitle: string;
+  marketTitle: string;
   yesBid: number | null;
   yesAsk: number | null;
   noBid: number | null;
   noAsk: number | null;
+  volume: number | null;
+  volume24h: number | null;
 }
 
 interface Market {
   ticker: string;
-  milestoneId?: string;
-}
-
-interface LiveDataEntry {
-  milestoneId: string;
+  eventTicker: string;
+  title: string;
+  subtitle: string;
+  yesSubTitle: string;
+  noSubTitle: string;
+  status: string;
+  volume: number;
+  volume24h?: number;
+  openInterest: number;
   yesBid?: number;
   yesAsk?: number;
   noBid?: number;
   noAsk?: number;
+}
+
+interface Event {
+  ticker: string;
+  seriesTicker: string;
+  title: string;
+  subtitle: string;
+  status: string;
+  volume: number;
+  volume24h?: number;
+  liquidity: number;
+  openInterest: number;
+  markets?: Market[];
+}
+
+interface EventsResponse {
+  events: Event[];
+  cursor: number | null;
 }
 
 interface UseLivePricesReturn {
@@ -38,81 +64,62 @@ interface UseLivePricesReturn {
 }
 
 // ============================================================================
-// Fetch live prices using markets + live-data flow
-// 1. Fetch markets to get milestoneIds
-// 2. Fetch live-data with milestoneIds
+// Fetch live prices using events endpoint with nested markets
 // ============================================================================
 
 async function fetchLivePrices(): Promise<MarketPrice[]> {
-  // Step 1: Fetch markets to get milestoneIds
-  const marketsRes = await fetch("/api/dflow/markets?status=active&limit=100");
-  if (!marketsRes.ok) {
-    throw new Error("Failed to fetch markets");
+  // Fetch events with nested markets to get all data in one call
+  const eventsRes = await fetch(
+    "/api/dflow/events?status=active&limit=50&withNestedMarkets=true",
+  );
+
+  if (!eventsRes.ok) {
+    throw new Error("Failed to fetch events");
   }
 
-  const marketsData = await marketsRes.json();
-  const markets: Market[] = Array.isArray(marketsData)
-    ? marketsData
-    : marketsData.markets || [];
+  const eventsData: EventsResponse = await eventsRes.json();
+  const events = eventsData.events || [];
 
-  if (markets.length === 0) {
+  console.log("[useLivePrices] Fetched", events.length, "events");
+
+  if (events.length === 0) {
     return [];
   }
 
-  // Extract milestoneIds from markets
-  const milestoneToTicker = new Map<string, string>();
-  const milestoneIds: string[] = [];
+  // Build price entries from events and their nested markets
+  const prices: MarketPrice[] = [];
 
-  for (const market of markets) {
-    if (market.milestoneId) {
-      milestoneIds.push(market.milestoneId);
-      milestoneToTicker.set(market.milestoneId, market.ticker);
+  for (const event of events) {
+    const markets = event.markets || [];
+
+    for (const market of markets) {
+      prices.push({
+        marketTicker: market.ticker,
+        eventTicker: event.ticker,
+        eventTitle: event.title,
+        marketTitle: market.title || market.yesSubTitle || "Yes",
+        yesBid: market.yesBid ?? null,
+        yesAsk: market.yesAsk ?? null,
+        noBid: market.noBid ?? null,
+        noAsk: market.noAsk ?? null,
+        volume: market.volume ?? null,
+        volume24h: market.volume24h ?? null,
+      });
     }
   }
 
-  if (milestoneIds.length === 0) {
-    return [];
-  }
-
-  // Step 2: Fetch live data with milestoneIds
-  const liveDataRes = await fetch(
-    `/api/dflow/live-data?milestoneIds=${milestoneIds.join(",")}`,
+  console.log(
+    "[useLivePrices] Built",
+    prices.length,
+    "market prices from events",
   );
-
-  if (!liveDataRes.ok) {
-    throw new Error("Failed to fetch live data");
-  }
-
-  const liveData = await liveDataRes.json();
-  const liveDataArray: LiveDataEntry[] = Array.isArray(liveData)
-    ? liveData
-    : liveData.data || [];
-
-  // Build price entries
-  const prices: MarketPrice[] = [];
-
-  for (const entry of liveDataArray) {
-    const ticker = milestoneToTicker.get(entry.milestoneId);
-    if (!ticker) continue;
-
-    prices.push({
-      marketTicker: ticker,
-      milestoneId: entry.milestoneId,
-      yesBid: entry.yesBid ?? null,
-      yesAsk: entry.yesAsk ?? null,
-      noBid: entry.noBid ?? null,
-      noAsk: entry.noAsk ?? null,
-    });
-  }
 
   return prices;
 }
 
 /**
  * Hook to fetch live market prices via REST polling.
- * Uses the new markets + live-data flow:
- * 1. Fetch markets to get milestoneIds
- * 2. Fetch live-data with milestoneIds
+ * Uses the events endpoint with nested markets for efficient data fetching.
  *
  * @param refreshInterval - Polling interval in ms (default from config)
  */
@@ -125,7 +132,7 @@ export function useLivePrices(
     { refreshInterval },
   );
 
-  // Create a map for quick lookups by ticker
+  // Create a map for quick lookups by market ticker
   const priceMap = new Map<string, MarketPrice>();
   if (data && Array.isArray(data)) {
     data.forEach((price) => {
