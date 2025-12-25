@@ -14,10 +14,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TradeCard } from "./TradeCard";
-import type { TradeWithModel, TradeFilter } from "@/types/arena";
+import type { TradeFilter } from "@/types/arena";
+import type { DflowTradeWithModel } from "@/hooks/trades/useTrades";
 
 interface TradesFeedProps {
-  trades: TradeWithModel[];
+  trades: DflowTradeWithModel[];
   selectedModelId: string | null;
 }
 

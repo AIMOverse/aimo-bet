@@ -1,5 +1,5 @@
 import { generateText } from "ai";
-import { getModel } from "@/lib/ai/registry";
+import { getModel } from "@/lib/ai/models";
 import { nanoid } from "nanoid";
 import type {
   PredictionMarketAgentConfig,
@@ -17,13 +17,17 @@ import {
   getMarketsTool,
   getMarketDetailsTool,
   getMarketPricesTool,
+} from "@/lib/ai/tools/market-discovery";
+import {
   placeOrderTool,
   getOrderStatusTool,
   cancelOrderTool,
+} from "@/lib/ai/tools/trade-execution";
+import {
   getPositionsTool,
   getBalanceTool,
   getTradeHistoryTool,
-} from "@/lib/ai/tools/markets";
+} from "@/lib/ai/tools/portfolio-management";
 
 // ============================================================================
 // DFLOW TOOLS - Available for agent use with AI SDK tool-calling
@@ -72,7 +76,7 @@ export abstract class PredictionMarketAgent {
    */
   abstract makeDecision(
     context: MarketContext,
-    analyses: MarketAnalysis[]
+    analyses: MarketAnalysis[],
   ): Promise<TradingDecision>;
 
   /**
@@ -81,7 +85,7 @@ export abstract class PredictionMarketAgent {
    */
   abstract generateBroadcast(
     decision: TradingDecision,
-    context: MarketContext
+    context: MarketContext,
   ): Promise<string>;
 
   /**
@@ -130,7 +134,7 @@ export abstract class PredictionMarketAgent {
   async saveChatMessage(
     content: string,
     messageType: ArenaChatMessageType,
-    relatedTradeId?: string
+    relatedTradeId?: string,
   ): Promise<void> {
     const message: ArenaChatMessage = {
       id: nanoid(),
@@ -169,14 +173,18 @@ export class DefaultPredictionMarketAgent extends PredictionMarketAgent {
     // Select markets to analyze (prioritize by volume and opportunity)
     const marketsToAnalyze = this.selectMarketsToAnalyze(
       availableMarkets,
-      this.maxAnalysisMarkets
+      this.maxAnalysisMarkets,
     );
 
     const analyses: MarketAnalysis[] = [];
 
     for (const market of marketsToAnalyze) {
       try {
-        const analysis = await this.analyzeMarket(market, portfolio.cashBalance, recentTrades);
+        const analysis = await this.analyzeMarket(
+          market,
+          portfolio.cashBalance,
+          recentTrades,
+        );
         analyses.push(analysis);
       } catch (error) {
         console.error(`Failed to analyze market ${market.ticker}:`, error);
@@ -188,12 +196,14 @@ export class DefaultPredictionMarketAgent extends PredictionMarketAgent {
 
   async makeDecision(
     context: MarketContext,
-    analyses: MarketAnalysis[]
+    analyses: MarketAnalysis[],
   ): Promise<TradingDecision> {
     const { portfolio } = context;
 
     // Filter to high-confidence analyses
-    const highConfidence = analyses.filter((a) => a.confidence >= this.minConfidence);
+    const highConfidence = analyses.filter(
+      (a) => a.confidence >= this.minConfidence,
+    );
 
     if (highConfidence.length === 0) {
       return {
@@ -205,7 +215,7 @@ export class DefaultPredictionMarketAgent extends PredictionMarketAgent {
 
     // Select the best opportunity
     const bestOpportunity = highConfidence.reduce((best, current) =>
-      current.confidence > best.confidence ? current : best
+      current.confidence > best.confidence ? current : best,
     );
 
     // Check if we have enough capital
@@ -224,7 +234,8 @@ export class DefaultPredictionMarketAgent extends PredictionMarketAgent {
       // Don't risk more than 30% on a single trade
       return {
         action: "hold",
-        reasoning: "Position size exceeds risk limits. Waiting for better opportunity.",
+        reasoning:
+          "Position size exceeds risk limits. Waiting for better opportunity.",
         confidence: bestOpportunity.confidence,
       };
     }
@@ -242,20 +253,25 @@ export class DefaultPredictionMarketAgent extends PredictionMarketAgent {
 
   async generateBroadcast(
     decision: TradingDecision,
-    context: MarketContext
+    context: MarketContext,
   ): Promise<string> {
-    const { action, marketTicker, side, quantity, reasoning, confidence } = decision;
+    const { action, marketTicker, side, quantity, reasoning, confidence } =
+      decision;
 
     if (action === "hold") {
       return reasoning;
     }
 
-    const market = context.availableMarkets.find((m) => m.ticker === marketTicker);
+    const market = context.availableMarkets.find(
+      (m) => m.ticker === marketTicker,
+    );
     const marketTitle = market?.title || marketTicker;
 
-    return `${action.toUpperCase()} ${quantity} ${side?.toUpperCase()} on "${marketTitle}". ` +
+    return (
+      `${action.toUpperCase()} ${quantity} ${side?.toUpperCase()} on "${marketTitle}". ` +
       `Confidence: ${(confidence * 100).toFixed(0)}%. ` +
-      `Reasoning: ${reasoning}`;
+      `Reasoning: ${reasoning}`
+    );
   }
 
   /**
@@ -264,7 +280,7 @@ export class DefaultPredictionMarketAgent extends PredictionMarketAgent {
   private async analyzeMarket(
     market: PredictionMarket,
     cashBalance: number,
-    _recentTrades: Trade[]
+    _recentTrades: Trade[],
   ): Promise<MarketAnalysis> {
     const model = getModel(this.config.modelIdentifier);
 
@@ -276,7 +292,7 @@ Category: ${market.category}
 Current YES price: $${market.yesPrice.toFixed(2)} (${(market.yesPrice * 100).toFixed(0)}%)
 Current NO price: $${market.noPrice.toFixed(2)} (${(market.noPrice * 100).toFixed(0)}%)
 Volume: $${market.volume.toLocaleString()}
-Expiration: ${market.expirationDate.toISOString().split('T')[0]}
+Expiration: ${market.expirationDate.toISOString().split("T")[0]}
 
 Your available capital: $${cashBalance.toFixed(2)}
 
@@ -319,9 +335,13 @@ Only suggest trading if you have strong conviction. Be conservative with positio
               side: parsed.suggestedSide === "yes" ? "yes" : "no",
               quantity: Math.min(
                 parsed.suggestedQuantity || 10,
-                this.maxPositionSize
+                this.maxPositionSize,
               ),
-              maxPrice: parsed.maxPrice || (parsed.suggestedSide === "yes" ? market.yesPrice : market.noPrice),
+              maxPrice:
+                parsed.maxPrice ||
+                (parsed.suggestedSide === "yes"
+                  ? market.yesPrice
+                  : market.noPrice),
             }
           : undefined,
       };
@@ -344,7 +364,7 @@ Only suggest trading if you have strong conviction. Be conservative with positio
    */
   private selectMarketsToAnalyze(
     markets: PredictionMarket[],
-    count: number
+    count: number,
   ): PredictionMarket[] {
     // Score markets by opportunity (volatile prices near 50% = more opportunity)
     const scored = markets
@@ -373,7 +393,7 @@ Only suggest trading if you have strong conviction. Be conservative with positio
  * @param config - Agent configuration
  */
 export function createPredictionMarketAgent(
-  config: PredictionMarketAgentConfig
+  config: PredictionMarketAgentConfig,
 ): PredictionMarketAgent {
   return new DefaultPredictionMarketAgent(config);
 }

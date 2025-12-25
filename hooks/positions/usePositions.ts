@@ -1,8 +1,8 @@
 "use client";
 
 import useSWR from "swr";
-import { POLLING_INTERVALS } from "../constants";
-import { useArenaModels } from "./usePerformance";
+import { POLLING_INTERVALS } from "@/config/arena";
+import { MODELS } from "@/lib/ai/models/models";
 
 // ============================================================================
 // Types for dflow positions
@@ -32,7 +32,7 @@ async function fetchDflowPositions(wallet: string): Promise<DflowPosition[]> {
 }
 
 // ============================================================================
-// Hook to fetch positions for a specific model (by wallet)
+// Hook to fetch positions for models
 // ============================================================================
 
 interface UsePositionsOptions {
@@ -41,17 +41,18 @@ interface UsePositionsOptions {
 }
 
 export function usePositions({ sessionId, modelId }: UsePositionsOptions) {
-  const { models } = useArenaModels();
-
-  // Get wallets for models
+  // Get wallets for models from models config
   const walletToModel = new Map<string, { id: string; name: string }>();
   if (modelId) {
-    const model = models?.find((m) => m.id === modelId);
+    const model = MODELS.find((m) => m.id === modelId);
     if (model?.walletAddress) {
-      walletToModel.set(model.walletAddress, { id: model.id, name: model.name });
+      walletToModel.set(model.walletAddress, {
+        id: model.id,
+        name: model.name,
+      });
     }
   } else {
-    models?.forEach((m) => {
+    MODELS.forEach((m) => {
       if (m.walletAddress) {
         walletToModel.set(m.walletAddress, { id: m.id, name: m.name });
       }
@@ -73,13 +74,13 @@ export function usePositions({ sessionId, modelId }: UsePositionsOptions) {
             modelId: modelInfo?.id,
             modelName: modelInfo?.name,
           }));
-        })
+        }),
       );
       return results.flat();
     },
     {
       refreshInterval: POLLING_INTERVALS.positions,
-    }
+    },
   );
 
   return {
@@ -91,36 +92,20 @@ export function usePositions({ sessionId, modelId }: UsePositionsOptions) {
 }
 
 // ============================================================================
-// Hook to fetch all positions for a session (across all models with wallets)
+// Hook to fetch all positions for a session
 // ============================================================================
 
 export function useSessionPositions(sessionId: string | null) {
+  const result = usePositions({ sessionId: sessionId ?? "" });
+
   if (!sessionId) {
     return {
       positions: [] as DflowPosition[],
       isLoading: false,
-      error: null,
-      mutate: () => Promise.resolve(),
+      error: undefined,
+      mutate: () => Promise.resolve(undefined),
     };
   }
 
-  return usePositions({ sessionId });
-}
-
-// ============================================================================
-// Legacy hook interface for backward compatibility
-// ============================================================================
-
-/**
- * @deprecated Use usePositions with sessionId and modelId instead
- */
-export function usePortfolioPositions(portfolioId: string | null, openOnly = true) {
-  // This legacy interface is deprecated
-  // Return empty positions as we've migrated to wallet-based positions
-  return {
-    positions: [] as DflowPosition[],
-    isLoading: false,
-    error: null,
-    mutate: () => Promise.resolve(),
-  };
+  return result;
 }

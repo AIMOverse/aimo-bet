@@ -1,16 +1,17 @@
 "use client";
 
 import { ArrowUpRight, ArrowDownRight } from "lucide-react";
-import type { TradeWithModel } from "@/types/arena";
+import type { DflowTradeWithModel } from "@/hooks/trades/useTrades";
 import { cn } from "@/lib/utils";
 
 interface TradeCardProps {
-  trade: TradeWithModel;
+  trade: DflowTradeWithModel;
   showReasoning?: boolean;
 }
 
 // Format time ago
-function formatTimeAgo(date: Date): string {
+function formatTimeAgo(timestamp: string): string {
+  const date = new Date(timestamp);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
@@ -35,7 +36,7 @@ function formatCurrency(value: number): string {
   }).format(value);
 }
 
-export function TradeCard({ trade, showReasoning = true }: TradeCardProps) {
+export function TradeCard({ trade }: TradeCardProps) {
   const isBuy = trade.action === "buy";
   const isYes = trade.side === "yes";
 
@@ -51,7 +52,7 @@ export function TradeCard({ trade, showReasoning = true }: TradeCardProps) {
           <span className="font-medium text-sm">{trade.model.name}</span>
         </div>
         <span className="text-xs text-muted-foreground">
-          {formatTimeAgo(trade.createdAt)}
+          {formatTimeAgo(trade.timestamp)}
         </span>
       </div>
 
@@ -62,7 +63,7 @@ export function TradeCard({ trade, showReasoning = true }: TradeCardProps) {
             "flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium",
             isBuy
               ? "bg-green-500/10 text-green-500"
-              : "bg-red-500/10 text-red-500"
+              : "bg-red-500/10 text-red-500",
           )}
         >
           {isBuy ? (
@@ -77,15 +78,17 @@ export function TradeCard({ trade, showReasoning = true }: TradeCardProps) {
             "px-2 py-0.5 rounded text-xs font-medium",
             isYes
               ? "bg-blue-500/10 text-blue-500"
-              : "bg-orange-500/10 text-orange-500"
+              : "bg-orange-500/10 text-orange-500",
           )}
         >
           {trade.side.toUpperCase()}
         </span>
       </div>
 
-      {/* Market info */}
-      <p className="text-sm mb-2 line-clamp-2">{trade.marketTitle}</p>
+      {/* Market ticker */}
+      <p className="text-sm mb-2 line-clamp-2 font-mono">
+        {trade.market_ticker}
+      </p>
 
       {/* Trade details */}
       <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -93,28 +96,20 @@ export function TradeCard({ trade, showReasoning = true }: TradeCardProps) {
           {trade.quantity} @ {formatCurrency(trade.price)}
         </span>
         <span className="font-medium text-foreground">
-          {formatCurrency(trade.notional)}
+          {formatCurrency(trade.total)}
         </span>
       </div>
 
-      {/* PnL if sell */}
-      {trade.pnl !== undefined && (
-        <div
-          className={cn(
-            "mt-2 text-xs font-medium",
-            trade.pnl >= 0 ? "text-green-500" : "text-red-500"
-          )}
+      {/* Transaction signature link */}
+      {trade.tx_signature && (
+        <a
+          href={`https://solscan.io/tx/${trade.tx_signature}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-2 text-xs text-blue-500 hover:underline block truncate"
         >
-          P&L: {trade.pnl >= 0 ? "+" : ""}
-          {formatCurrency(trade.pnl)}
-        </div>
-      )}
-
-      {/* Reasoning */}
-      {showReasoning && trade.reasoning && (
-        <p className="mt-3 text-xs text-muted-foreground italic border-t pt-2">
-          "{trade.reasoning}"
-        </p>
+          View on Solscan
+        </a>
       )}
     </div>
   );

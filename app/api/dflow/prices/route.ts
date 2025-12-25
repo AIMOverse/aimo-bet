@@ -16,10 +16,13 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const tickers = searchParams.get("tickers");
 
-    console.log("[dflow/prices] Fetching prices for tickers:", tickers || "all");
+    console.log(
+      "[dflow/prices] Fetching prices for tickers:",
+      tickers || "all",
+    );
 
     // If specific tickers requested, use live-data-by-mint or filter results
-    let endpoint = `${DFLOW_METADATA_API}/live-data`;
+    const endpoint = `${DFLOW_METADATA_API}/live-data`;
 
     const response = await fetch(endpoint, {
       headers: {
@@ -32,7 +35,7 @@ export async function GET(req: Request) {
       console.error("[dflow/prices] API error:", response.status, errorText);
       return NextResponse.json(
         { error: `dflow API error: ${response.status}` },
-        { status: response.status }
+        { status: response.status },
       );
     }
 
@@ -43,19 +46,23 @@ export async function GET(req: Request) {
       const tickerList = tickers.split(",").map((t) => t.trim());
       if (Array.isArray(data)) {
         data = data.filter((item: { market_ticker?: string }) =>
-          tickerList.includes(item.market_ticker || "")
+          tickerList.includes(item.market_ticker || ""),
         );
       }
     }
 
-    console.log("[dflow/prices] Returning", Array.isArray(data) ? data.length : 1, "price entries");
+    console.log(
+      "[dflow/prices] Returning",
+      Array.isArray(data) ? data.length : 1,
+      "price entries",
+    );
 
     return NextResponse.json(data);
   } catch (error) {
     console.error("[dflow/prices] Failed to fetch prices:", error);
     return NextResponse.json(
       { error: "Failed to fetch prices" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DEFAULT_ARENA_MODELS } from "@/lib/arena/constants";
+import { MODELS } from "@/lib/ai/models/models";
 import type { ArenaTab } from "@/types/arena";
 
 const APP_TABS: { value: ArenaTab; label: string; icon: React.ReactNode }[] = [
@@ -78,15 +78,12 @@ export function AppTabs({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Models</SelectItem>
-            {DEFAULT_ARENA_MODELS.map((model) => (
-              <SelectItem
-                key={model.modelIdentifier}
-                value={model.modelIdentifier}
-              >
+            {MODELS.filter((m) => m.enabled).map((model) => (
+              <SelectItem key={model.id} value={model.id}>
                 <div className="flex items-center gap-2">
                   <div
                     className="w-2.5 h-2.5 rounded-full"
-                    style={{ backgroundColor: model.chartColor }}
+                    style={{ backgroundColor: model.chartColor || "#6366f1" }}
                   />
                   <span>{model.name}</span>
                 </div>

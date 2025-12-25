@@ -1,36 +1,33 @@
 import { NextResponse } from "next/server";
 import {
-  getSessions,
-  getSession,
-  updateSession,
-  deleteSession,
-} from "@/lib/supabase/messages";
+  getTradingSessions,
+  getTradingSession,
+  getActiveSession,
+  createTradingSession,
+  updateSessionStatus,
+} from "@/lib/supabase/arena";
+import type { SessionStatus } from "@/types/arena";
+import { DEFAULT_STARTING_CAPITAL } from "@/config/arena";
 
 // ============================================================================
-// GET /api/sessions - List all sessions
+// GET /api/sessions - List sessions or get active session
 // ============================================================================
-
-// Debug: track call frequency
-let lastCallTime = 0;
-let callCount = 0;
 
 export async function GET(req: Request) {
-  const now = Date.now();
-  if (now - lastCallTime < 1000) {
-    callCount++;
-    console.log(`[API /api/sessions] Rapid call #${callCount} within 1s`);
-  } else {
-    callCount = 1;
-    console.log(`[API /api/sessions] First call in new window`);
-  }
-  lastCallTime = now;
   try {
     const { searchParams } = new URL(req.url);
-    const sessionId = searchParams.get("id");
+    const id = searchParams.get("id");
+    const active = searchParams.get("active");
 
-    // If ID provided, get single session
-    if (sessionId) {
-      const session = await getSession(sessionId);
+    // Get active session
+    if (active === "true") {
+      const session = await getActiveSession();
+      return NextResponse.json(session);
+    }
+
+    // Get specific session
+    if (id) {
+      const session = await getTradingSession(id);
       if (!session) {
         return NextResponse.json(
           { error: "Session not found" },
@@ -40,8 +37,8 @@ export async function GET(req: Request) {
       return NextResponse.json(session);
     }
 
-    // Otherwise, list all sessions
-    const sessions = await getSessions();
+    // List all sessions
+    const sessions = await getTradingSessions();
     return NextResponse.json(sessions);
   } catch (error) {
     console.error("Failed to get sessions:", error);
@@ -53,15 +50,37 @@ export async function GET(req: Request) {
 }
 
 // ============================================================================
-// PATCH /api/sessions - Update a session
+// POST /api/sessions - Create new session
+// ============================================================================
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const { name, startingCapital = DEFAULT_STARTING_CAPITAL } = body;
+
+    // Create the session
+    const session = await createTradingSession(name, startingCapital);
+
+    return NextResponse.json(session, { status: 201 });
+  } catch (error) {
+    console.error("Failed to create session:", error);
+    return NextResponse.json(
+      { error: "Failed to create session" },
+      { status: 500 },
+    );
+  }
+}
+
+// ============================================================================
+// PATCH /api/sessions - Update session status
 // ============================================================================
 
 export async function PATCH(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const sessionId = searchParams.get("id");
+    const id = searchParams.get("id");
 
-    if (!sessionId) {
+    if (!id) {
       return NextResponse.json(
         { error: "Session ID is required" },
         { status: 400 },
@@ -69,50 +88,27 @@ export async function PATCH(req: Request) {
     }
 
     const body = await req.json();
-    const { title, modelId } = body;
+    const { status } = body as { status: SessionStatus };
 
-    if (!title && !modelId) {
+    if (
+      !status ||
+      !["setup", "running", "paused", "completed"].includes(status)
+    ) {
       return NextResponse.json(
-        { error: "At least one field (title, modelId) is required" },
+        {
+          error: "Valid status is required (setup, running, paused, completed)",
+        },
         { status: 400 },
       );
     }
 
-    await updateSession(sessionId, { title, modelId });
+    await updateSessionStatus(id, status);
 
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Failed to update session:", error);
     return NextResponse.json(
       { error: "Failed to update session" },
-      { status: 500 },
-    );
-  }
-}
-
-// ============================================================================
-// DELETE /api/sessions - Delete a session
-// ============================================================================
-
-export async function DELETE(req: Request) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const sessionId = searchParams.get("id");
-
-    if (!sessionId) {
-      return NextResponse.json(
-        { error: "Session ID is required" },
-        { status: 400 },
-      );
-    }
-
-    await deleteSession(sessionId);
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error("Failed to delete session:", error);
-    return NextResponse.json(
-      { error: "Failed to delete session" },
       { status: 500 },
     );
   }

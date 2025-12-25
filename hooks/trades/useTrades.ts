@@ -1,9 +1,9 @@
 "use client";
 
 import useSWR from "swr";
-import { POLLING_INTERVALS } from "../constants";
-import { useArenaModels } from "./usePerformance";
-import type { ArenaModel } from "@/types/arena";
+import { POLLING_INTERVALS } from "@/config/arena";
+import { MODELS } from "@/lib/ai/models/models";
+import type { ModelDefinition } from "@/types/models";
 
 // ============================================================================
 // Types for dflow trades
@@ -27,7 +27,7 @@ export interface DflowTrade {
 }
 
 export interface DflowTradeWithModel extends DflowTrade {
-  model: ArenaModel;
+  model: ModelDefinition;
 }
 
 // ============================================================================
@@ -36,10 +36,10 @@ export interface DflowTradeWithModel extends DflowTrade {
 
 async function fetchDflowTrades(
   wallet: string,
-  limit: number
+  limit: number,
 ): Promise<DflowTrade[]> {
   const response = await fetch(
-    `/api/dflow/trades?wallet=${wallet}&limit=${limit}`
+    `/api/dflow/trades?wallet=${wallet}&limit=${limit}`,
   );
   if (!response.ok) {
     throw new Error("Failed to fetch trades");
@@ -49,7 +49,7 @@ async function fetchDflowTrades(
 }
 
 // ============================================================================
-// Hook to fetch trades for a session (from dflow)
+// Hook to fetch trades for a session
 // ============================================================================
 
 interface UseTradesOptions {
@@ -58,18 +58,20 @@ interface UseTradesOptions {
   limit?: number;
 }
 
-export function useTrades({ sessionId, modelId, limit = 50 }: UseTradesOptions) {
-  const { models } = useArenaModels();
-
-  // Build wallet to model mapping
-  const walletToModel = new Map<string, ArenaModel>();
+export function useTrades({
+  sessionId,
+  modelId,
+  limit = 50,
+}: UseTradesOptions) {
+  // Build wallet to model mapping from models config
+  const walletToModel = new Map<string, ModelDefinition>();
   if (modelId) {
-    const model = models?.find((m) => m.id === modelId);
+    const model = MODELS.find((m) => m.id === modelId);
     if (model?.walletAddress) {
       walletToModel.set(model.walletAddress, model);
     }
   } else {
-    models?.forEach((m) => {
+    MODELS.forEach((m) => {
       if (m.walletAddress) {
         walletToModel.set(m.walletAddress, m);
       }
@@ -94,14 +96,14 @@ export function useTrades({ sessionId, modelId, limit = 50 }: UseTradesOptions) 
             model: model || {
               id: "unknown",
               name: "Unknown Model",
-              provider: "Unknown",
-              modelIdentifier: "unknown",
+              provider: "unknown",
+              contextLength: 0,
+              pricing: { prompt: 0, completion: 0 },
               chartColor: "#6366f1",
               enabled: true,
-              createdAt: new Date(),
             },
           }));
-        })
+        }),
       );
 
       // Merge and sort by timestamp (most recent first)
@@ -109,13 +111,13 @@ export function useTrades({ sessionId, modelId, limit = 50 }: UseTradesOptions) 
         .flat()
         .sort(
           (a, b) =>
-            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
         )
         .slice(0, limit);
     },
     {
       refreshInterval: POLLING_INTERVALS.trades,
-    }
+    },
   );
 
   return {
@@ -127,21 +129,20 @@ export function useTrades({ sessionId, modelId, limit = 50 }: UseTradesOptions) 
 }
 
 // ============================================================================
-// Legacy hook interface for backward compatibility
+// Hook to fetch all trades for a session
 // ============================================================================
 
-/**
- * @deprecated Use useTrades with sessionId and modelId instead
- */
 export function useSessionTrades(sessionId: string | null, limit = 50) {
+  const result = useTrades({ sessionId: sessionId ?? "", limit });
+
   if (!sessionId) {
     return {
       trades: [] as DflowTradeWithModel[],
       isLoading: false,
-      error: null,
-      mutate: () => Promise.resolve(),
+      error: undefined,
+      mutate: () => Promise.resolve(undefined),
     };
   }
 
-  return useTrades({ sessionId, limit });
+  return result;
 }

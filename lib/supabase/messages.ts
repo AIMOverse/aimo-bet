@@ -1,6 +1,6 @@
 import { createIdGenerator, generateText, type UIMessage } from "ai";
 import { requireServerClient } from "./server";
-import { getModel } from "@/lib/ai/registry";
+import { getModel } from "@/lib/ai/models";
 import type {
   DbChatSession,
   DbChatMessage,

@@ -29,8 +29,6 @@ interface ChatRequest {
   mode?: ChatMode;
   model?: string;
   tools?: {
-    generateImage?: boolean;
-    generateVideo?: boolean;
     webSearch?: boolean;
   };
 }
@@ -103,7 +101,7 @@ async function handleUserChat(
   message: UIMessage,
   sessionId: string | null,
   model: string,
-  tools: ChatRequest["tools"]
+  tools: ChatRequest["tools"],
 ) {
   // Server generates session ID for new chats (single source of truth)
   const finalSessionId = sessionId ?? generateSessionId();
@@ -142,8 +140,6 @@ async function handleUserChat(
           model,
           mode: "user-chat",
           tools: {
-            generateImage: tools?.generateImage ?? false,
-            generateVideo: tools?.generateVideo ?? false,
             webSearch: tools?.webSearch ?? false,
           },
         },
@@ -182,12 +178,14 @@ async function handleUserChat(
 async function handleArenaChat(
   req: Request,
   message: UIMessage,
-  sessionId: string | null
+  sessionId: string | null,
 ) {
   // Arena mode requires a trading session ID
   if (!sessionId) {
     return new Response(
-      JSON.stringify({ error: "Trading session ID is required for arena mode" }),
+      JSON.stringify({
+        error: "Trading session ID is required for arena mode",
+      }),
       { status: 400, headers: { "Content-Type": "application/json" } },
     );
   }
@@ -244,8 +242,6 @@ async function handleArenaChat(
           mode: "arena",
           model: "openrouter/gpt-4o-mini",
           tools: {
-            generateImage: false,
-            generateVideo: false,
             webSearch: false,
           },
         },

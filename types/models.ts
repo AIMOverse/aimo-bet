@@ -48,6 +48,13 @@ export interface ModelDefinition {
   outputModalities?: OutputModality[];
   /** Image generation settings (for models with image output) */
   imageSettings?: ImageSettings;
+  // Arena-specific fields (optional)
+  /** Chart color for performance chart display */
+  chartColor?: string;
+  /** Solana wallet public address for on-chain trading */
+  walletAddress?: string;
+  /** Whether this model is enabled for arena trading */
+  enabled?: boolean;
 }
 
 /**

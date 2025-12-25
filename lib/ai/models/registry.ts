@@ -1,5 +1,5 @@
 import { createProviderRegistry } from "ai";
-import { openrouter } from "./providers";
+import { openrouter } from "./openrouter";
 
 /**
  * Unified provider registry for all AI models.

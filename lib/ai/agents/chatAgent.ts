@@ -1,11 +1,7 @@
 import { ToolLoopAgent, stepCountIs } from "ai";
 import { z } from "zod";
-import { getModel } from "@/lib/ai/registry";
+import { getModel } from "@/lib/ai/models";
 import { DEFAULT_SYSTEM_PROMPT } from "@/config/defaults";
-import { generateImageTool, generateVideoTool } from "@/lib/ai/tools";
-
-// Tool names type
-type ToolName = "generateImage" | "generateVideo";
 
 // =============================================================================
 // Arena Assistant Prompt
@@ -32,25 +28,14 @@ const chatCallOptionsSchema = z.object({
   mode: z.enum(["user-chat", "arena"]).default("user-chat"),
   tools: z
     .object({
-      generateImage: z.boolean().default(false),
-      generateVideo: z.boolean().default(false),
       webSearch: z.boolean().default(false),
     })
     .default({
-      generateImage: false,
-      generateVideo: false,
       webSearch: false,
     }),
 });
 
 export type ChatCallOptions = z.infer<typeof chatCallOptionsSchema>;
-
-// All available tools
-const allTools = {
-  generateImage: generateImageTool,
-  generateVideo: generateVideoTool,
-  // Future: webSearch, etc.
-};
 
 export const chatAgent = new ToolLoopAgent({
   // Default model (overridden by prepareCall)
@@ -58,9 +43,6 @@ export const chatAgent = new ToolLoopAgent({
 
   // System instructions
   instructions: DEFAULT_SYSTEM_PROMPT,
-
-  // All tools available to the agent
-  tools: allTools,
 
   // Stop after 5 steps max (for multi-tool scenarios)
   stopWhen: stepCountIs(5),
@@ -82,16 +64,11 @@ export const chatAgent = new ToolLoopAgent({
       };
     }
 
-    // User-chat mode: full features
-    const activeTools: ToolName[] = [];
-    if (options.tools.generateImage) activeTools.push("generateImage");
-    if (options.tools.generateVideo) activeTools.push("generateVideo");
     // Future: if (options.tools.webSearch) activeTools.push("webSearch");
 
     return {
       ...settings,
       model: getModel(options.model),
-      activeTools: activeTools.length > 0 ? activeTools : undefined,
     };
   },
 });

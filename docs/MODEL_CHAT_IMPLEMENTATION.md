@@ -151,9 +151,11 @@ Simple text input with send button.
 
 ## Hook: useArenaChatMessages
 
-Specialized hook for arena mode chat.
+Specialized hook for arena mode chat. Located in `hooks/chat/useArenaChatMessages.ts`.
 
 ```typescript
+import { useArenaChatMessages } from "@/hooks/chat";
+
 const {
   messages,      // ArenaChatMessage[]
   isLoading,     // boolean
@@ -204,26 +206,38 @@ components/chat/
 ├── ChatMessage.tsx       # Single message display
 └── ChatInput.tsx         # User input field
 
-hooks/chat/
-├── index.ts              # Exports (includes useArenaChatMessages)
-├── useChatMessages.ts    # User chat hook (existing)
-└── useArenaChatMessages.ts  # Arena chat hook (new)
+hooks/
+├── arena/
+│   ├── index.ts          # Exports arena hooks
+│   ├── useArenaModels.ts # Get models from hardcoded config
+│   ├── usePerformance.ts # Performance snapshots
+│   ├── usePositions.ts   # dflow positions
+│   ├── useTrades.ts      # dflow trades
+│   └── useMarketPrices.ts # WebSocket prices
+└── chat/
+    ├── index.ts              # Exports chat hooks
+    ├── useChatMessages.ts    # User chat hook
+    ├── useArenaChatMessages.ts  # Arena chat hook
+    └── useSessions.ts        # Session management
 
-lib/cache/
-└── chat.ts               # Both user chat + arena cache functions
+lib/arena/
+├── constants.ts          # Polling intervals, chart config
+├── models.ts             # Hardcoded ARENA_MODELS
+└── utils.ts              # Chart utilities
 
 lib/supabase/
-└── arena.ts              # Includes arena chat message functions
+└── arena.ts              # Arena chat message functions (sessions, snapshots, chat)
 
 app/api/
 ├── chat/
 │   └── route.ts          # Supports mode: "arena"
 └── arena/
+    ├── sessions/
+    │   └── route.ts      # Trading session management
+    ├── snapshots/
+    │   └── route.ts      # Performance snapshots
     └── chat-messages/
         └── route.ts      # GET: load arena messages
-
-supabase/migrations/
-└── 20241224_create_arena_chat_messages.sql
 ```
 
 ## Design Principles
@@ -240,14 +254,15 @@ supabase/migrations/
 
 ```tsx
 import { ModelChatFeed } from "@/components/chat";
+import { useArenaModels } from "@/hooks/arena";
 
-function ArenaPage() {
-  const { session, models } = useArenaSession();
+function ArenaPage({ sessionId }: { sessionId: string }) {
+  const { models } = useArenaModels();
 
   return (
     <div className="h-full">
       <ModelChatFeed
-        sessionId={session?.id ?? null}
+        sessionId={sessionId}
         models={models}
         selectedModelId={null}
       />

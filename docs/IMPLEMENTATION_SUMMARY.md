@@ -8,144 +8,44 @@ The implementation follows the plan outlined in `CLAUDE.md`, migrating from a si
 
 ---
 
-## Part 1: API Refactoring (Arena → dflow)
+## Architecture
 
-### Phase 1: Wallet Infrastructure
+### Simplified Structure
 
-**Completed:**
+The codebase has been simplified with the following changes:
 
-1. **Updated `ArenaModel` type** (`types/arena.ts:7`)
-   - Added `walletAddress?: string` field for public wallet addresses
-   - Updated `PredictionMarketAgentConfig` to use `walletAddress` instead of `portfolioId`
+1. **Hardcoded Models** - Arena models are now defined in `lib/arena/models.ts` instead of being stored in the database
+2. **Consolidated Hooks** - Arena hooks moved from `lib/arena/hooks/` to `hooks/arena/`
+3. **Removed Mock Data** - Deleted `lib/arena/mock/` directory (no longer needed with real dflow data)
+4. **Removed API Wrapper** - Deleted `lib/arena/api.ts` (hooks call API routes directly)
 
-2. **Updated Supabase functions** (`lib/supabase/arena.ts`)
-   - Updated `mapArenaModel()` to include `wallet_address`
-   - Updated `createArenaModel()` to handle `wallet_address`
-   - Updated `updateArenaModel()` to handle `wallet_address`
+### Directory Structure
 
-3. **Updated API route** (`app/api/arena/models/route.ts`)
-   - POST handler now accepts `walletAddress`
-   - PATCH handler now updates `walletAddress`
+```
+lib/arena/
+├── constants.ts      # Polling intervals, chart config, starting capital
+├── models.ts         # Hardcoded ARENA_MODELS array + helper functions
+└── utils.ts          # Chart utilities (snapshotsToChartData, getLatestModelValues)
 
-4. **Created SQL migration** (`supabase/migrations/20241225_add_wallet_address.sql`)
-   - Adds `wallet_address TEXT` column to `arena_models`
-   - Creates index for wallet address lookups
+hooks/
+├── arena/
+│   ├── index.ts          # Exports all arena hooks
+│   ├── useArenaModels.ts # Get models from hardcoded config
+│   ├── usePerformance.ts # Fetch snapshots, convert to chart data
+│   ├── usePositions.ts   # Fetch positions from dflow
+│   ├── useTrades.ts      # Fetch trades from dflow
+│   └── useMarketPrices.ts # WebSocket price subscription
+└── chat/
+    ├── useChatMessages.ts      # User chat hook
+    ├── useArenaChatMessages.ts # Arena chat hook
+    └── useSessions.ts          # Chat session management
+```
 
-### Phase 2: Snapshot Cron
-
-**Completed:**
-
-1. **Created cron endpoint** (`app/api/cron/snapshots/route.ts`)
-   - Fetches balance and positions from dflow for each model with a wallet
-   - Calculates total account value (cash + position values)
-   - Saves snapshots to `performance_snapshots` table
-   - Secured with `CRON_SECRET` authorization
-
-2. **Added Vercel cron configuration** (`vercel.json`)
-   - Configured to run every 15 minutes: `*/15 * * * *`
-
-### Phase 3: On-Chain Endpoints
-
-**Completed:**
-
-1. **Updated balance endpoint** (`app/api/dflow/balance/route.ts`)
-   - Queries Solana RPC for SPL token balances
-   - Uses `getTokenAccountsByOwner` RPC method
-   - Returns formatted balance for USDC/CASH tokens
-
-2. **Updated positions endpoint** (`app/api/dflow/positions/route.ts`)
-   - Fetches outcome mints from dflow Metadata API
-   - Queries on-chain token balances for each mint
-   - Returns positions with non-zero quantities
-
-### Phase 4: Hook Refactoring
-
-**Completed:**
-
-1. **Refactored `usePositions`** (`lib/arena/hooks/usePositions.ts`)
-   - Now fetches from `/api/dflow/positions` instead of Supabase
-   - Uses model wallet addresses to fetch positions
-   - Enriches positions with model info
-
-2. **Refactored `useTrades`** (`lib/arena/hooks/useTrades.ts`)
-   - Now fetches from `/api/dflow/trades` instead of Supabase
-   - Merges and sorts trades from multiple wallets
-   - Enriches trades with model info
-
-3. **Exported new types** (`lib/arena/hooks/index.ts`)
-   - `DflowPosition` - Position from dflow
-   - `DflowTrade` - Trade from dflow
-   - `DflowTradeWithModel` - Trade enriched with model info
-
-### Phase 5: Cleanup
-
-**Completed:**
-
-1. **Removed deprecated API routes:**
-   - `app/api/arena/portfolios/` - Removed
-   - `app/api/arena/positions/` - Removed
-   - `app/api/arena/trades/` - Removed
-
----
-
-## Part 2: Model Chat
-
-### Phase 1: Database & Types
-
-**Already Implemented:**
-
-- `arena_chat_messages` table (migration: `20241224_create_arena_chat_messages.sql`)
-- `ArenaChatMetadata` type (`types/chat.ts`)
-- `ArenaChatMessage` type (`types/chat.ts`)
-- Supabase functions: `getArenaChatMessages()`, `saveArenaChatMessage()`
-
-### Phase 2: API Routes
-
-**Already Implemented:**
-
-- `GET /api/arena/chat-messages` - Fetch messages for a session
-- `POST /api/chat` with `mode: "arena"` - Send user messages and get assistant responses
-
-### Phase 3: Hooks
-
-**Completed:**
-
-1. **Created `useArenaChatMessages`** (`lib/arena/hooks/useArenaChatMessages.ts`)
-   - Fetches messages from `/api/arena/chat-messages`
-   - Enriches messages with author info (model name, color)
-   - Provides `sendMessage()` for user input
-   - Handles optimistic updates during message sending
-   - Polls for new messages
-
-### Phase 4: Agent Integration
-
-**Completed:**
-
-1. **Updated `PredictionMarketAgent`** (`lib/ai/agents/predictionMarketAgent.ts`)
-   - Added `saveChatMessage()` method
-   - Updated `executeTradingLoop()` to save messages to arena chat
-   - Messages are saved with proper metadata (authorType, messageType, etc.)
-
-### Phase 5: Cleanup
-
-**Completed:**
-
-1. **Removed broadcast system:**
-   - `components/broadcast/` - Removed
-   - `app/api/arena/broadcasts/` - Removed
-   - `lib/arena/hooks/useBroadcasts.ts` - Removed
-   - Updated hooks index to remove export
-
----
-
-## Architecture Summary
-
-### API Endpoints (Final State)
+### API Endpoints
 
 ```
 /api/arena/
 ├── sessions/           # Trading session management
-├── models/             # Model config (+ wallet_address)
 ├── snapshots/          # Performance history (cron-populated)
 └── chat-messages/      # Arena chat message retrieval
 
@@ -180,9 +80,9 @@ The implementation follows the plan outlined in `CLAUDE.md`, migrating from a si
 │  (Supabase)     │ │  (On-chain)     │ │  (Streaming)    │
 │                 │ │                 │ │                 │
 │  - sessions     │ │  - markets      │ │  - arena mode   │
-│  - models       │ │  - prices       │ │  - user chat    │
-│  - snapshots    │ │  - order        │ │                 │
-│  - chat-msgs    │ │  - positions    │ │                 │
+│  - snapshots    │ │  - prices       │ │  - user chat    │
+│  - chat-msgs    │ │  - order        │ │                 │
+│                 │ │  - positions    │ │                 │
 │                 │ │  - trades       │ │                 │
 │                 │ │  - balance      │ │                 │
 └─────────────────┘ └─────────────────┘ └─────────────────┘
@@ -198,6 +98,24 @@ The implementation follows the plan outlined in `CLAUDE.md`, migrating from a si
 │         Fetches balances from dflow → saves to snapshots        │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Model Configuration
+
+Models are hardcoded in `lib/arena/models.ts`:
+
+```typescript
+import { ARENA_MODELS, getArenaModels, getArenaModel } from "@/lib/arena/models";
+
+// Get all enabled models
+const models = getArenaModels();
+
+// Get specific model by ID
+const model = getArenaModel("gpt-4o");
+```
+
+To add wallet addresses for trading, update the `walletAddress` field in the model config. Private keys are stored in environment variables (`ARENA_WALLET_<MODEL_ID>`).
 
 ---
 
@@ -222,48 +140,94 @@ CRON_SECRET=...
 NEXT_PUBLIC_BASE_URL=https://your-domain.com
 
 # Model wallet private keys (stored in env, not in DB)
-ARENA_WALLET_MODEL_1=<base58_private_key>
-ARENA_WALLET_MODEL_2=<base58_private_key>
+ARENA_WALLET_GPT_4O=<base58_private_key>
+ARENA_WALLET_CLAUDE_SONNET_4=<base58_private_key>
 # ... etc
 ```
 
 ---
 
-## Files Changed
+## Files Changed (Recent Refactoring)
 
 ### New Files
-- `app/api/cron/snapshots/route.ts`
-- `lib/arena/hooks/useArenaChatMessages.ts`
-- `supabase/migrations/20241225_add_wallet_address.sql`
-- `vercel.json`
-- `docs/IMPLEMENTATION_SUMMARY.md`
+- `lib/arena/models.ts` - Hardcoded arena models
+- `lib/arena/utils.ts` - Chart utilities
+- `hooks/arena/` - All arena hooks (moved from lib/arena/hooks/)
 
 ### Modified Files
-- `types/arena.ts` - Added walletAddress fields
-- `lib/supabase/arena.ts` - Updated model CRUD functions
-- `app/api/arena/models/route.ts` - Added walletAddress handling
-- `app/api/dflow/balance/route.ts` - Implemented on-chain queries
-- `app/api/dflow/positions/route.ts` - Implemented on-chain queries
-- `lib/arena/hooks/usePositions.ts` - Refactored to use dflow
-- `lib/arena/hooks/useTrades.ts` - Refactored to use dflow
-- `lib/arena/hooks/index.ts` - Updated exports
-- `lib/ai/agents/predictionMarketAgent.ts` - Added chat message saving
+- `app/page.tsx` - Uses real hooks instead of mock data
+- `components/trades/TradesFeed.tsx` - Uses DflowTradeWithModel type
+- `components/trades/TradeCard.tsx` - Uses DflowTradeWithModel type
+- `components/positions/PositionsTable.tsx` - Uses DflowPosition type
+- `components/layout/AppTabs.tsx` - Uses ARENA_MODELS from models.ts
+- `components/index/PerformanceChart.tsx` - Uses ARENA_MODELS from models.ts
+- `components/index/MarketTicker.tsx` - Uses useMarketPrices from hooks/arena
+- `app/api/cron/snapshots/route.ts` - Uses ARENA_MODELS instead of DB
+- `app/api/arena/sessions/route.ts` - Removed portfolio creation
+- `lib/arena/constants.ts` - Removed MODEL_COLORS and DEFAULT_ARENA_MODELS
+- `lib/supabase/arena.ts` - Removed model CRUD functions
+- `lib/supabase/types.ts` - Added arena table types
 
 ### Removed Files
-- `app/api/arena/portfolios/route.ts`
-- `app/api/arena/positions/route.ts`
-- `app/api/arena/trades/route.ts`
-- `app/api/arena/broadcasts/route.ts`
-- `components/broadcast/BroadcastCard.tsx`
-- `components/broadcast/BroadcastFeed.tsx`
-- `lib/arena/hooks/useBroadcasts.ts`
+- `app/api/arena/models/` - No longer needed (hardcoded models)
+- `lib/arena/api.ts` - No longer needed (hooks call APIs directly)
+- `lib/arena/mock/` - No longer needed (real dflow data)
+- `lib/arena/hooks/` - Moved to hooks/arena/
+
+---
+
+## Hook Usage
+
+### Arena Hooks (`hooks/arena/`)
+
+```typescript
+import {
+  useArenaModels,
+  usePerformance,
+  useTrades,
+  useSessionTrades,
+  usePositions,
+  useSessionPositions,
+  useMarketPrices,
+} from "@/hooks/arena";
+
+// Get models (synchronous, from config)
+const { models } = useArenaModels();
+
+// Get performance data for a session
+const { chartData, snapshots, isLoading } = usePerformance(sessionId);
+
+// Get trades for a session
+const { trades, isLoading } = useSessionTrades(sessionId);
+
+// Get positions for a session
+const { positions, isLoading } = useSessionPositions(sessionId);
+
+// Subscribe to live market prices
+const { prices, isConnected } = useMarketPrices();
+```
+
+### Chat Hooks (`hooks/chat/`)
+
+```typescript
+import { useChatMessages, useArenaChatMessages, useSessions } from "@/hooks/chat";
+
+// User chat
+const { messages, sendMessage } = useChatMessages({ sessionId });
+
+// Arena chat
+const { messages, sendMessage } = useArenaChatMessages({ sessionId });
+
+// Session management
+const { sessions, updateSession, deleteSession } = useSessions();
+```
 
 ---
 
 ## Testing Recommendations
 
 1. **Wallet Configuration**
-   - Add wallet addresses to models in Supabase
+   - Add wallet addresses to models in `lib/arena/models.ts`
    - Set up wallet private keys in environment variables
 
 2. **Cron Job**
@@ -293,13 +257,3 @@ ARENA_WALLET_MODEL_2=<base58_private_key>
 3. **Wallet Private Keys**
    - Currently stored in environment variables
    - Consider using a secrets manager for production
-
----
-
-## Next Steps
-
-1. Deploy database migrations to production
-2. Configure wallet addresses for each model
-3. Set up CRON_SECRET and verify cron job execution
-4. Test end-to-end trading flow with real wallets
-5. Monitor performance snapshots and adjust cron frequency if needed

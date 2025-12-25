@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
-import {
-  getArenaModels,
-  getActiveSession,
-  createBulkSnapshots,
-} from "@/lib/supabase/arena";
+import { getActiveSession, createBulkSnapshots } from "@/lib/supabase/arena";
+import { MODELS } from "@/lib/ai/models/models";
 
 // ============================================================================
 // Cron Job: Snapshot Performance Data from dflow
@@ -21,9 +18,9 @@ export async function GET(req: Request) {
   try {
     console.log("[cron/snapshots] Starting snapshot job");
 
-    // Get all enabled models with wallets
-    const models = await getArenaModels(true);
-    const modelsWithWallets = models.filter((m) => m.walletAddress);
+    // Get all enabled models with wallets from config
+    const enabledModels = MODELS.filter((m) => m.enabled);
+    const modelsWithWallets = enabledModels.filter((m) => m.walletAddress);
 
     if (modelsWithWallets.length === 0) {
       console.log("[cron/snapshots] No models with wallets configured");
@@ -41,7 +38,7 @@ export async function GET(req: Request) {
     }
 
     console.log(
-      `[cron/snapshots] Processing ${modelsWithWallets.length} models for session ${session.id}`
+      `[cron/snapshots] Processing ${modelsWithWallets.length} models for session ${session.id}`,
     );
 
     // Fetch live prices for position valuation
@@ -63,14 +60,14 @@ export async function GET(req: Request) {
         try {
           // Get cash balance
           const balanceRes = await fetch(
-            `${baseUrl}/api/dflow/balance?wallet=${model.walletAddress}`
+            `${baseUrl}/api/dflow/balance?wallet=${model.walletAddress}`,
           );
           const balanceData = await balanceRes.json();
           const cashBalance = parseFloat(balanceData.formatted) || 0;
 
           // Get positions
           const positionsRes = await fetch(
-            `${baseUrl}/api/dflow/positions?wallet=${model.walletAddress}`
+            `${baseUrl}/api/dflow/positions?wallet=${model.walletAddress}`,
           );
           const positionsData = await positionsRes.json();
 
@@ -83,15 +80,18 @@ export async function GET(req: Request) {
             positionsValue = positionsData.positions.reduce(
               (
                 sum: number,
-                pos: { market_ticker: string; quantity: number; outcome: string }
+                pos: {
+                  market_ticker: string;
+                  quantity: number;
+                  outcome: string;
+                },
               ) => {
                 const price = priceMap.get(pos.market_ticker) || 0;
                 // For "yes" positions, use yes price; for "no", use (1 - yes price)
-                const markPrice =
-                  pos.outcome === "yes" ? price : 1 - price;
+                const markPrice = pos.outcome === "yes" ? price : 1 - price;
                 return sum + pos.quantity * markPrice;
               },
-              0
+              0,
             );
           }
 
@@ -99,7 +99,7 @@ export async function GET(req: Request) {
           const accountValue = cashBalance + positionsValue;
 
           console.log(
-            `[cron/snapshots] Model ${model.name}: cash=${cashBalance}, positions=${positionsValue}, total=${accountValue}`
+            `[cron/snapshots] Model ${model.name}: cash=${cashBalance}, positions=${positionsValue}, total=${accountValue}`,
           );
 
           return {
@@ -110,7 +110,7 @@ export async function GET(req: Request) {
         } catch (error) {
           console.error(
             `[cron/snapshots] Failed to fetch data for model ${model.id}:`,
-            error
+            error,
           );
           // Return snapshot with 0 value on error
           return {
@@ -119,7 +119,7 @@ export async function GET(req: Request) {
             accountValue: 0,
           };
         }
-      })
+      }),
     );
 
     // Filter out zero-value snapshots (errors)
@@ -142,7 +142,7 @@ export async function GET(req: Request) {
     console.error("[cron/snapshots] Snapshot cron failed:", error);
     return NextResponse.json(
       { error: "Failed to create snapshots" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

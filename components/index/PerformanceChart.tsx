@@ -14,11 +14,8 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { ChartDataPoint, LeaderboardEntry } from "@/types/arena";
-import {
-  DEFAULT_ARENA_MODELS,
-  DEFAULT_STARTING_CAPITAL,
-  CHART_CONFIG,
-} from "@/lib/arena/constants";
+import { MODELS } from "@/lib/ai/models/models";
+import { DEFAULT_STARTING_CAPITAL, CHART_CONFIG } from "@/config/arena";
 import { useMemo, useState } from "react";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -206,8 +203,10 @@ export function PerformanceChart({
   // Create color map from model identifier to chart color
   const colorMap = useMemo(() => {
     const map = new Map<string, string>();
-    DEFAULT_ARENA_MODELS.forEach((model) => {
-      map.set(model.name, model.chartColor);
+    MODELS.forEach((model) => {
+      if (model.chartColor) {
+        map.set(model.name, model.chartColor);
+      }
     });
     return map;
   }, []);

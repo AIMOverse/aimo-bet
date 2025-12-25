@@ -1,12 +1,12 @@
 "use client";
 
 import { Skeleton } from "@/components/ui/skeleton";
-import { useMarketPrices } from "@/lib/arena/hooks/useMarketPrices";
+import { useLivePrices, type MarketPrice } from "@/hooks/index/useLivePrices";
 
 const MAX_DISPLAY_MARKETS = 4;
 
 export function MarketTicker() {
-  const { prices, isLoading } = useMarketPrices();
+  const { prices, priceMap, isLoading } = useLivePrices();
 
   if (isLoading) {
     return (
@@ -23,10 +23,7 @@ export function MarketTicker() {
   }
 
   // Take first N markets to display
-  const displayMarkets = Array.from(prices.values()).slice(
-    0,
-    MAX_DISPLAY_MARKETS,
-  );
+  const displayMarkets = prices.slice(0, MAX_DISPLAY_MARKETS);
 
   if (displayMarkets.length === 0) {
     return (
@@ -36,7 +33,7 @@ export function MarketTicker() {
 
   return (
     <div className="flex items-center gap-6 text-sm">
-      {displayMarkets.map((market) => (
+      {displayMarkets.map((market: MarketPrice) => (
         <div key={market.market_ticker} className="flex items-center gap-1.5">
           <span className="text-muted-foreground font-medium truncate max-w-32">
             {market.market_ticker}

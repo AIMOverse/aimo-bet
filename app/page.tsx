@@ -7,19 +7,34 @@ import { PerformanceChart } from "@/components/index/PerformanceChart";
 import { TradesFeed } from "@/components/trades/TradesFeed";
 import { ModelChatFeed } from "@/components/chat/ModelChatFeed";
 import { PositionsTable } from "@/components/positions/PositionsTable";
-import {
-  generateMockChartData,
-  generateMockLeaderboard,
-  getLatestModelValues,
-} from "@/lib/arena/mock/performance";
-import {
-  generateMockTradesWithModels,
-  generateMockPositions,
-} from "@/lib/arena/mock/trades";
-import type { ArenaTab } from "@/types/arena";
+import { usePerformance } from "@/hooks/index/usePerformance";
+import { useSessionTrades } from "@/hooks/trades/useTrades";
+import { useSessionPositions } from "@/hooks/positions/usePositions";
+import type { ArenaTab, ChartDataPoint } from "@/types/arena";
 
-// Mock session ID for development (in production, this would come from routing/state)
-const MOCK_SESSION_ID = "00000000-0000-0000-0000-000000000001";
+/**
+ * Get latest values for each model from chart data (for legend display).
+ */
+function getLatestModelValues(
+  chartData: ChartDataPoint[],
+): Map<string, number> {
+  const latestValues = new Map<string, number>();
+
+  if (chartData.length === 0) return latestValues;
+
+  const latestPoint = chartData[chartData.length - 1];
+
+  Object.entries(latestPoint).forEach(([key, value]) => {
+    if (key !== "timestamp" && typeof value === "number") {
+      latestValues.set(key, value);
+    }
+  });
+
+  return latestValues;
+}
+
+// Session ID for the arena (in production, this would come from routing/state)
+const SESSION_ID = "00000000-0000-0000-0000-000000000001";
 
 /**
  * Home page - renders the Alpha Arena trading dashboard.
@@ -28,11 +43,14 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<ArenaTab>("trades");
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
 
-  // Generate mock data (in production, this would come from SWR hooks)
-  const chartData = useMemo(() => generateMockChartData(24, 30), []);
-  const leaderboard = useMemo(() => generateMockLeaderboard(), []);
-  const trades = useMemo(() => generateMockTradesWithModels(5), []);
-  const positions = useMemo(() => generateMockPositions("mock-portfolio"), []);
+  // Fetch real data from hooks
+  const { chartData, isLoading: performanceLoading } =
+    usePerformance(SESSION_ID);
+  const { trades, isLoading: tradesLoading } = useSessionTrades(SESSION_ID);
+  const { positions, isLoading: positionsLoading } =
+    useSessionPositions(SESSION_ID);
+
+  // Calculate latest values for legend
   const latestValues = useMemo(
     () => getLatestModelValues(chartData),
     [chartData],
@@ -46,7 +64,7 @@ export default function Home() {
       case "chat":
         return (
           <ModelChatFeed
-            sessionId={MOCK_SESSION_ID}
+            sessionId={SESSION_ID}
             selectedModelId={selectedModelId}
           />
         );
@@ -67,11 +85,7 @@ export default function Home() {
         {/* Left Panel - Chart with integrated Legend */}
         <div className="flex flex-col border-r min-h-0 overflow-auto lg:flex-1">
           <div className="flex-1 p-4 flex flex-col gap-4">
-            <PerformanceChart
-              data={chartData}
-              latestValues={latestValues}
-              leaderboard={leaderboard}
-            />
+            <PerformanceChart data={chartData} latestValues={latestValues} />
           </div>
         </div>
 

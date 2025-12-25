@@ -4,7 +4,8 @@ import {
   wrapLanguageModel,
   defaultSettingsMiddleware,
 } from "ai";
-import { getDefaultProvider, MODELS } from "@/lib/ai/models/models";
+import { getDefaultProvider } from "./providers";
+import { MODELS } from "./catalog";
 import { loggingMiddleware } from "../middleware";
 
 // Get configuration from central config

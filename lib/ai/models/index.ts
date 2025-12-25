@@ -1,11 +1,9 @@
 // ============================================================================
-// Backwards Compatibility Re-exports
+// Unified Models Module
 // ============================================================================
-// This file re-exports from the new modular structure for backwards compatibility.
-// New code should import from "@/lib/ai/models" directly.
 
+// Model catalog and helpers
 export {
-  // Model catalog
   MODELS,
   getModelById,
   getModelsByProvider,
@@ -16,8 +14,14 @@ export {
   getModelColor,
   getModelColorMap,
   getModelsWithWallets,
-  // Provider config
-  PROVIDERS,
-  getProviderById,
-  getDefaultProvider,
-} from "./index";
+} from "./catalog";
+
+// Provider configurations
+export { PROVIDERS, getProviderById, getDefaultProvider } from "./providers";
+
+// Provider instances
+export { openrouter } from "./openrouter";
+export { aimo } from "./aimo";
+
+// Registry and model access
+export { registry, getModel } from "./registry";

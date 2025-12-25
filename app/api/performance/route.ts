@@ -6,7 +6,7 @@ import {
 } from "@/lib/supabase/arena";
 
 // ============================================================================
-// GET /api/arena/snapshots - Get performance snapshots for a session
+// GET /api/performance - Get performance snapshots for a session
 // ============================================================================
 
 export async function GET(req: Request) {
@@ -34,7 +34,7 @@ export async function GET(req: Request) {
 }
 
 // ============================================================================
-// POST /api/arena/snapshots - Create performance snapshot(s)
+// POST /api/performance - Create performance snapshot(s)
 // ============================================================================
 
 export async function POST(req: Request) {
