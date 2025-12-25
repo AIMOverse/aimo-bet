@@ -1,9 +1,9 @@
 "use client";
 
 import useSWR from "swr";
-import { POLLING_INTERVALS } from "@/config/arena";
+import { POLLING_INTERVALS } from "@/lib/config";
 import { MODELS } from "@/lib/ai/models/models";
-import type { PerformanceSnapshot, ChartDataPoint } from "@/types/arena";
+import type { PerformanceSnapshot, ChartDataPoint } from "@/types/db";
 import type { ModelDefinition } from "@/types/models";
 
 /**

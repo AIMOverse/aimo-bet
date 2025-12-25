@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
+import { dflowMetadataFetch } from "@/lib/dflow/client";
 
 // ============================================================================
 // dflow Positions - On-chain + Metadata API
 // Docs: https://pond.dflow.net/prediction-market-metadata-api-reference/markets/outcome-mints
 // ============================================================================
-
-const DFLOW_METADATA_API = "https://prediction-markets-api.dflow.net/api/v1";
 
 // Solana RPC endpoint
 const SOLANA_RPC_URL =
@@ -35,7 +34,7 @@ interface Position {
 
 async function getTokenBalanceForMint(
   owner: string,
-  mint: string
+  mint: string,
 ): Promise<number> {
   try {
     const response = await fetch(SOLANA_RPC_URL, {
@@ -45,11 +44,7 @@ async function getTokenBalanceForMint(
         jsonrpc: "2.0",
         id: 1,
         method: "getTokenAccountsByOwner",
-        params: [
-          owner,
-          { mint },
-          { encoding: "jsonParsed" },
-        ],
+        params: [owner, { mint }, { encoding: "jsonParsed" }],
       }),
     });
 
@@ -104,7 +99,7 @@ export async function GET(req: Request) {
     if (!walletAddress) {
       return NextResponse.json(
         { error: "wallet address is required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -113,21 +108,14 @@ export async function GET(req: Request) {
     if (tickers) params.set("tickers", tickers);
     if (!includeClosed) params.set("status", "active");
 
-    const response = await fetch(
-      `${DFLOW_METADATA_API}/outcome-mints?${params}`,
-      {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    const response = await dflowMetadataFetch(`/outcome-mints?${params}`);
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error("[dflow/positions] API error:", response.status, errorText);
       return NextResponse.json(
         { error: `dflow API error: ${response.status}` },
-        { status: response.status }
+        { status: response.status },
       );
     }
 
@@ -151,7 +139,7 @@ export async function GET(req: Request) {
         batch.map(async (mint) => {
           const quantity = await getTokenBalanceForMint(
             walletAddress,
-            mint.mint
+            mint.mint,
           );
           return {
             market_ticker: mint.market_ticker,
@@ -160,7 +148,7 @@ export async function GET(req: Request) {
             quantity,
             wallet: walletAddress,
           };
-        })
+        }),
       );
 
       // Only include positions with non-zero quantity
@@ -170,7 +158,7 @@ export async function GET(req: Request) {
     console.log(
       "[dflow/positions] Found",
       positions.length,
-      "positions with balance"
+      "positions with balance",
     );
 
     return NextResponse.json({
@@ -181,7 +169,7 @@ export async function GET(req: Request) {
     console.error("[dflow/positions] Failed to fetch positions:", error);
     return NextResponse.json(
       { error: "Failed to fetch positions" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

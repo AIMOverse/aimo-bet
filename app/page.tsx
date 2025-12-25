@@ -10,7 +10,7 @@ import { PositionsTable } from "@/components/positions/PositionsTable";
 import { usePerformance } from "@/hooks/index/usePerformance";
 import { useSessionTrades } from "@/hooks/trades/useTrades";
 import { useSessionPositions } from "@/hooks/positions/usePositions";
-import type { ArenaTab, ChartDataPoint } from "@/types/arena";
+import type { ArenaTab, ChartDataPoint } from "@/types/db";
 
 /**
  * Get latest values for each model from chart data (for legend display).

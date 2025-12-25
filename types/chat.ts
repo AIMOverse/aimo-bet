@@ -1,18 +1,18 @@
 import type { UIMessage } from "ai";
 
 // =============================================================================
-// Arena Chat Types
+// Chat Types
 // =============================================================================
 
 /**
- * Author types for arena chat messages
+ * Author types for chat messages
  */
-export type ArenaChatAuthorType = "model" | "user" | "assistant";
+export type ChatAuthorType = "model" | "user" | "assistant";
 
 /**
- * Message types for arena chat
+ * Message types for chat
  */
-export type ArenaChatMessageType =
+export type ChatMessageType =
   | "analysis"
   | "trade"
   | "commentary"
@@ -20,18 +20,18 @@ export type ArenaChatMessageType =
   | "assistant";
 
 /**
- * Custom metadata for arena chat messages.
+ * Custom metadata for chat messages.
  * Follows ai-sdk patterns by extending UIMessage with typed metadata.
  */
-export interface ArenaChatMetadata {
+export interface ChatMetadata {
   /** Trading session ID (trading_sessions.id) */
   sessionId: string;
   /** Who authored the message */
-  authorType: ArenaChatAuthorType;
+  authorType: ChatAuthorType;
   /** Identifier for the author (model_id, visitorIP, or 'assistant') */
   authorId: string;
   /** Type of message content */
-  messageType: ArenaChatMessageType;
+  messageType: ChatMessageType;
   /** Related trade ID if this is a trade message */
   relatedTradeId?: string;
   /** Timestamp in milliseconds */
@@ -39,24 +39,24 @@ export interface ArenaChatMetadata {
 }
 
 /**
- * Arena chat message = UIMessage with our custom metadata
+ * Chat message = UIMessage with our custom metadata
  */
-export type ArenaChatMessage = UIMessage & {
-  metadata?: ArenaChatMetadata;
+export type ChatMessage = UIMessage & {
+  metadata?: ChatMetadata;
 };
 
 /**
  * Author display information for rendering
  */
-export interface ArenaChatAuthor {
+export interface ChatAuthor {
   name: string;
   avatarUrl?: string;
   color?: string;
 }
 
 /**
- * Arena chat message with author display info for rendering
+ * Chat message with author display info for rendering
  */
-export interface ArenaChatMessageWithAuthor extends ArenaChatMessage {
-  author: ArenaChatAuthor;
+export interface ChatMessageWithAuthor extends ChatMessage {
+  author: ChatAuthor;
 }

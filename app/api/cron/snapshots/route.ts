@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getActiveSession, createBulkSnapshots } from "@/lib/supabase/arena";
+import { getActiveSession, createBulkSnapshots } from "@/lib/supabase/db";
 import { MODELS } from "@/lib/ai/models/models";
 
 // ============================================================================

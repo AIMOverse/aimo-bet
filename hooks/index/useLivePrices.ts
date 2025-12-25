@@ -1,7 +1,7 @@
 "use client";
 
 import useSWR from "swr";
-import { POLLING_INTERVALS } from "@/config/arena";
+import { POLLING_INTERVALS } from "@/lib/config";
 
 export interface MarketPrice {
   market_ticker: string;

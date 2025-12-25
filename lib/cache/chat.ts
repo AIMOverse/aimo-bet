@@ -4,8 +4,7 @@ import type { UIMessage } from "ai";
 // Cache Configuration
 // =============================================================================
 
-const USER_CHAT_PREFIX = "aimo-chat-messages-";
-const ARENA_CHAT_PREFIX = "aimo-arena-chat-";
+const CACHE_PREFIX = "aimo-chat-";
 const CACHE_VERSION = "v1";
 
 /**
@@ -16,25 +15,25 @@ function isBrowser(): boolean {
 }
 
 // =============================================================================
-// User Chat Cache Functions
+// Chat Cache Functions
 // =============================================================================
 
 /**
- * Get the cache key for a user chat session's messages
+ * Get the cache key for a session's messages
  */
-function getUserChatCacheKey(sessionId: string): string {
-  return `${USER_CHAT_PREFIX}${CACHE_VERSION}-${sessionId}`;
+function getCacheKey(sessionId: string): string {
+  return `${CACHE_PREFIX}${CACHE_VERSION}-${sessionId}`;
 }
 
 /**
- * Get cached messages for a user chat session
+ * Get cached messages for a session
  * Returns empty array if not found or on error
  */
 export function getCachedMessages(sessionId: string): UIMessage[] {
   if (!isBrowser()) return [];
 
   try {
-    const key = getUserChatCacheKey(sessionId);
+    const key = getCacheKey(sessionId);
     const cached = localStorage.getItem(key);
     if (!cached) return [];
 
@@ -49,33 +48,31 @@ export function getCachedMessages(sessionId: string): UIMessage[] {
 }
 
 /**
- * Cache messages for a user chat session
+ * Cache messages for a session
  */
 export function setCachedMessages(
   sessionId: string,
-  messages: UIMessage[]
+  messages: UIMessage[],
 ): void {
   if (!isBrowser()) return;
 
   try {
-    const key = getUserChatCacheKey(sessionId);
+    const key = getCacheKey(sessionId);
     localStorage.setItem(key, JSON.stringify(messages));
   } catch (error) {
-    // Handle quota exceeded or other errors
     console.error("Failed to cache messages:", error);
-    // Try to clear old caches if storage is full
     clearOldCaches();
   }
 }
 
 /**
- * Clear cached messages for a user chat session
+ * Clear cached messages for a session
  */
 export function clearCachedMessages(sessionId: string): void {
   if (!isBrowser()) return;
 
   try {
-    const key = getUserChatCacheKey(sessionId);
+    const key = getCacheKey(sessionId);
     localStorage.removeItem(key);
   } catch (error) {
     console.error("Failed to clear message cache:", error);
@@ -83,7 +80,7 @@ export function clearCachedMessages(sessionId: string): void {
 }
 
 /**
- * Clear all user chat message caches
+ * Clear all chat message caches
  */
 export function clearAllCachedMessages(): void {
   if (!isBrowser()) return;
@@ -91,95 +88,12 @@ export function clearAllCachedMessages(): void {
   try {
     const keys = Object.keys(localStorage);
     for (const key of keys) {
-      if (key.startsWith(USER_CHAT_PREFIX)) {
+      if (key.startsWith(CACHE_PREFIX)) {
         localStorage.removeItem(key);
       }
     }
   } catch (error) {
     console.error("Failed to clear all message caches:", error);
-  }
-}
-
-// =============================================================================
-// Arena Chat Cache Functions
-// =============================================================================
-
-/**
- * Get the cache key for an arena trading session's messages
- */
-function getArenaCacheKey(tradingSessionId: string): string {
-  return `${ARENA_CHAT_PREFIX}${CACHE_VERSION}-${tradingSessionId}`;
-}
-
-/**
- * Get cached messages for an arena trading session
- * Returns empty array if not found or on error
- */
-export function getArenaCachedMessages(tradingSessionId: string): UIMessage[] {
-  if (!isBrowser()) return [];
-
-  try {
-    const key = getArenaCacheKey(tradingSessionId);
-    const cached = localStorage.getItem(key);
-    if (!cached) return [];
-
-    const parsed = JSON.parse(cached);
-    if (!Array.isArray(parsed)) return [];
-
-    return parsed;
-  } catch (error) {
-    console.error("Failed to read arena message cache:", error);
-    return [];
-  }
-}
-
-/**
- * Cache messages for an arena trading session
- */
-export function setArenaCachedMessages(
-  tradingSessionId: string,
-  messages: UIMessage[]
-): void {
-  if (!isBrowser()) return;
-
-  try {
-    const key = getArenaCacheKey(tradingSessionId);
-    localStorage.setItem(key, JSON.stringify(messages));
-  } catch (error) {
-    console.error("Failed to cache arena messages:", error);
-    clearOldCaches();
-  }
-}
-
-/**
- * Clear cached messages for an arena trading session
- */
-export function clearArenaCachedMessages(tradingSessionId: string): void {
-  if (!isBrowser()) return;
-
-  try {
-    const key = getArenaCacheKey(tradingSessionId);
-    localStorage.removeItem(key);
-  } catch (error) {
-    console.error("Failed to clear arena message cache:", error);
-  }
-}
-
-/**
- * Clear all arena chat message caches
- */
-export function clearAllArenaCachedMessages(): void {
-  if (!isBrowser()) return;
-
-  try {
-    const keys = Object.keys(localStorage);
-    for (const key of keys) {
-      if (key.startsWith(ARENA_CHAT_PREFIX)) {
-        localStorage.removeItem(key);
-      }
-    }
-  } catch (error) {
-    console.error("Failed to clear all arena message caches:", error);
   }
 }
 
@@ -198,10 +112,7 @@ function clearOldCaches(): void {
     const chatCaches: { key: string; time: number }[] = [];
 
     for (const key of keys) {
-      const isUserChat = key.startsWith(USER_CHAT_PREFIX);
-      const isArenaChat = key.startsWith(ARENA_CHAT_PREFIX);
-
-      if (isUserChat || isArenaChat) {
+      if (key.startsWith(CACHE_PREFIX)) {
         // Remove old version caches
         if (!key.includes(CACHE_VERSION)) {
           localStorage.removeItem(key);

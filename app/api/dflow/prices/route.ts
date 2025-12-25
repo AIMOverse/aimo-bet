@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
+import { dflowMetadataFetch } from "@/lib/dflow/client";
 
 // ============================================================================
 // dflow Prediction Markets Metadata API - Live Data
 // Docs: https://pond.dflow.net/prediction-market-metadata-api-reference/live-data/live-data
 // ============================================================================
-
-const DFLOW_METADATA_API = "https://prediction-markets-api.dflow.net/api/v1";
 
 // ============================================================================
 // GET /api/dflow/prices - Get current market prices
@@ -21,14 +20,7 @@ export async function GET(req: Request) {
       tickers || "all",
     );
 
-    // If specific tickers requested, use live-data-by-mint or filter results
-    const endpoint = `${DFLOW_METADATA_API}/live-data`;
-
-    const response = await fetch(endpoint, {
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
+    const response = await dflowMetadataFetch("/live-data");
 
     if (!response.ok) {
       const errorText = await response.text();

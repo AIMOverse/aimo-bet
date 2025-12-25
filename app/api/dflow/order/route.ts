@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
+import { dflowSwapFetch } from "@/lib/dflow/client";
 
 // ============================================================================
 // dflow Swap API - Order
 // Docs: https://pond.dflow.net/swap-api-reference/order/order
 // ============================================================================
-
-const DFLOW_SWAP_API = "https://swap-api.dflow.net";
 
 // ============================================================================
 // POST /api/dflow/order - Place an order
@@ -36,21 +35,21 @@ export async function POST(req: Request) {
     if (!market_ticker || !side || !action || !quantity) {
       return NextResponse.json(
         { error: "market_ticker, side, action, and quantity are required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     if (quantity <= 0) {
       return NextResponse.json(
         { error: "quantity must be positive" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     if (limit_price !== undefined && (limit_price < 0 || limit_price > 1)) {
       return NextResponse.json(
         { error: "limit_price must be between 0 and 1" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -74,11 +73,8 @@ export async function POST(req: Request) {
       slippage_tolerance,
     };
 
-    const response = await fetch(`${DFLOW_SWAP_API}/order`, {
+    const response = await dflowSwapFetch("/order", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
       body: JSON.stringify(orderRequest),
     });
 
@@ -87,7 +83,7 @@ export async function POST(req: Request) {
       console.error("[dflow/order] API error:", response.status, errorText);
       return NextResponse.json(
         { error: `dflow Swap API error: ${response.status} - ${errorText}` },
-        { status: response.status }
+        { status: response.status },
       );
     }
 
@@ -103,7 +99,7 @@ export async function POST(req: Request) {
     console.error("[dflow/order] Failed to place order:", error);
     return NextResponse.json(
       { error: "Failed to place order" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

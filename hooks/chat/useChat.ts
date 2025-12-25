@@ -4,20 +4,17 @@ import { useChat as useAIChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { UIMessage } from "ai";
-import {
-  getArenaCachedMessages,
-  setArenaCachedMessages,
-} from "@/lib/cache/chat";
-import type { ArenaChatMessage } from "@/types/chat";
+import { getCachedMessages, setCachedMessages } from "@/lib/cache/chat";
+import type { ChatMessage } from "@/types/chat";
 
-interface UseArenaChatMessagesOptions {
-  /** Trading session ID (required for arena mode) */
+interface UseChatOptions {
+  /** Trading session ID */
   sessionId: string | null;
 }
 
-interface UseArenaChatMessagesReturn {
-  /** All messages in the arena chat */
-  messages: ArenaChatMessage[];
+interface UseChatReturn {
+  /** All messages in the chat */
+  messages: ChatMessage[];
   /** Input value (managed locally) */
   input: string;
   /** Set input value */
@@ -31,15 +28,11 @@ interface UseArenaChatMessagesReturn {
   /** Stop generation */
   stop: () => void;
   /** Append a message without sending (for model broadcasts) */
-  append: (message: ArenaChatMessage) => void;
+  append: (message: ChatMessage) => void;
 }
 
-export function useArenaChatMessages({
-  sessionId,
-}: UseArenaChatMessagesOptions): UseArenaChatMessagesReturn {
-  const [initialMessages, setInitialMessages] = useState<ArenaChatMessage[]>(
-    []
-  );
+export function useChat({ sessionId }: UseChatOptions): UseChatReturn {
+  const [initialMessages, setInitialMessages] = useState<ChatMessage[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [input, setInput] = useState("");
   const [localError, setLocalError] = useState<Error | undefined>(undefined);
@@ -54,11 +47,11 @@ export function useArenaChatMessages({
 
   // Stable internal ID for useAIChat
   const internalChatId = useMemo(
-    () => `arena-${sessionId ?? "none"}`,
-    [sessionId]
+    () => `chat-${sessionId ?? "none"}`,
+    [sessionId],
   );
 
-  // Arena mode transport - no session header interception needed
+  // Chat transport
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
@@ -68,12 +61,11 @@ export function useArenaChatMessages({
             body: {
               message: messages[messages.length - 1],
               sessionId: sessionIdRef.current,
-              mode: "arena",
             },
           };
         },
       }),
-    []
+    [],
   );
 
   // Load messages when session changes
@@ -88,19 +80,19 @@ export function useArenaChatMessages({
 
       try {
         // Try cache first
-        const cached = getArenaCachedMessages(sessionId);
+        const cached = getCachedMessages(sessionId);
         if (cached.length > 0) {
-          setInitialMessages(cached as ArenaChatMessage[]);
+          setInitialMessages(cached as ChatMessage[]);
         }
 
-        // Fetch from arena chat messages API
+        // Fetch from chat messages API
         const response = await fetch(
-          `/api/arena/chat-messages?sessionId=${sessionId}`
+          `/api/arena/chat-messages?sessionId=${sessionId}`,
         );
         if (response.ok) {
           const messages = await response.json();
           setInitialMessages(messages);
-          setArenaCachedMessages(sessionId, messages);
+          setCachedMessages(sessionId, messages);
         } else if (cached.length === 0) {
           // No cache and API failed - start fresh
           setInitialMessages([]);
@@ -108,14 +100,14 @@ export function useArenaChatMessages({
 
         hasLoadedRef.current = sessionId;
       } catch (err) {
-        console.error("Failed to load arena messages:", err);
+        console.error("Failed to load messages:", err);
         setLocalError(
-          err instanceof Error ? err : new Error("Failed to load messages")
+          err instanceof Error ? err : new Error("Failed to load messages"),
         );
         // Use cached if available
-        const cached = getArenaCachedMessages(sessionId);
+        const cached = getCachedMessages(sessionId);
         if (cached.length > 0) {
-          setInitialMessages(cached as ArenaChatMessage[]);
+          setInitialMessages(cached as ChatMessage[]);
         }
       } finally {
         setIsLoadingHistory(false);
@@ -166,22 +158,22 @@ export function useArenaChatMessages({
       const parts: UIMessage["parts"] = [{ type: "text", text: content }];
       aiSendMessage({ parts });
     },
-    [aiSendMessage, sessionId]
+    [aiSendMessage, sessionId],
   );
 
   // Append message locally (for model broadcasts via realtime)
   const append = useCallback(
-    (message: ArenaChatMessage) => {
+    (message: ChatMessage) => {
       setMessages((prev) => [...prev, message]);
     },
-    [setMessages]
+    [setMessages],
   );
 
   const isLoading =
     status === "streaming" || status === "submitted" || isLoadingHistory;
 
   return {
-    messages: isLoadingHistory ? [] : (messages as ArenaChatMessage[]),
+    messages: isLoadingHistory ? [] : (messages as ChatMessage[]),
     input,
     setInput,
     isLoading,

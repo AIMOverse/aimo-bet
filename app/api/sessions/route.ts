@@ -5,9 +5,9 @@ import {
   getActiveSession,
   createTradingSession,
   updateSessionStatus,
-} from "@/lib/supabase/arena";
-import type { SessionStatus } from "@/types/arena";
-import { DEFAULT_STARTING_CAPITAL } from "@/config/arena";
+} from "@/lib/supabase/db";
+import type { SessionStatus } from "@/types/db";
+import { DEFAULT_STARTING_CAPITAL } from "@/lib/config";
 
 // ============================================================================
 // GET /api/sessions - List sessions or get active session

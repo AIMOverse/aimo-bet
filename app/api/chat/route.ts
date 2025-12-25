@@ -8,10 +8,10 @@ import {
 import { chatAgent } from "@/lib/ai/agents";
 import {
   getGlobalSession,
-  getArenaChatMessages,
-  saveArenaChatMessage,
-} from "@/lib/supabase/arena";
-import type { ArenaChatMessage } from "@/types/chat";
+  getChatMessages,
+  saveChatMessage,
+} from "@/lib/supabase/db";
+import type { ChatMessage } from "@/types/chat";
 
 // ============================================================================
 // Types
@@ -68,11 +68,11 @@ export async function POST(req: Request) {
     // Get visitor ID from request
     const visitorId = getVisitorId(req);
 
-    // Load recent arena messages for context
-    const previousMessages = await getArenaChatMessages(finalSessionId, 50);
+    // Load recent messages for context
+    const previousMessages = await getChatMessages(finalSessionId, 50);
 
     // Create user message with metadata
-    const userMessage: ArenaChatMessage = {
+    const userMessage: ChatMessage = {
       ...message,
       metadata: {
         sessionId: finalSessionId,
@@ -84,7 +84,7 @@ export async function POST(req: Request) {
     };
 
     // Save user message
-    await saveArenaChatMessage(userMessage);
+    await saveChatMessage(userMessage);
 
     const uiMessages = [...previousMessages, userMessage];
 
@@ -101,7 +101,6 @@ export async function POST(req: Request) {
         const agentStream = await createAgentUIStream({
           agent: chatAgent,
           uiMessages,
-          options: {},
         });
 
         writer.merge(agentStream);
@@ -110,7 +109,7 @@ export async function POST(req: Request) {
         try {
           // Save assistant response messages with metadata
           for (const msg of responseMessages) {
-            const arenaMessage: ArenaChatMessage = {
+            const chatMessage: ChatMessage = {
               ...msg,
               metadata: {
                 sessionId: finalSessionId,
@@ -120,10 +119,10 @@ export async function POST(req: Request) {
                 createdAt: Date.now(),
               },
             };
-            await saveArenaChatMessage(arenaMessage);
+            await saveChatMessage(chatMessage);
           }
         } catch (error) {
-          console.error("Failed to save arena chat:", error);
+          console.error("Failed to save chat:", error);
         }
       },
     });

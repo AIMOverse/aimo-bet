@@ -8,10 +8,13 @@ import {
   Bot,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ArenaChatMessage, ArenaChatMessageType } from "@/types/chat";
+import type {
+  ChatMessage as ChatMessageType,
+  ChatMessageType as MessageType,
+} from "@/types/chat";
 
 interface ChatMessageProps {
-  message: ArenaChatMessage;
+  message: ChatMessageType;
   modelInfo?: {
     name: string;
     color: string;
@@ -35,7 +38,7 @@ function formatTimeAgo(timestamp: number): string {
 }
 
 // Get icon for message type
-function MessageTypeIcon({ type }: { type: ArenaChatMessageType }) {
+function MessageTypeIcon({ type }: { type: MessageType }) {
   switch (type) {
     case "analysis":
       return <BarChart3 className="h-4 w-4" />;
@@ -53,7 +56,7 @@ function MessageTypeIcon({ type }: { type: ArenaChatMessageType }) {
 }
 
 // Get badge style for message type
-function getTypeBadgeStyle(type: ArenaChatMessageType): string {
+function getTypeBadgeStyle(type: MessageType): string {
   switch (type) {
     case "analysis":
       return "bg-blue-500/10 text-blue-500";
@@ -85,11 +88,13 @@ function getMessageBackground(authorType: string): string {
 }
 
 // Extract text content from message parts
-function getMessageText(message: ArenaChatMessage): string {
+function getMessageText(message: ChatMessageType): string {
   if (!message.parts) return "";
 
   return message.parts
-    .filter((part): part is { type: "text"; text: string } => part.type === "text")
+    .filter(
+      (part): part is { type: "text"; text: string } => part.type === "text",
+    )
     .map((part) => part.text)
     .join("");
 }
@@ -98,7 +103,7 @@ function getMessageText(message: ArenaChatMessage): string {
 function getAuthorName(
   authorType: string,
   authorId: string,
-  modelInfo?: { name: string; color: string }
+  modelInfo?: { name: string; color: string },
 ): string {
   switch (authorType) {
     case "model":
@@ -115,7 +120,7 @@ function getAuthorName(
 // Get author avatar color
 function getAvatarColor(
   authorType: string,
-  modelInfo?: { name: string; color: string }
+  modelInfo?: { name: string; color: string },
 ): string {
   switch (authorType) {
     case "model":
@@ -133,9 +138,14 @@ export function ChatMessage({ message, modelInfo }: ChatMessageProps) {
   const metadata = message.metadata;
   const authorType = metadata?.authorType ?? "assistant";
   const messageType = metadata?.messageType ?? "assistant";
-  const createdAt = metadata?.createdAt ?? Date.now();
+  // Use 0 as fallback - createdAt should always be set by the time messages are saved
+  const createdAt = metadata?.createdAt ?? 0;
 
-  const authorName = getAuthorName(authorType, metadata?.authorId ?? "", modelInfo);
+  const authorName = getAuthorName(
+    authorType,
+    metadata?.authorId ?? "",
+    modelInfo,
+  );
   const avatarColor = getAvatarColor(authorType, modelInfo);
   const bgStyle = getMessageBackground(authorType);
   const badgeStyle = getTypeBadgeStyle(messageType);
@@ -147,7 +157,7 @@ export function ChatMessage({ message, modelInfo }: ChatMessageProps) {
     <div
       className={cn(
         "p-4 rounded-lg hover:bg-opacity-80 transition-colors",
-        bgStyle
+        bgStyle,
       )}
     >
       {/* Header */}
@@ -172,7 +182,7 @@ export function ChatMessage({ message, modelInfo }: ChatMessageProps) {
           <span
             className={cn(
               "flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium",
-              badgeStyle
+              badgeStyle,
             )}
           >
             <MessageTypeIcon type={messageType} />
@@ -182,7 +192,9 @@ export function ChatMessage({ message, modelInfo }: ChatMessageProps) {
       </div>
 
       {/* Content */}
-      <div className="text-sm leading-relaxed whitespace-pre-wrap">{content}</div>
+      <div className="text-sm leading-relaxed whitespace-pre-wrap">
+        {content}
+      </div>
     </div>
   );
 }

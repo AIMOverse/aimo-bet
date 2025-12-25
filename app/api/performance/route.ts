@@ -3,7 +3,7 @@ import {
   getPerformanceSnapshots,
   createPerformanceSnapshot,
   createBulkSnapshots,
-} from "@/lib/supabase/arena";
+} from "@/lib/supabase/db";
 
 // ============================================================================
 // GET /api/performance - Get performance snapshots for a session
@@ -18,7 +18,7 @@ export async function GET(req: Request) {
     if (!sessionId) {
       return NextResponse.json(
         { error: "sessionId is required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -28,7 +28,7 @@ export async function GET(req: Request) {
     console.error("Failed to get snapshots:", error);
     return NextResponse.json(
       { error: "Failed to get snapshots" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -53,22 +53,32 @@ export async function POST(req: Request) {
       if (snapshots.length === 0) {
         return NextResponse.json(
           { error: "At least one snapshot is required" },
-          { status: 400 }
+          { status: 400 },
         );
       }
 
       // Validate all entries
       for (const snapshot of snapshots) {
-        if (!snapshot.sessionId || !snapshot.modelId || typeof snapshot.accountValue !== "number") {
+        if (
+          !snapshot.sessionId ||
+          !snapshot.modelId ||
+          typeof snapshot.accountValue !== "number"
+        ) {
           return NextResponse.json(
-            { error: "Each snapshot requires sessionId, modelId, and accountValue" },
-            { status: 400 }
+            {
+              error:
+                "Each snapshot requires sessionId, modelId, and accountValue",
+            },
+            { status: 400 },
           );
         }
       }
 
       await createBulkSnapshots(snapshots);
-      return NextResponse.json({ success: true, count: snapshots.length }, { status: 201 });
+      return NextResponse.json(
+        { success: true, count: snapshots.length },
+        { status: 201 },
+      );
     } else {
       // Single creation
       const { sessionId, modelId, accountValue } = body as {
@@ -80,18 +90,22 @@ export async function POST(req: Request) {
       if (!sessionId || !modelId || typeof accountValue !== "number") {
         return NextResponse.json(
           { error: "sessionId, modelId, and accountValue are required" },
-          { status: 400 }
+          { status: 400 },
         );
       }
 
-      const snapshot = await createPerformanceSnapshot(sessionId, modelId, accountValue);
+      const snapshot = await createPerformanceSnapshot(
+        sessionId,
+        modelId,
+        accountValue,
+      );
       return NextResponse.json(snapshot, { status: 201 });
     }
   } catch (error) {
     console.error("Failed to create snapshot:", error);
     return NextResponse.json(
       { error: "Failed to create snapshot" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

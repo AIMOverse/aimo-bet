@@ -8,9 +8,9 @@ import type {
   TradingDecision,
   Trade,
   PredictionMarket,
-} from "@/types/arena";
-import type { ArenaChatMessage, ArenaChatMessageType } from "@/types/chat";
-import { saveArenaChatMessage } from "@/lib/supabase/arena";
+} from "@/types/db";
+import type { ChatMessage, ChatMessageType } from "@/types/chat";
+import { saveChatMessage } from "@/lib/supabase/db";
 
 // Import dflow trading tools
 import {
@@ -106,9 +106,9 @@ export abstract class PredictionMarketAgent {
     // Step 3: Generate broadcast message
     const broadcast = await this.generateBroadcast(decision, context);
 
-    // Step 4: Save to arena chat (replaces old broadcast system)
+    // Step 4: Save to chat (replaces old broadcast system)
     const messageType = decision.action === "hold" ? "commentary" : "trade";
-    await this.saveChatMessage(broadcast, messageType);
+    await this.saveMessage(broadcast, messageType);
 
     return { decision, broadcast, analyses };
   }
@@ -128,15 +128,15 @@ export abstract class PredictionMarketAgent {
   }
 
   /**
-   * Save a chat message to the arena chat.
+   * Save a chat message.
    * This replaces the old broadcast system.
    */
-  async saveChatMessage(
+  async saveMessage(
     content: string,
-    messageType: ArenaChatMessageType,
+    messageType: ChatMessageType,
     relatedTradeId?: string,
   ): Promise<void> {
-    const message: ArenaChatMessage = {
+    const message: ChatMessage = {
       id: nanoid(),
       role: "assistant", // Models use assistant role
       parts: [{ type: "text", text: content }],
@@ -150,7 +150,7 @@ export abstract class PredictionMarketAgent {
       },
     };
 
-    await saveArenaChatMessage(message);
+    await saveChatMessage(message);
   }
 }
 

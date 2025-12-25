@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
+import { dflowSwapFetch } from "@/lib/dflow/client";
 
 // ============================================================================
 // dflow Swap API - Order Status
 // Docs: https://pond.dflow.net/swap-api-reference/order/order-status
 // ============================================================================
-
-const DFLOW_SWAP_API = "https://swap-api.dflow.net";
 
 // ============================================================================
 // GET /api/dflow/order/[id] - Get order status
@@ -13,7 +12,7 @@ const DFLOW_SWAP_API = "https://swap-api.dflow.net";
 
 export async function GET(
   req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await params;
@@ -21,19 +20,14 @@ export async function GET(
     if (!id) {
       return NextResponse.json(
         { error: "Order ID is required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     console.log("[dflow/order/id] Fetching order status:", id);
 
-    const response = await fetch(
-      `${DFLOW_SWAP_API}/order-status?order_id=${encodeURIComponent(id)}`,
-      {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
+    const response = await dflowSwapFetch(
+      `/order-status?order_id=${encodeURIComponent(id)}`,
     );
 
     if (!response.ok) {
@@ -41,7 +35,7 @@ export async function GET(
       console.error("[dflow/order/id] API error:", response.status, errorText);
       return NextResponse.json(
         { error: `dflow API error: ${response.status}` },
-        { status: response.status }
+        { status: response.status },
       );
     }
 
@@ -53,7 +47,7 @@ export async function GET(
     console.error("[dflow/order/id] Failed to fetch order status:", error);
     return NextResponse.json(
       { error: "Failed to fetch order status" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -64,7 +58,7 @@ export async function GET(
 
 export async function DELETE(
   req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await params;
@@ -72,26 +66,27 @@ export async function DELETE(
     if (!id) {
       return NextResponse.json(
         { error: "Order ID is required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     console.log("[dflow/order/id] Cancelling order:", id);
 
-    const response = await fetch(`${DFLOW_SWAP_API}/order`, {
+    const response = await dflowSwapFetch("/order", {
       method: "DELETE",
-      headers: {
-        "Content-Type": "application/json",
-      },
       body: JSON.stringify({ order_id: id }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("[dflow/order/id] Cancel error:", response.status, errorText);
+      console.error(
+        "[dflow/order/id] Cancel error:",
+        response.status,
+        errorText,
+      );
       return NextResponse.json(
         { error: `dflow API error: ${response.status}` },
-        { status: response.status }
+        { status: response.status },
       );
     }
 
@@ -106,7 +101,7 @@ export async function DELETE(
     console.error("[dflow/order/id] Failed to cancel order:", error);
     return NextResponse.json(
       { error: "Failed to cancel order" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

@@ -13,9 +13,9 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import type { ChartDataPoint, LeaderboardEntry } from "@/types/arena";
+import type { ChartDataPoint, LeaderboardEntry } from "@/types/db";
 import { MODELS } from "@/lib/ai/models/models";
-import { DEFAULT_STARTING_CAPITAL, CHART_CONFIG } from "@/config/arena";
+import { DEFAULT_STARTING_CAPITAL, CHART_CONFIG } from "@/lib/config";
 import { useMemo, useState } from "react";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";

@@ -3,10 +3,10 @@ import type {
   TradingSession,
   PerformanceSnapshot,
   SessionStatus,
-} from "@/types/arena";
+} from "@/types/db";
 import type { UIMessage } from "ai";
-import type { ArenaChatMetadata, ArenaChatMessage } from "@/types/chat";
-import { DEFAULT_STARTING_CAPITAL } from "@/config/arena";
+import type { ChatMetadata, ChatMessage } from "@/types/chat";
+import { DEFAULT_STARTING_CAPITAL } from "@/lib/config";
 import type {
   DbTradingSessionInsert,
   DbPerformanceSnapshotInsert,
@@ -61,13 +61,14 @@ export async function getGlobalSession(): Promise<TradingSession> {
     .select()
     .single();
 
-  if (createError) {
+  if (createError || !newSession) {
     console.error("Failed to create global session:", createError);
-    throw createError;
+    throw createError ?? new Error("Failed to create global session");
   }
 
-  console.log("[arena] Created new Global Arena session:", newSession.id);
-  return mapTradingSession(newSession);
+  const session = newSession as Record<string, unknown>;
+  console.log("[arena] Created new Global Arena session:", session.id);
+  return mapTradingSession(session);
 }
 
 // ============================================================================
@@ -189,10 +190,10 @@ export async function updateSessionStatus(
 // ARENA CHAT MESSAGES
 // ============================================================================
 
-export async function getArenaChatMessages(
+export async function getChatMessages(
   sessionId: string,
   limit = 100,
-): Promise<ArenaChatMessage[]> {
+): Promise<ChatMessage[]> {
   const client = getSupabaseClient();
   if (!client) return [];
 
@@ -208,12 +209,10 @@ export async function getArenaChatMessages(
     throw error;
   }
 
-  return (data || []).map(mapArenaChatMessage);
+  return (data || []).map(mapChatMessage);
 }
 
-export async function saveArenaChatMessage(
-  message: ArenaChatMessage,
-): Promise<void> {
+export async function saveChatMessage(message: ChatMessage): Promise<void> {
   const client = getSupabaseClient();
   if (!client) throw new Error("Supabase not configured");
 
@@ -235,9 +234,7 @@ export async function saveArenaChatMessage(
   }
 }
 
-export async function saveArenaChatMessages(
-  messages: ArenaChatMessage[],
-): Promise<void> {
+export async function saveChatMessages(messages: ChatMessage[]): Promise<void> {
   const client = getSupabaseClient();
   if (!client) throw new Error("Supabase not configured");
 
@@ -369,11 +366,11 @@ function mapPerformanceSnapshot(
   };
 }
 
-function mapArenaChatMessage(row: Record<string, unknown>): ArenaChatMessage {
+function mapChatMessage(row: Record<string, unknown>): ChatMessage {
   return {
     id: row.id as string,
     role: row.role as "user" | "assistant",
     parts: row.parts as UIMessage["parts"],
-    metadata: row.metadata as ArenaChatMetadata,
+    metadata: row.metadata as ChatMetadata,
   };
 }

@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
+import { dflowMetadataFetch } from "@/lib/dflow/client";
 
 // ============================================================================
 // dflow Prediction Markets Metadata API - Trades
 // Docs: https://pond.dflow.net/prediction-market-metadata-api-reference/trades/trades
 // ============================================================================
-
-const DFLOW_METADATA_API = "https://prediction-markets-api.dflow.net/api/v1";
 
 // ============================================================================
 // GET /api/dflow/trades - Get trade history
@@ -18,7 +17,11 @@ export async function GET(req: Request) {
     const limit = searchParams.get("limit") || "50";
     const walletAddress = searchParams.get("wallet");
 
-    console.log("[dflow/trades] Fetching trades:", { ticker, limit, walletAddress });
+    console.log("[dflow/trades] Fetching trades:", {
+      ticker,
+      limit,
+      walletAddress,
+    });
 
     // Build query params for dflow API
     const params = new URLSearchParams();
@@ -26,30 +29,30 @@ export async function GET(req: Request) {
     if (ticker) params.set("market_ticker", ticker);
     if (walletAddress) params.set("wallet", walletAddress);
 
-    const response = await fetch(`${DFLOW_METADATA_API}/trades?${params}`, {
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
+    const response = await dflowMetadataFetch(`/trades?${params}`);
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error("[dflow/trades] API error:", response.status, errorText);
       return NextResponse.json(
         { error: `dflow API error: ${response.status}` },
-        { status: response.status }
+        { status: response.status },
       );
     }
 
     const data = await response.json();
-    console.log("[dflow/trades] Fetched", Array.isArray(data) ? data.length : 0, "trades");
+    console.log(
+      "[dflow/trades] Fetched",
+      Array.isArray(data) ? data.length : 0,
+      "trades",
+    );
 
     return NextResponse.json(data);
   } catch (error) {
     console.error("[dflow/trades] Failed to fetch trades:", error);
     return NextResponse.json(
       { error: "Failed to fetch trades" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

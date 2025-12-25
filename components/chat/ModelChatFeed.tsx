@@ -2,12 +2,19 @@
 
 import { useMemo, useEffect, useRef } from "react";
 import { MessageSquare, Loader2 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardFooter,
+} from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ChatMessage } from "./ChatMessage";
 import { ChatInput } from "./ChatInput";
-import { useArenaChatMessages } from "@/hooks/chat";
-import type { ArenaModel } from "@/types/arena";
+import { useChat } from "@/hooks/chat/useChat";
+import type { ArenaModel } from "@/types/db";
+import type { ChatMessage as ChatMessageType } from "@/types/chat";
 
 interface ModelChatFeedProps {
   /** Trading session ID */
@@ -23,14 +30,7 @@ export function ModelChatFeed({
   selectedModelId = null,
   models = [],
 }: ModelChatFeedProps) {
-  const {
-    messages,
-    isLoading,
-    error,
-    sendMessage,
-    input,
-    setInput,
-  } = useArenaChatMessages({
+  const { messages, isLoading, error, sendMessage, input, setInput } = useChat({
     sessionId,
   });
 
@@ -51,7 +51,7 @@ export function ModelChatFeed({
   // Filter by model if selected
   const filteredMessages = useMemo(() => {
     if (!selectedModelId) return messages;
-    return messages.filter((msg) => {
+    return messages.filter((msg: ChatMessageType) => {
       // Show all non-model messages (user, assistant)
       if (msg.metadata?.authorType !== "model") return true;
       // Filter model messages by selected model
@@ -123,7 +123,7 @@ export function ModelChatFeed({
             </div>
           ) : (
             <div className="space-y-3">
-              {filteredMessages.map((msg) => (
+              {filteredMessages.map((msg: ChatMessageType) => (
                 <ChatMessage
                   key={msg.id}
                   message={msg}

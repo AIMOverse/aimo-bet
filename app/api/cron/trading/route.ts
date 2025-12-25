@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
-import { getGlobalSession } from "@/lib/supabase/arena";
+import { getGlobalSession } from "@/lib/supabase/db";
 import { MODELS } from "@/lib/ai/models/catalog";
 import {
   createPredictionMarketAgent,
   type PredictionMarketAgent,
 } from "@/lib/ai/agents/predictionMarketAgent";
-import type { MarketContext, PredictionMarket, Trade, Broadcast } from "@/types/arena";
+import type {
+  MarketContext,
+  PredictionMarket,
+  Trade,
+  Broadcast,
+} from "@/types/db";
 
 // ============================================================================
 // Cron Job: Run Trading Loop for Each Model

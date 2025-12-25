@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { MODELS } from "@/lib/ai/models/models";
-import type { ArenaTab } from "@/types/arena";
+import type { ArenaTab } from "@/types/db";
 
 const APP_TABS: { value: ArenaTab; label: string; icon: React.ReactNode }[] = [
   {
