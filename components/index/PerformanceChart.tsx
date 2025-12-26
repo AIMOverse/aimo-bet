@@ -10,15 +10,18 @@ import {
   ResponsiveContainer,
   ReferenceLine,
   Legend,
+  LabelList,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { ChartDataPoint, LeaderboardEntry } from "@/types/db";
 import { MODELS } from "@/lib/ai/models/models";
+import { getSeriesLogoPath } from "@/lib/ai/models/catalog";
 import { DEFAULT_STARTING_CAPITAL, CHART_CONFIG } from "@/lib/config";
 import { useMemo, useState } from "react";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 
 interface PerformanceChartProps {
   data: ChartDataPoint[];
@@ -103,6 +106,87 @@ function ChangeIndicator({ change }: { change: number }) {
     return <TrendingDown className="h-3 w-3 text-red-500" />;
   }
   return <Minus className="h-3 w-3 text-muted-foreground" />;
+}
+
+// Custom label component for line-end logos
+interface LineEndLabelProps {
+  x?: number | string;
+  y?: number | string;
+  index?: number;
+  dataLength: number;
+  modelName: string;
+  color: string;
+  isHovered: boolean;
+  isDimmed: boolean;
+  onHover: (name: string | null) => void;
+}
+
+function LineEndLabel({
+  x,
+  y,
+  index,
+  dataLength,
+  modelName,
+  color,
+  isHovered,
+  isDimmed,
+  onHover,
+}: LineEndLabelProps) {
+  // Only render at the last data point
+  const xNum = typeof x === "string" ? parseFloat(x) : x;
+  const yNum = typeof y === "string" ? parseFloat(y) : y;
+
+  if (index !== dataLength - 1 || xNum === undefined || yNum === undefined) {
+    return null;
+  }
+
+  const logoPath = getSeriesLogoPath(modelName);
+  const initial = modelName.charAt(0).toUpperCase();
+  const size = 20;
+
+  return (
+    <foreignObject
+      x={xNum + 4}
+      y={yNum - size / 2}
+      width={size}
+      height={size}
+      style={{
+        overflow: "visible",
+        opacity: isDimmed ? 0.3 : 1,
+        transition: "opacity 150ms",
+      }}
+    >
+      <div
+        className="cursor-pointer"
+        onMouseEnter={() => onHover(modelName)}
+        onMouseLeave={() => onHover(null)}
+      >
+        <Avatar
+          className={cn(
+            "size-5 ring-[1.5px] ring-offset-0 bg-background",
+            isHovered && "ring-2",
+          )}
+          style={{
+            ["--tw-ring-color" as string]: color,
+          }}
+        >
+          {logoPath ? (
+            <AvatarImage
+              src={logoPath}
+              alt={`${modelName} logo`}
+              className="p-0.5"
+            />
+          ) : null}
+          <AvatarFallback
+            className="text-[10px] font-semibold text-foreground bg-muted"
+            style={{ backgroundColor: `${color}20` }}
+          >
+            {initial}
+          </AvatarFallback>
+        </Avatar>
+      </div>
+    </foreignObject>
+  );
 }
 
 // Custom legend component
@@ -364,7 +448,22 @@ export function PerformanceChart({
                     dot={false}
                     activeDot={{ r: 4 }}
                     animationDuration={CHART_CONFIG.animationDuration}
-                  />
+                  >
+                    <LabelList
+                      dataKey={name}
+                      content={(props) => (
+                        <LineEndLabel
+                          {...props}
+                          dataLength={chartData.length}
+                          modelName={name}
+                          color={color}
+                          isHovered={isHovered}
+                          isDimmed={isDimmed}
+                          onHover={setHoveredModel}
+                        />
+                      )}
+                    />
+                  </Line>
                 );
               })}
               <Legend

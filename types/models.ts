@@ -49,6 +49,8 @@ export interface ModelDefinition {
   /** Image generation settings (for models with image output) */
   imageSettings?: ImageSettings;
   // Arena-specific fields (optional)
+  /** Model series identifier for logo display (e.g., "openai", "claude", "gemini") */
+  series?: string;
   /** Chart color for performance chart display */
   chartColor?: string;
   /** Solana wallet public address for on-chain trading */

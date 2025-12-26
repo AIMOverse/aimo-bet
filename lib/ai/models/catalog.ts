@@ -22,6 +22,7 @@ export const MODELS: ModelDefinition[] = [
     supportsFunctions: true,
     outputModalities: ["text"],
     // Arena config
+    series: "openai",
     chartColor: "#10b981", // Emerald
     walletAddress: process.env.WALLET_GPT4O_PUBLIC,
     enabled: true,
@@ -38,6 +39,7 @@ export const MODELS: ModelDefinition[] = [
     supportsFunctions: true,
     outputModalities: ["text"],
     // Arena config
+    series: "openai",
     chartColor: "#22c55e", // Green
     walletAddress: process.env.WALLET_GPT4O_MINI_PUBLIC,
     enabled: true,
@@ -54,6 +56,7 @@ export const MODELS: ModelDefinition[] = [
     supportsFunctions: true,
     outputModalities: ["text"],
     // Arena config
+    series: "claude",
     chartColor: "#f97316", // Orange
     walletAddress: process.env.WALLET_CLAUDE_SONNET_PUBLIC,
     enabled: true,
@@ -70,6 +73,7 @@ export const MODELS: ModelDefinition[] = [
     supportsFunctions: true,
     outputModalities: ["text"],
     // Arena config
+    series: "claude",
     chartColor: "#fb923c", // Amber
     walletAddress: process.env.WALLET_CLAUDE_HAIKU_PUBLIC,
     enabled: true,
@@ -86,6 +90,7 @@ export const MODELS: ModelDefinition[] = [
     supportsFunctions: true,
     outputModalities: ["text"],
     // Arena config
+    series: "gemini",
     chartColor: "#3b82f6", // Blue
     walletAddress: process.env.WALLET_GEMINI_FLASH_PUBLIC,
     enabled: true,
@@ -102,6 +107,7 @@ export const MODELS: ModelDefinition[] = [
     supportsFunctions: true,
     outputModalities: ["text"],
     // Arena config
+    series: "deepseek",
     chartColor: "#8b5cf6", // Violet
     walletAddress: process.env.WALLET_DEEPSEEK_PUBLIC,
     enabled: true,
@@ -118,6 +124,7 @@ export const MODELS: ModelDefinition[] = [
     supportsFunctions: true,
     outputModalities: ["text"],
     // Arena config
+    series: "llama",
     chartColor: "#ec4899", // Pink
     walletAddress: process.env.WALLET_LLAMA_PUBLIC,
     enabled: true,
@@ -134,6 +141,7 @@ export const MODELS: ModelDefinition[] = [
     supportsFunctions: true,
     outputModalities: ["text"],
     // Arena config
+    series: "mistral",
     chartColor: "#06b6d4", // Cyan
     walletAddress: process.env.WALLET_MISTRAL_PUBLIC,
     enabled: true,
@@ -205,6 +213,59 @@ export function getModelColorMap(): Map<string, string> {
   MODELS.forEach((model) => {
     if (model.chartColor) {
       map.set(model.name, model.chartColor);
+    }
+  });
+  return map;
+}
+
+/**
+ * Get model series by model name
+ */
+export function getModelSeries(modelName: string): string | undefined {
+  const model = MODELS.find((m) => m.name === modelName);
+  return model?.series;
+}
+
+/**
+ * Get series logo path for a model
+ * Returns the path to the series logo SVG, or undefined if no series is set
+ */
+export function getSeriesLogoPath(modelName: string): string | undefined {
+  const series = getModelSeries(modelName);
+  if (!series) return undefined;
+
+  // Map series to logo filename
+  const logoMap: Record<string, string> = {
+    openai: "openai.svg",
+    claude: "claude-color.svg",
+    gemini: "gemini-color.svg",
+    deepseek: "deepseek-color.svg",
+    llama: "llama-color.svg",
+    mistral: "mistral-color.svg",
+    qwen: "qwen-color.svg",
+    grok: "grok.svg",
+    kimi: "kimi-color.svg",
+    zai: "zai.svg",
+  };
+
+  const filename = logoMap[series];
+  return filename ? `/model-series/${filename}` : undefined;
+}
+
+/**
+ * Create a map of model name to series info (series id and logo path)
+ */
+export function getModelSeriesMap(): Map<
+  string,
+  { series: string; logoPath: string }
+> {
+  const map = new Map<string, { series: string; logoPath: string }>();
+  MODELS.forEach((model) => {
+    if (model.series) {
+      const logoPath = getSeriesLogoPath(model.name);
+      if (logoPath) {
+        map.set(model.name, { series: model.series, logoPath });
+      }
     }
   });
   return map;

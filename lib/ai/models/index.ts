@@ -13,6 +13,9 @@ export {
   getArenaModelByShortId,
   getModelColor,
   getModelColorMap,
+  getModelSeries,
+  getSeriesLogoPath,
+  getModelSeriesMap,
   getModelsWithWallets,
 } from "./catalog";
 
