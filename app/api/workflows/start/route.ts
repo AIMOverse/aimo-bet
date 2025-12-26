@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { start, getRun } from "workflow/api";
-import { priceWatcherWorkflow } from "@/lib/workflows";
+import { priceWatcherWorkflow } from "@/lib/ai/workflows";
 
 // Singleton run ID for the price watcher
 const PRICE_WATCHER_RUN_ID = "price-watcher-singleton";

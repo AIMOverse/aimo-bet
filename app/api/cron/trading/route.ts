@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRun, start } from "workflow/api";
-import { priceWatcherWorkflow } from "@/lib/workflows";
+import { priceWatcherWorkflow } from "@/lib/ai/workflows";
 import { getGlobalSession } from "@/lib/supabase/db";
 import { getModelsWithWallets, getWalletPrivateKey } from "@/lib/ai/models/catalog";
 import {
