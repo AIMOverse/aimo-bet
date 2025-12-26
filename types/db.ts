@@ -201,3 +201,11 @@ export interface TradeFilter {
   action?: TradeAction;
   side?: PositionSide;
 }
+
+// Price swing detected by the price watcher
+export interface PriceSwing {
+  ticker: string;
+  previousPrice: number;
+  currentPrice: number;
+  changePercent: number;
+}

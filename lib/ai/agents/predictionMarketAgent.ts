@@ -11,10 +11,9 @@ import type {
 import type { ChatMessage, ChatMessageType } from "@/types/chat";
 import { saveChatMessage } from "@/lib/supabase/db";
 import { createAgentTools, type AgentTools } from "@/lib/ai/tools";
-import {
-  TRADING_SYSTEM_PROMPT,
-  buildContextPrompt,
-} from "./prompts/tradingPrompt";
+import { TRADING_SYSTEM_PROMPT } from "@/lib/ai/prompts/trading/systemPrompt";
+import { buildContextPrompt } from "@/lib/ai/prompts/trading/contextBuilder";
+import { validateTrade } from "@/lib/ai/guardrails";
 
 // ============================================================================
 // Types

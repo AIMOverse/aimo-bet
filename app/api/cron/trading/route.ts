@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getRun, start } from "workflow/api";
+import { priceWatcherWorkflow } from "@/lib/ai/workflows";
 import { getGlobalSession } from "@/lib/supabase/db";
 import { getModelsWithWallets, getWalletPrivateKey } from "@/lib/ai/models/catalog";
 import {
@@ -18,9 +20,12 @@ import type {
 } from "@/types/db";
 
 // ============================================================================
-// Cron Job: Run Trading Loop for Each Model
+// Cron Job: Health Check for Price Watcher Workflow
+// Falls back to manual trading loop if workflow isn't running
 // Triggered by Vercel Cron every 1 minute (requires Pro plan)
 // ============================================================================
+
+const PRICE_WATCHER_RUN_ID = "price-watcher-singleton";
 
 export async function GET(req: Request) {
   // Verify cron secret for security
@@ -31,7 +36,39 @@ export async function GET(req: Request) {
   }
 
   try {
-    console.log("[cron/trading] Starting trading cron job");
+    // First, check if price watcher workflow is running
+    let workflowStatus = "unknown";
+    let workflowRestarted = false;
+
+    try {
+      const run = await getRun(PRICE_WATCHER_RUN_ID);
+
+      if (!run || run.status !== "running") {
+        console.log("[cron/trading] Price watcher not running, restarting...");
+
+        await start(priceWatcherWorkflow, [], {
+          runId: PRICE_WATCHER_RUN_ID,
+        });
+
+        workflowStatus = "restarted";
+        workflowRestarted = true;
+      } else {
+        workflowStatus = "running";
+        // Workflow is handling everything, just return health status
+        return NextResponse.json({
+          message: "Price watcher healthy",
+          workflowStatus: "running",
+          timestamp: new Date().toISOString(),
+        });
+      }
+    } catch (workflowError) {
+      console.error("[cron/trading] Workflow check failed:", workflowError);
+      workflowStatus = "error";
+      // Fall through to legacy behavior
+    }
+
+    // Fallback: Run trading loop directly if workflow isn't handling it
+    console.log("[cron/trading] Running fallback trading loop");
 
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
 
@@ -41,6 +78,8 @@ export async function GET(req: Request) {
       console.log("[cron/trading] No markets available");
       return NextResponse.json({
         message: "No markets available",
+        workflowStatus,
+        workflowRestarted,
         swings: 0,
         modelsRun: 0,
       });
@@ -67,6 +106,8 @@ export async function GET(req: Request) {
     if (swings.length === 0) {
       return NextResponse.json({
         message: "No significant price movements",
+        workflowStatus,
+        workflowRestarted,
         swings: 0,
         modelsRun: 0,
       });
@@ -78,6 +119,8 @@ export async function GET(req: Request) {
       console.log("[cron/trading] No enabled models with wallets");
       return NextResponse.json({
         message: "No models with wallets configured",
+        workflowStatus,
+        workflowRestarted,
         swings: swings.length,
         modelsRun: 0,
       });
@@ -142,6 +185,8 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       success: true,
+      workflowStatus,
+      workflowRestarted,
       swings: swings.length,
       modelsRun: enabledModels.length,
       successes,
