@@ -1,8 +1,12 @@
 /**
  * Guardrails Types
  *
- * Type definitions for risk management and trade validation
+ * Type definitions for risk management, trade validation, and LLM-level limits
  */
+
+// =============================================================================
+// Trade Validation Types
+// =============================================================================
 
 /**
  * Risk limits configuration for trading agents
@@ -51,4 +55,22 @@ export interface PortfolioState {
   }[];
   /** Today's realized P&L */
   todayPnL: number;
+}
+
+// =============================================================================
+// LLM Middleware Types
+// =============================================================================
+
+/**
+ * Configuration for trading middleware that enforces LLM-level limits
+ */
+export interface TradingMiddlewareConfig {
+  /** Maximum tokens per LLM call */
+  maxTokens: number;
+  /** Maximum tool calls per agent run (prevent runaway agents) */
+  maxToolCalls: number;
+  /** Maximum trades per execution */
+  maxTradesPerRun: number;
+  /** Model ID for observability tagging */
+  modelId: string;
 }

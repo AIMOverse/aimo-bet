@@ -4,7 +4,6 @@ import { useChat as useAIChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { UIMessage } from "ai";
-import { getCachedMessages, setCachedMessages } from "@/lib/cache/chat";
 import type { ChatMessage } from "@/types/chat";
 
 interface UseChatOptions {
@@ -79,22 +78,13 @@ export function useChat({ sessionId }: UseChatOptions): UseChatReturn {
       setLocalError(undefined);
 
       try {
-        // Try cache first
-        const cached = getCachedMessages(sessionId);
-        if (cached.length > 0) {
-          setInitialMessages(cached as ChatMessage[]);
-        }
-
-        // Fetch from chat messages API
         const response = await fetch(
           `/api/arena/chat-messages?sessionId=${sessionId}`,
         );
         if (response.ok) {
           const messages = await response.json();
           setInitialMessages(messages);
-          setCachedMessages(sessionId, messages);
-        } else if (cached.length === 0) {
-          // No cache and API failed - start fresh
+        } else {
           setInitialMessages([]);
         }
 
@@ -104,11 +94,7 @@ export function useChat({ sessionId }: UseChatOptions): UseChatReturn {
         setLocalError(
           err instanceof Error ? err : new Error("Failed to load messages"),
         );
-        // Use cached if available
-        const cached = getCachedMessages(sessionId);
-        if (cached.length > 0) {
-          setInitialMessages(cached as ChatMessage[]);
-        }
+        setInitialMessages([]);
       } finally {
         setIsLoadingHistory(false);
       }

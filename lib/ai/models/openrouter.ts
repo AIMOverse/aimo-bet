@@ -1,6 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai";
-import { customProvider, wrapLanguageModel } from "ai";
-import { loggingMiddleware } from "../middleware/logging";
+import { customProvider } from "ai";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
@@ -29,52 +28,28 @@ const openrouterBase = createOpenAI({
 export const openrouter = customProvider({
   languageModels: {
     // Claude Sonnet 4
-    "claude-sonnet-4": wrapLanguageModel({
-      model: openrouterBase.chat("anthropic/claude-sonnet-4"),
-      middleware: [loggingMiddleware],
-    }),
+    "claude-sonnet-4": openrouterBase.chat("anthropic/claude-sonnet-4"),
 
     // Claude 3.5 Haiku
-    "claude-3.5-haiku": wrapLanguageModel({
-      model: openrouterBase.chat("anthropic/claude-3.5-haiku"),
-      middleware: [loggingMiddleware],
-    }),
+    "claude-3.5-haiku": openrouterBase.chat("anthropic/claude-3.5-haiku"),
 
     // GPT-4o
-    "gpt-4o": wrapLanguageModel({
-      model: openrouterBase.chat("openai/gpt-4o"),
-      middleware: [loggingMiddleware],
-    }),
+    "gpt-4o": openrouterBase.chat("openai/gpt-4o"),
 
     // GPT-4o Mini
-    "gpt-4o-mini": wrapLanguageModel({
-      model: openrouterBase.chat("openai/gpt-4o-mini"),
-      middleware: [loggingMiddleware],
-    }),
+    "gpt-4o-mini": openrouterBase.chat("openai/gpt-4o-mini"),
 
     // Gemini 2.0 Flash
-    "gemini-2.0-flash": wrapLanguageModel({
-      model: openrouterBase.chat("google/gemini-2.0-flash-exp"),
-      middleware: [loggingMiddleware],
-    }),
+    "gemini-2.0-flash": openrouterBase.chat("google/gemini-2.0-flash-exp"),
 
     // Llama 3.3 70B
-    "llama-3.3-70b": wrapLanguageModel({
-      model: openrouterBase.chat("meta-llama/llama-3.3-70b-instruct"),
-      middleware: [loggingMiddleware],
-    }),
+    "llama-3.3-70b": openrouterBase.chat("meta-llama/llama-3.3-70b-instruct"),
 
     // DeepSeek Chat
-    "deepseek-chat": wrapLanguageModel({
-      model: openrouterBase.chat("deepseek/deepseek-chat"),
-      middleware: [loggingMiddleware],
-    }),
+    "deepseek-chat": openrouterBase.chat("deepseek/deepseek-chat"),
 
     // Mistral Large
-    "mistral-large": wrapLanguageModel({
-      model: openrouterBase.chat("mistralai/mistral-large"),
-      middleware: [loggingMiddleware],
-    }),
+    "mistral-large": openrouterBase.chat("mistralai/mistral-large"),
   },
 
   // Allow any OpenRouter model ID to pass through

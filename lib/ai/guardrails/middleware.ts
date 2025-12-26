@@ -6,20 +6,7 @@
  */
 
 import type { LanguageModelMiddleware } from "ai";
-
-/**
- * Configuration for trading middleware
- */
-export interface TradingMiddlewareConfig {
-  /** Maximum tokens per LLM call */
-  maxTokens: number;
-  /** Maximum tool calls per agent run (prevent runaway agents) */
-  maxToolCalls: number;
-  /** Maximum trades per execution */
-  maxTradesPerRun: number;
-  /** Model ID for observability tagging */
-  modelId: string;
-}
+import type { TradingMiddlewareConfig } from "./types";
 
 /**
  * Default configuration for trading middleware
@@ -49,18 +36,7 @@ export function createTradingMiddleware(
   let tradeCount = 0;
 
   return {
-    specificationVersion: "v3",
-
-    transformParams: async ({ params }) => {
-      // Enforce maxTokens at request level
-      return {
-        ...params,
-        maxTokens: Math.min(
-          params.maxTokens ?? mergedConfig.maxTokens,
-          mergedConfig.maxTokens
-        ),
-      };
-    },
+    specificationVersion: "v3" as const,
 
     wrapGenerate: async ({ doGenerate }) => {
       const start = Date.now();
@@ -80,12 +56,21 @@ export function createTradingMiddleware(
 
       const duration = Date.now() - start;
 
-      // Count tool calls and trades
-      if (result.toolCalls) {
-        toolCallCount += result.toolCalls.length;
-        tradeCount += result.toolCalls.filter(
-          (c) => c.toolName === "placeOrder"
-        ).length;
+      // Count tool calls and trades from the content array
+      // In V3, tool calls are in the content array with type: 'tool-call'
+      if (result.content && Array.isArray(result.content)) {
+        const toolCalls = result.content.filter(
+          (part) => part.type === "tool-call"
+        );
+        toolCallCount += toolCalls.length;
+
+        const tradeCalls = toolCalls.filter(
+          (c) =>
+            c.type === "tool-call" &&
+            "toolName" in c &&
+            c.toolName === "placeOrder"
+        );
+        tradeCount += tradeCalls.length;
 
         if (tradeCount > mergedConfig.maxTradesPerRun) {
           throw new Error(

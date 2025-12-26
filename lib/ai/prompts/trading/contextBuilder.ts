@@ -2,16 +2,65 @@
  * Context builder for trading agent prompts
  */
 
-import type { MarketContext, PriceSwing } from "@/types";
+import type {
+  PriceSwing,
+  MarketStatus,
+  PositionSide,
+  TradeAction,
+} from "@/types";
+
+/**
+ * Simplified market data for context prompt
+ */
+interface ContextMarket {
+  ticker: string;
+  title: string;
+  yesPrice: number;
+  noPrice: number;
+  volume: number;
+  status: MarketStatus;
+}
+
+/**
+ * Simplified position data for context prompt
+ */
+interface ContextPosition {
+  marketTicker: string;
+  marketTitle: string;
+  side: PositionSide;
+  quantity: number;
+}
+
+/**
+ * Simplified trade data for context prompt
+ */
+interface ContextTrade {
+  marketTicker: string;
+  side: PositionSide;
+  action: TradeAction;
+  quantity: number;
+  price: number;
+}
+
+/**
+ * Context input for building trading prompts
+ */
+export interface ContextPromptInput {
+  availableMarkets: ContextMarket[];
+  portfolio: {
+    cashBalance: number;
+    totalValue: number;
+    positions: ContextPosition[];
+  };
+  recentTrades: ContextTrade[];
+  priceSwings?: PriceSwing[];
+}
 
 /**
  * Build a context prompt with market data and portfolio state
  */
-export function buildContextPrompt(
-  context: MarketContext,
-  priceSwings?: PriceSwing[]
-): string {
-  const { availableMarkets, portfolio, recentTrades } = context;
+export function buildContextPrompt(context: ContextPromptInput): string {
+  const { availableMarkets, portfolio, recentTrades, priceSwings } = context;
 
   let prompt = `## Current Market Data\n\n`;
 
@@ -21,7 +70,7 @@ export function buildContextPrompt(
     prompt += priceSwings
       .map(
         (swing) =>
-          `- ${swing.ticker}: ${(swing.changePercent * 100).toFixed(1)}% change (${swing.previousPrice.toFixed(2)} → ${swing.currentPrice.toFixed(2)})`
+          `- ${swing.ticker}: ${(swing.changePercent * 100).toFixed(1)}% change (${swing.previousPrice.toFixed(2)} → ${swing.currentPrice.toFixed(2)})`,
       )
       .join("\n");
     prompt += `\n\n`;
@@ -38,7 +87,7 @@ export function buildContextPrompt(
       status: m.status,
     })),
     null,
-    2
+    2,
   );
 
   prompt += `\n\n## Your Portfolio\n\n`;

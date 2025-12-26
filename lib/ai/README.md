@@ -19,8 +19,9 @@ lib/ai/
 │       └── assistantPrompt.ts     # Chat assistant prompt
 ├── guardrails/                # Risk control & validation
 │   ├── index.ts                   # Guardrails exports
-│   ├── types.ts                   # RiskLimits interface
-│   └── riskLimits.ts              # Pre-trade validation
+│   ├── types.ts                   # RiskLimits, TradingMiddlewareConfig
+│   ├── riskLimits.ts              # Pre-trade validation
+│   └── middleware.ts              # LLM-level limits (maxTokens, maxToolCalls)
 ├── tools/                     # AI SDK tools for agent capabilities
 │   ├── index.ts                   # Tool factory with wallet injection
 │   ├── market-discovery/          # getMarkets, getMarketDetails, getLiveData
@@ -32,10 +33,6 @@ lib/ai/
 │   ├── registry.ts                # Model access via AI SDK
 │   ├── openrouter.ts              # OpenRouter provider instance
 │   └── aimo.ts                    # AIMO provider instance
-├── middleware/                # AI SDK middleware
-│   ├── index.ts                   # Middleware exports
-│   ├── logging.ts                 # LLM call logging
-│   └── tradingGuardrails.ts       # LLM-level limits (maxTokens, maxToolCalls)
 └── workflows/                 # Durable workflows
     ├── index.ts                   # Workflow exports
     ├── priceWatcher.ts            # Long-lived price polling workflow
@@ -117,10 +114,10 @@ const result = validateTrade(tradeSize, marketId, portfolio);
 - `maxTradeSize`: $100 per trade
 - `minConfidence`: 70% minimum
 
-### 2. LLM-Level Limits (`middleware/tradingGuardrails.ts`)
+### 2. LLM-Level Limits (`guardrails/middleware.ts`)
 
 ```typescript
-import { createTradingMiddleware } from "@/lib/ai/middleware";
+import { createTradingMiddleware } from "@/lib/ai/guardrails";
 
 const middleware = createTradingMiddleware({
   maxTokens: 4096,

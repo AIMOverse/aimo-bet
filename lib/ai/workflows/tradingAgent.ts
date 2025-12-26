@@ -5,14 +5,22 @@ import { generateText, wrapLanguageModel, stepCountIs } from "ai";
 import { getModel } from "@/lib/ai/models";
 import { getWalletPrivateKey } from "@/lib/ai/models/catalog";
 import { createAgentTools } from "@/lib/ai/tools";
-import { createTradingMiddleware } from "@/lib/ai/middleware/tradingGuardrails";
+import { createTradingMiddleware } from "@/lib/ai/guardrails";
 import { TRADING_SYSTEM_PROMPT } from "@/lib/ai/prompts/trading/systemPrompt";
-import { buildContextPrompt } from "@/lib/ai/prompts/trading/contextBuilder";
+import {
+  buildContextPrompt,
+  type ContextPromptInput,
+} from "@/lib/ai/prompts/trading/contextBuilder";
 import { getGlobalSession, saveChatMessage } from "@/lib/supabase/db";
 import { TRADING_CONFIG } from "@/lib/config";
 import { nanoid } from "nanoid";
 import type { ChatMessage, ChatMessageType } from "@/types/chat";
-import type { PredictionMarket, Trade, PositionSide, TradeAction } from "@/types/db";
+import type {
+  PredictionMarket,
+  Trade,
+  PositionSide,
+  TradeAction,
+} from "@/types/db";
 
 // ============================================================================
 // Types
@@ -43,6 +51,15 @@ interface StreamChunk {
   };
 }
 
+/**
+ * Workflow writable stream interface.
+ * At runtime, getWritable() returns this type, but TypeScript sees WritableStream.
+ */
+interface WorkflowWritable<T> {
+  write(chunk: T): void;
+  close(): void;
+}
+
 interface TradingResult {
   reasoning: string;
   trades: Trade[];
@@ -63,9 +80,13 @@ const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
  * Executes a trading agent with streaming output.
  * Each agent run is a separate workflow instance.
  */
-export async function tradingAgentWorkflow(input: TradingInput): Promise<TradingResult> {
+export async function tradingAgentWorkflow(
+  input: TradingInput,
+): Promise<TradingResult> {
   // Get writable stream for real-time updates to frontend
-  const stream = getWritable<StreamChunk>();
+  // Cast needed because workflow runtime types aren't visible to TypeScript
+  const stream =
+    getWritable<StreamChunk>() as unknown as WorkflowWritable<StreamChunk>;
 
   console.log(`[tradingAgent:${input.modelId}] Starting trading workflow`);
 
@@ -129,7 +150,7 @@ async function fetchContext(walletAddress: string): Promise<MarketContext> {
   let cashBalance = 0;
   try {
     const balanceRes = await fetch(
-      `${BASE_URL}/api/solana/balance?wallet=${walletAddress}`
+      `${BASE_URL}/api/solana/balance?wallet=${walletAddress}`,
     );
     if (balanceRes.ok) {
       const balanceData = await balanceRes.json();
@@ -148,7 +169,7 @@ async function fetchContext(walletAddress: string): Promise<MarketContext> {
       if (Array.isArray(marketsData)) {
         markets = marketsData.map((m: Record<string, unknown>) => ({
           ticker: m.ticker as string,
-          title: m.title as string || m.ticker as string,
+          title: (m.title as string) || (m.ticker as string),
           category: (m.category as string) || "Unknown",
           yesPrice: parseFloat(m.yes_price as string) || 0.5,
           noPrice: parseFloat(m.no_price as string) || 0.5,
@@ -180,7 +201,7 @@ async function runAgent(
   input: TradingInput,
   context: MarketContext,
   sessionId: string,
-  stream: ReturnType<typeof getWritable<StreamChunk>>
+  stream: WorkflowWritable<StreamChunk>,
 ): Promise<TradingResult> {
   "use step";
 
@@ -201,20 +222,30 @@ async function runAgent(
   const tools = createAgentTools(input.walletAddress, privateKey);
 
   // Build context prompt
-  const contextPrompt = buildContextPrompt(
-    {
-      availableMarkets: context.availableMarkets,
-      portfolio: {
-        cashBalance: context.portfolio.cashBalance,
-        totalValue: context.portfolio.totalValue,
-        positions: context.portfolio.positions,
-        unrealizedPnl: 0,
-      },
-      recentTrades: context.recentTrades,
-      recentBroadcasts: [],
+  const promptInput: ContextPromptInput = {
+    availableMarkets: context.availableMarkets.map((m) => ({
+      ticker: m.ticker,
+      title: m.title,
+      yesPrice: m.yesPrice,
+      noPrice: m.noPrice,
+      volume: m.volume,
+      status: m.status,
+    })),
+    portfolio: {
+      cashBalance: context.portfolio.cashBalance,
+      totalValue: context.portfolio.totalValue,
+      positions: context.portfolio.positions,
     },
-    input.priceSwings
-  );
+    recentTrades: context.recentTrades.map((t) => ({
+      marketTicker: t.marketTicker,
+      side: t.side,
+      action: t.action,
+      quantity: t.quantity,
+      price: t.price,
+    })),
+    priceSwings: input.priceSwings,
+  };
+  const contextPrompt = buildContextPrompt(promptInput);
 
   // Execute agentic loop
   const result = await generateText({
@@ -236,7 +267,8 @@ async function runAgent(
 
           // If it's a trade, stream the trade details
           if (call.toolName === "placeOrder") {
-            const args = (call as { input?: Record<string, unknown> }).input || {};
+            const args =
+              (call as { input?: Record<string, unknown> }).input || {};
             stream.write({
               type: "trade",
               trade: {
@@ -283,7 +315,7 @@ function extractTrades(steps: unknown[]): Trade[] {
     for (const call of typedStep.toolCalls) {
       if (call.toolName === "placeOrder") {
         const result = typedStep.toolResults.find(
-          (r) => r.toolCallId === call.toolCallId
+          (r) => r.toolCallId === call.toolCallId,
         );
 
         if (result?.output?.success) {
@@ -296,7 +328,8 @@ function extractTrades(steps: unknown[]): Trade[] {
             side: args.side as PositionSide,
             action: args.action as TradeAction,
             quantity: args.quantity as number,
-            price: result.output.order?.price || (args.limit_price as number) || 0,
+            price:
+              result.output.order?.price || (args.limit_price as number) || 0,
             notional:
               (args.quantity as number) *
               (result.output.order?.price || (args.limit_price as number) || 0),
@@ -338,7 +371,7 @@ async function waitForFills(trades: Trade[]): Promise<void> {
 async function broadcastSummary(
   sessionId: string,
   modelId: string,
-  result: TradingResult
+  result: TradingResult,
 ): Promise<void> {
   "use step";
 

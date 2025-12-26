@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { getRun, start } from "workflow/api";
 import { priceWatcherWorkflow } from "@/lib/ai/workflows";
 import { getGlobalSession } from "@/lib/supabase/db";
-import { getModelsWithWallets, getWalletPrivateKey } from "@/lib/ai/models/catalog";
+import {
+  getModelsWithWallets,
+  getWalletPrivateKey,
+} from "@/lib/ai/models/catalog";
 import {
   PredictionMarketAgent,
   type PriceSwing,
@@ -42,13 +45,12 @@ export async function GET(req: Request) {
 
     try {
       const run = await getRun(PRICE_WATCHER_RUN_ID);
+      const runStatus = run ? await run.status : null;
 
-      if (!run || run.status !== "running") {
+      if (!run || runStatus !== "running") {
         console.log("[cron/trading] Price watcher not running, restarting...");
 
-        await start(priceWatcherWorkflow, [], {
-          runId: PRICE_WATCHER_RUN_ID,
-        });
+        await start(priceWatcherWorkflow, []);
 
         workflowStatus = "restarted";
         workflowRestarted = true;
@@ -97,7 +99,7 @@ export async function GET(req: Request) {
     // 2. Sync prices and detect swings
     const swings = await syncPricesAndDetectSwings(
       currentPrices,
-      TRADING_CONFIG.swingThreshold
+      TRADING_CONFIG.swingThreshold,
     );
 
     console.log(`[cron/trading] Detected ${swings.length} price swings`);
@@ -152,14 +154,14 @@ export async function GET(req: Request) {
             baseUrl,
             model.walletAddress!,
             markets,
-            session.startingCapital
+            session.startingCapital,
           );
 
           // Execute agentic trading loop with swing info
           const result = await agent.executeTradingLoop(context, swings);
 
           console.log(
-            `[cron/trading] Model ${model.name} completed. Trades: ${result.trades.length}`
+            `[cron/trading] Model ${model.name} completed. Trades: ${result.trades.length}`,
           );
 
           return {
@@ -172,7 +174,7 @@ export async function GET(req: Request) {
           console.error(`[cron/trading] Error for model ${model.id}:`, error);
           throw error;
         }
-      })
+      }),
     );
 
     // Count successes and failures
@@ -180,7 +182,7 @@ export async function GET(req: Request) {
     const failures = results.filter((r) => r.status === "rejected").length;
 
     console.log(
-      `[cron/trading] Completed: ${successes} successes, ${failures} failures`
+      `[cron/trading] Completed: ${successes} successes, ${failures} failures`,
     );
 
     return NextResponse.json({
@@ -197,7 +199,7 @@ export async function GET(req: Request) {
     console.error("[cron/trading] Trading cron failed:", error);
     return NextResponse.json(
       { error: "Failed to run trading cron" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -231,7 +233,7 @@ interface MarketData {
  */
 async function fetchPositions(
   baseUrl: string,
-  walletAddress: string
+  walletAddress: string,
 ): Promise<MarketContext["portfolio"]["positions"]> {
   // Step 1: Get all token accounts from wallet
   const rpcResponse = await fetch(SOLANA_RPC_URL, {
@@ -279,13 +281,13 @@ async function fetchPositions(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ addresses: tokenAccounts.map((t) => t.mint) }),
-    }
+    },
   );
 
   if (!filterRes.ok) {
     console.error(
       "[cron/trading] filter-outcome-mints error:",
-      filterRes.status
+      filterRes.status,
     );
     return [];
   }
@@ -378,13 +380,13 @@ async function buildMarketContext(
   baseUrl: string,
   walletAddress: string,
   availableMarkets: PredictionMarket[],
-  startingCapital: number
+  startingCapital: number,
 ): Promise<MarketContext> {
   // Fetch balance
   let cashBalance = startingCapital;
   try {
     const balanceRes = await fetch(
-      `${baseUrl}/api/solana/balance?wallet=${walletAddress}`
+      `${baseUrl}/api/solana/balance?wallet=${walletAddress}`,
     );
     const balanceData = await balanceRes.json();
     cashBalance = parseFloat(balanceData.formatted) || startingCapital;
@@ -405,7 +407,7 @@ async function buildMarketContext(
   const recentTrades: Trade[] = [];
   try {
     const tradesRes = await fetch(
-      `${baseUrl}/api/dflow/trades?wallet=${walletAddress}&limit=10`
+      `${baseUrl}/api/dflow/trades?wallet=${walletAddress}&limit=10`,
     );
     const tradesData = await tradesRes.json();
     if (tradesData.trades && Array.isArray(tradesData.trades)) {
@@ -430,8 +432,8 @@ async function buildMarketContext(
             price: t.price,
             notional: t.quantity * t.price,
             createdAt: new Date(t.created_at),
-          })
-        )
+          }),
+        ),
       );
     }
   } catch (error) {

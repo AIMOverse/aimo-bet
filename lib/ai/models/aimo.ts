@@ -6,7 +6,6 @@ import {
 } from "ai";
 import { getDefaultProvider } from "./providers";
 import { MODELS } from "./catalog";
-import { loggingMiddleware } from "../middleware";
 
 // Get configuration from central config
 const provider = getDefaultProvider();
@@ -29,28 +28,18 @@ const aimoBase = createOpenAI({
 export const aimo = customProvider({
   languageModels: {
     // DeepSeek V3.1 - Default model
-    "deepseek-v3.1": wrapLanguageModel({
-      model: aimoBase.chat(DEEPSEEK_MODEL_ID),
-      middleware: [loggingMiddleware],
-    }),
+    "deepseek-v3.1": aimoBase.chat(DEEPSEEK_MODEL_ID),
 
     // GPT-OSS-120B model
-    "gpt-oss-120b": wrapLanguageModel({
-      model: aimoBase.chat(GPT_OSS_MODEL_ID),
-      middleware: [loggingMiddleware],
-    }),
+    "gpt-oss-120b": aimoBase.chat(GPT_OSS_MODEL_ID),
 
     // GLM 4.6 model
-    "glm-4.6": wrapLanguageModel({
-      model: aimoBase.chat(GLM_MODEL_ID),
-      middleware: [loggingMiddleware],
-    }),
+    "glm-4.6": aimoBase.chat(GLM_MODEL_ID),
 
     // Alias: fast responses with lower temperature
     fast: wrapLanguageModel({
       model: aimoBase.chat(DEEPSEEK_MODEL_ID),
       middleware: [
-        loggingMiddleware,
         defaultSettingsMiddleware({
           settings: {
             temperature: 0.7,
@@ -64,7 +53,6 @@ export const aimo = customProvider({
     creative: wrapLanguageModel({
       model: aimoBase.chat(DEEPSEEK_MODEL_ID),
       middleware: [
-        loggingMiddleware,
         defaultSettingsMiddleware({
           settings: {
             temperature: 1.0,
@@ -77,7 +65,6 @@ export const aimo = customProvider({
     precise: wrapLanguageModel({
       model: aimoBase.chat(DEEPSEEK_MODEL_ID),
       middleware: [
-        loggingMiddleware,
         defaultSettingsMiddleware({
           settings: {
             temperature: 0.3,

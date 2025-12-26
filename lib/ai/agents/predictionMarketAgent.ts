@@ -1,4 +1,4 @@
-import { generateText, stepCountIs, type StepResult, type ToolSet } from "ai";
+import { generateText, stepCountIs, type StepResult } from "ai";
 import { getModel } from "@/lib/ai/models";
 import { nanoid } from "nanoid";
 import type {
@@ -13,7 +13,7 @@ import { saveChatMessage } from "@/lib/supabase/db";
 import { createAgentTools, type AgentTools } from "@/lib/ai/tools";
 import { TRADING_SYSTEM_PROMPT } from "@/lib/ai/prompts/trading/systemPrompt";
 import { buildContextPrompt } from "@/lib/ai/prompts/trading/contextBuilder";
-import { validateTrade } from "@/lib/ai/guardrails";
+import type { ContextPromptInput } from "@/lib/ai/prompts/trading/contextBuilder";
 
 // ============================================================================
 // Types
@@ -68,7 +68,7 @@ export class PredictionMarketAgent {
     // Create tools with wallet context injected
     this.tools = createAgentTools(
       config.walletAddress,
-      config.walletPrivateKey
+      config.walletPrivateKey,
     );
   }
 
@@ -78,16 +78,16 @@ export class PredictionMarketAgent {
    */
   async executeTradingLoop(
     context: MarketContext,
-    priceSwings?: PriceSwing[]
+    priceSwings?: PriceSwing[],
   ): Promise<AgentExecutionResult> {
     const model = getModel(this.config.modelIdentifier);
 
     console.log(
-      `[Agent:${this.config.modelId}] Starting trading loop with ${context.availableMarkets.length} markets`
+      `[Agent:${this.config.modelId}] Starting trading loop with ${context.availableMarkets.length} markets`,
     );
 
     // Build context for the prompt
-    const contextPrompt = buildContextPrompt({
+    const promptInput: ContextPromptInput = {
       availableMarkets: context.availableMarkets.map((m) => ({
         ticker: m.ticker,
         title: m.title,
@@ -114,7 +114,8 @@ export class PredictionMarketAgent {
         price: t.price,
       })),
       priceSwings,
-    });
+    };
+    const contextPrompt = buildContextPrompt(promptInput);
 
     try {
       const result = await generateText({
@@ -130,7 +131,9 @@ export class PredictionMarketAgent {
           });
           if (step.toolCalls && step.toolCalls.length > 0) {
             for (const call of step.toolCalls) {
-              console.log(`[Agent:${this.config.modelId}] Tool call: ${call.toolName}`);
+              console.log(
+                `[Agent:${this.config.modelId}] Tool call: ${call.toolName}`,
+              );
             }
           }
         },
@@ -146,7 +149,7 @@ export class PredictionMarketAgent {
       const reasoning = result.text || "No reasoning provided.";
 
       console.log(
-        `[Agent:${this.config.modelId}] Trading loop complete. Trades: ${trades.length}`
+        `[Agent:${this.config.modelId}] Trading loop complete. Trades: ${trades.length}`,
       );
 
       // Save broadcast to chat
@@ -156,14 +159,17 @@ export class PredictionMarketAgent {
 
       return { reasoning, trades, steps };
     } catch (error) {
-      console.error(`[Agent:${this.config.modelId}] Trading loop error:`, error);
+      console.error(
+        `[Agent:${this.config.modelId}] Trading loop error:`,
+        error,
+      );
 
       // Save error message
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error occurred";
       await this.saveMessage(
         `Trading analysis failed: ${errorMessage}`,
-        "commentary"
+        "commentary",
       );
 
       return {
@@ -186,7 +192,7 @@ export class PredictionMarketAgent {
    */
   protected extractSteps(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    steps: Array<StepResult<any>>
+    steps: Array<StepResult<any>>,
   ): AgentStep[] {
     return steps.map((step, index) => ({
       stepNumber: index + 1,
@@ -194,9 +200,8 @@ export class PredictionMarketAgent {
       toolCalls: step.toolCalls?.map((call) => ({
         toolName: call.toolName,
         args: (call as { input?: Record<string, unknown> }).input || {},
-        result: step.toolResults?.find(
-          (r) => r.toolCallId === call.toolCallId
-        )?.output,
+        result: step.toolResults?.find((r) => r.toolCallId === call.toolCallId)
+          ?.output,
       })),
     }));
   }
@@ -206,7 +211,7 @@ export class PredictionMarketAgent {
    */
   protected extractTradesFromSteps(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    steps: Array<StepResult<any>>
+    steps: Array<StepResult<any>>,
   ): Trade[] {
     const trades: Trade[] = [];
 
@@ -217,14 +222,19 @@ export class PredictionMarketAgent {
         if (call.toolName === "placeOrder") {
           // Find corresponding result
           const resultPart = step.toolResults.find(
-            (r) => r.toolCallId === call.toolCallId
+            (r) => r.toolCallId === call.toolCallId,
           );
           const result = resultPart?.output as
-            | { success: boolean; order?: { id: string; price?: number }; quantity?: number }
+            | {
+                success: boolean;
+                order?: { id: string; price?: number };
+                quantity?: number;
+              }
             | undefined;
 
           if (result?.success) {
-            const input = (call as { input?: Record<string, unknown> }).input || {};
+            const input =
+              (call as { input?: Record<string, unknown> }).input || {};
             const args = input as {
               market_ticker: string;
               side: PositionSide;
@@ -261,7 +271,7 @@ export class PredictionMarketAgent {
   protected async saveMessage(
     content: string,
     messageType: ChatMessageType,
-    relatedTradeId?: string
+    relatedTradeId?: string,
   ): Promise<void> {
     const message: ChatMessage = {
       id: nanoid(),
@@ -304,7 +314,7 @@ export class PredictionMarketAgent {
  * @param config - Agent configuration
  */
 export function createPredictionMarketAgent(
-  config: PredictionMarketAgentConfig
+  config: PredictionMarketAgentConfig,
 ): PredictionMarketAgent {
   return new PredictionMarketAgent(config);
 }

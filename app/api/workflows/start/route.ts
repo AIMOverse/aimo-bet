@@ -15,18 +15,18 @@ export async function POST(req: Request) {
   try {
     // Check if already running
     const existingRun = await getRun(PRICE_WATCHER_RUN_ID);
-    if (existingRun && existingRun.status === "running") {
+    const existingStatus = existingRun ? await existingRun.status : null;
+
+    if (existingRun && existingStatus === "running") {
       return NextResponse.json({
         message: "Price watcher already running",
         runId: PRICE_WATCHER_RUN_ID,
-        status: existingRun.status,
+        status: existingStatus,
       });
     }
 
     // Start the workflow
-    const run = await start(priceWatcherWorkflow, [], {
-      runId: PRICE_WATCHER_RUN_ID,
-    });
+    const run = await start(priceWatcherWorkflow, []);
 
     const status = await run.status;
 
@@ -42,7 +42,7 @@ export async function POST(req: Request) {
         error: "Failed to start workflow",
         details: error instanceof Error ? error.message : "Unknown error",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -64,8 +64,10 @@ export async function GET(req: Request) {
       });
     }
 
+    const status = await existingRun.status;
+
     return NextResponse.json({
-      status: existingRun.status,
+      status,
       runId: PRICE_WATCHER_RUN_ID,
     });
   } catch (error) {
@@ -75,7 +77,7 @@ export async function GET(req: Request) {
         error: "Failed to get workflow status",
         details: error instanceof Error ? error.message : "Unknown error",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

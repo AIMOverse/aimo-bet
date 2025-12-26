@@ -343,71 +343,24 @@ export * from "./types";
 export { validateTrade } from "./riskLimits";
 ```
 
-#### 1.3 Create AI SDK Middleware for LLM-Level Guardrails
+#### 1.3 LLM-Level Guardrails Middleware
 
-Replace the current logging middleware with trading guardrails middleware.
+The middleware for LLM-level limits is now part of the guardrails module.
 
-**File: `lib/ai/middleware/tradingGuardrails.ts`**
+**File: `lib/ai/guardrails/middleware.ts`**
 
 ```typescript
 import type { LanguageModelMiddleware } from "ai";
-
-interface TradingMiddlewareConfig {
-  /** Maximum tokens per LLM call */
-  maxTokens: number;
-  /** Maximum tool calls per agent run (prevent runaway agents) */
-  maxToolCalls: number;
-  /** Maximum trades per execution */
-  maxTradesPerRun: number;
-  /** Model ID for observability tagging */
-  modelId: string;
-}
+import type { TradingMiddlewareConfig } from "./types";
 
 /**
  * Creates middleware that enforces LLM-level limits.
  * Observability is handled by useWorkflow dashboard, not this middleware.
  */
 export function createTradingMiddleware(
-  config: TradingMiddlewareConfig
+  config: Partial<TradingMiddlewareConfig> = {}
 ): LanguageModelMiddleware {
-  let toolCallCount = 0;
-  let tradeCount = 0;
-
-  return {
-    transformParams: async ({ params }) => {
-      // Enforce maxTokens at request level
-      return {
-        ...params,
-        maxTokens: Math.min(
-          params.maxTokens ?? config.maxTokens,
-          config.maxTokens
-        ),
-      };
-    },
-
-    wrapGenerate: async ({ doGenerate }) => {
-      // Pre-check: have we exceeded tool call limit?
-      if (toolCallCount >= config.maxToolCalls) {
-        throw new Error(`Tool call limit exceeded (${config.maxToolCalls})`);
-      }
-
-      const result = await doGenerate();
-
-      // Count tool calls and trades
-      if (result.toolCalls) {
-        toolCallCount += result.toolCalls.length;
-        tradeCount += result.toolCalls.filter(
-          (c) => c.toolName === "placeOrder"
-        ).length;
-
-        if (tradeCount > config.maxTradesPerRun) {
-          throw new Error(`Trade limit exceeded (${config.maxTradesPerRun})`);
-        }
-      }
-
-      return result;
-    },
-  };
+  // ... implementation
 }
 
 // Default configuration
@@ -430,7 +383,7 @@ import { TRADING_SYSTEM_PROMPT, buildContextPrompt } from "./prompts/tradingProm
 // After
 import { TRADING_SYSTEM_PROMPT } from "@/lib/ai/prompts/trading/systemPrompt";
 import { buildContextPrompt } from "@/lib/ai/prompts/trading/contextBuilder";
-import { validateTrade } from "@/lib/ai/guardrails";
+import { validateTrade, createTradingMiddleware } from "@/lib/ai/guardrails";
 ```
 
 ---
@@ -695,7 +648,7 @@ import { generateText, wrapLanguageModel, stepCountIs } from "ai";
 import { getModel } from "@/lib/ai/models";
 import { getWalletPrivateKey } from "@/lib/ai/models/catalog";
 import { createAgentTools } from "@/lib/ai/tools";
-import { createTradingMiddleware } from "@/lib/ai/middleware/tradingGuardrails";
+import { createTradingMiddleware } from "@/lib/ai/guardrails";
 import { TRADING_SYSTEM_PROMPT } from "@/lib/ai/prompts/trading/systemPrompt";
 import { buildContextPrompt } from "@/lib/ai/prompts/trading/contextBuilder";
 import { getGlobalSession } from "@/lib/supabase/db";
@@ -1326,15 +1279,14 @@ WALLET_MISTRAL_PRIVATE=<solana-private-key>
 ## Implementation Checklist
 
 ### Phase 1: Structural Reorganization
-- [ ] Create `lib/ai/prompts/` directory
-- [ ] Move `tradingPrompt.ts` to `lib/ai/prompts/trading/systemPrompt.ts`
-- [ ] Create `lib/ai/prompts/trading/contextBuilder.ts`
-- [ ] Create `lib/ai/guardrails/` directory
-- [ ] Create `lib/ai/guardrails/types.ts`
-- [ ] Create `lib/ai/guardrails/riskLimits.ts`
-- [ ] Create `lib/ai/middleware/tradingGuardrails.ts`
-- [ ] Delete `lib/ai/middleware/logging.ts` (replaced by workflow observability)
-- [ ] Update agent imports
+- [x] Create `lib/ai/prompts/` directory
+- [x] Move `tradingPrompt.ts` to `lib/ai/prompts/trading/systemPrompt.ts`
+- [x] Create `lib/ai/prompts/trading/contextBuilder.ts`
+- [x] Create `lib/ai/guardrails/` directory
+- [x] Create `lib/ai/guardrails/types.ts`
+- [x] Create `lib/ai/guardrails/riskLimits.ts`
+- [x] Create `lib/ai/guardrails/middleware.ts` (LLM-level limits)
+- [x] Update agent imports
 
 ### Phase 2: Workflow-Based Data Pipeline
 - [ ] Install useWorkflow: `npm install workflow`
@@ -1365,7 +1317,7 @@ WALLET_MISTRAL_PRIVATE=<solana-private-key>
 | `lib/ai/guardrails/index.ts` | Export guardrails |
 | `lib/ai/guardrails/types.ts` | Risk limit types |
 | `lib/ai/guardrails/riskLimits.ts` | Trade validation |
-| `lib/ai/middleware/tradingGuardrails.ts` | LLM-level limits middleware |
+| `lib/ai/guardrails/middleware.ts` | LLM-level limits middleware |
 | `lib/workflows/index.ts` | Export workflows |
 | `lib/workflows/priceWatcher.ts` | Long-lived price polling workflow |
 | `lib/workflows/tradingAgent.ts` | Agent execution with streaming |
@@ -1383,7 +1335,6 @@ WALLET_MISTRAL_PRIVATE=<solana-private-key>
 | File | Reason |
 |------|--------|
 | `lib/ai/agents/prompts/tradingPrompt.ts` | Moved to `lib/ai/prompts/` |
-| `lib/ai/middleware/logging.ts` | Replaced by workflow observability |
 
 ---
 
