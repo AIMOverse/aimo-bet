@@ -2,12 +2,27 @@
  * Context builder for trading agent prompts
  */
 
-import type {
-  PriceSwing,
-  MarketStatus,
-  PositionSide,
-  TradeAction,
-} from "@/lib/supabase/types";
+import type { MarketStatus, PositionSide, TradeAction } from "@/lib/supabase/types";
+
+/**
+ * Price swing data
+ */
+interface PriceSwing {
+  ticker: string;
+  previousPrice: number;
+  currentPrice: number;
+  changePercent: number;
+}
+
+/**
+ * Market signal from PartyKit relay
+ */
+interface MarketSignal {
+  type: "price_swing" | "volume_spike" | "orderbook_imbalance";
+  ticker: string;
+  data: Record<string, unknown>;
+  timestamp: number;
+}
 
 /**
  * Simplified market data for context prompt
@@ -54,17 +69,64 @@ export interface ContextPromptInput {
   };
   recentTrades: ContextTrade[];
   priceSwings?: PriceSwing[];
+  /** Full signal data for richer context */
+  signal?: MarketSignal;
+}
+
+/**
+ * Build signal-specific context section
+ */
+function buildSignalContext(signal: MarketSignal): string {
+  let section = `### Market Signal Detected\n\n`;
+  section += `**Type:** ${signal.type.replace(/_/g, " ").toUpperCase()}\n`;
+  section += `**Market:** ${signal.ticker}\n`;
+  section += `**Timestamp:** ${new Date(signal.timestamp).toISOString()}\n\n`;
+
+  switch (signal.type) {
+    case "price_swing":
+      section += `**Price Movement:**\n`;
+      section += `- Previous price: ${(signal.data.previousPrice as number).toFixed(4)}\n`;
+      section += `- Current price: ${(signal.data.currentPrice as number).toFixed(4)}\n`;
+      section += `- Change: ${((signal.data.changePercent as number) * 100).toFixed(2)}%\n`;
+      break;
+
+    case "volume_spike":
+      section += `**Volume Activity:**\n`;
+      section += `- Trade volume: ${signal.data.volume}\n`;
+      section += `- Average volume: ${(signal.data.averageVolume as number).toFixed(0)}\n`;
+      section += `- Multiplier: ${(signal.data.multiplier as number).toFixed(1)}x normal\n`;
+      section += `- Taker side: ${signal.data.takerSide}\n`;
+      break;
+
+    case "orderbook_imbalance":
+      section += `**Orderbook Imbalance:**\n`;
+      section += `- YES bid depth: ${signal.data.yesBidDepth}\n`;
+      section += `- NO bid depth: ${signal.data.noBidDepth}\n`;
+      section += `- Ratio: ${(signal.data.ratio as number).toFixed(2)}\n`;
+      section += `- Direction: ${signal.data.direction}\n`;
+      break;
+  }
+
+  section += `\n`;
+  return section;
 }
 
 /**
  * Build a context prompt with market data and portfolio state
  */
 export function buildContextPrompt(context: ContextPromptInput): string {
-  const { availableMarkets, portfolio, recentTrades, priceSwings } = context;
+  const { availableMarkets, portfolio, recentTrades, priceSwings, signal } =
+    context;
 
   let prompt = `## Current Market Data\n\n`;
 
-  if (priceSwings && priceSwings.length > 0) {
+  // Include full signal context if available
+  if (signal) {
+    prompt += buildSignalContext(signal);
+  }
+
+  // Include price swings for backwards compatibility
+  if (priceSwings && priceSwings.length > 0 && !signal) {
     prompt += `### Price Swings Detected\n\n`;
     prompt += `The following markets have significant price movements:\n`;
     prompt += priceSwings
