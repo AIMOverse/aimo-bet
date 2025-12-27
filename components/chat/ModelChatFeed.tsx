@@ -13,8 +13,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ChatMessage } from "./ChatMessage";
 import { ChatInput } from "./ChatInput";
 import { useChat } from "@/hooks/chat/useChat";
-import type { ArenaModel } from "@/types/db";
-import type { ChatMessage as ChatMessageType } from "@/types/chat";
+import type {
+  ArenaModel,
+  ChatMessage as ChatMessageType,
+} from "@/lib/supabase/types";
 
 interface ModelChatFeedProps {
   /** Trading session ID */

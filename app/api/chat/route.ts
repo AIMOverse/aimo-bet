@@ -11,7 +11,7 @@ import {
   getChatMessages,
   saveChatMessage,
 } from "@/lib/supabase/db";
-import type { ChatMessage } from "@/types/chat";
+import type { ChatMessage } from "@/lib/supabase/types";
 
 // ============================================================================
 // Types

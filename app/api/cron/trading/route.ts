@@ -15,12 +15,8 @@ import {
   type MarketPrice,
 } from "@/lib/supabase/prices";
 import { TRADING_CONFIG } from "@/lib/config";
-import type {
-  MarketContext,
-  PredictionMarket,
-  Trade,
-  Broadcast,
-} from "@/types/db";
+import type { PredictionMarket, Trade, Broadcast } from "@/lib/supabase/types";
+import type { MarketContext } from "@/lib/ai/agents/types";
 
 // ============================================================================
 // Cron Job: Health Check for Price Watcher Workflow

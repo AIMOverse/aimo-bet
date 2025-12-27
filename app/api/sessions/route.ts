@@ -6,7 +6,7 @@ import {
   createTradingSession,
   updateSessionStatus,
 } from "@/lib/supabase/db";
-import type { SessionStatus } from "@/types/db";
+import type { SessionStatus } from "@/lib/supabase/types";
 import { DEFAULT_STARTING_CAPITAL } from "@/lib/config";
 
 // ============================================================================

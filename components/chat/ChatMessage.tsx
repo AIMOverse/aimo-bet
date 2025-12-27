@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import type {
   ChatMessage as ChatMessageType,
   ChatMessageType as MessageType,
-} from "@/types/chat";
+} from "@/lib/supabase/types";
 
 interface ChatMessageProps {
   message: ChatMessageType;

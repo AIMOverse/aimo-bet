@@ -1,11 +1,12 @@
 import { getSupabaseClient } from "./client";
+import type { UIMessage } from "ai";
 import type {
   TradingSession,
   PerformanceSnapshot,
   SessionStatus,
-} from "@/types/db";
-import type { UIMessage } from "ai";
-import type { ChatMetadata, ChatMessage } from "@/types/chat";
+  ChatMetadata,
+  ChatMessage,
+} from "./types";
 import { DEFAULT_STARTING_CAPITAL } from "@/lib/config";
 import type {
   DbTradingSessionInsert,

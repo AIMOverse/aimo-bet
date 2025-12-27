@@ -3,8 +3,8 @@
 import useSWR from "swr";
 import { POLLING_INTERVALS } from "@/lib/config";
 import { MODELS } from "@/lib/ai/models/models";
-import type { PerformanceSnapshot, ChartDataPoint } from "@/types/db";
-import type { ModelDefinition } from "@/types/models";
+import type { PerformanceSnapshot, ChartDataPoint } from "@/lib/supabase/types";
+import type { ModelDefinition } from "@/lib/ai/models/types";
 
 /**
  * Convert performance snapshots to chart data format for Recharts.

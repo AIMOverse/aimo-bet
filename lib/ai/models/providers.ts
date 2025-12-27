@@ -1,4 +1,4 @@
-import type { ProviderConfig } from "@/types/models";
+import type { ProviderConfig } from "./types";
 
 // ============================================================================
 // Provider Configuration

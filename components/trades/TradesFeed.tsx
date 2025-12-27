@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TradeCard } from "./TradeCard";
-import type { TradeFilter } from "@/types/db";
+import type { TradeFilter } from "@/lib/supabase/types";
 import type { DflowTradeWithModel } from "@/hooks/trades/useTrades";
 
 interface TradesFeedProps {

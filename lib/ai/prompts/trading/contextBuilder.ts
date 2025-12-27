@@ -7,7 +7,7 @@ import type {
   MarketStatus,
   PositionSide,
   TradeAction,
-} from "@/types";
+} from "@/lib/supabase/types";
 
 /**
  * Simplified market data for context prompt

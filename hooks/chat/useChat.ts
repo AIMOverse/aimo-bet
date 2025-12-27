@@ -4,7 +4,7 @@ import { useChat as useAIChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { UIMessage } from "ai";
-import type { ChatMessage } from "@/types/chat";
+import type { ChatMessage } from "@/lib/supabase/types";
 
 interface UseChatOptions {
   /** Trading session ID */

@@ -1,4 +1,4 @@
-import type { ModelDefinition } from "@/types/models";
+import type { ModelDefinition } from "./types";
 
 // ============================================================================
 // Model Catalog

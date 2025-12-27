@@ -14,13 +14,14 @@ import {
 import { getGlobalSession, saveChatMessage } from "@/lib/supabase/db";
 import { TRADING_CONFIG } from "@/lib/config";
 import { nanoid } from "nanoid";
-import type { ChatMessage, ChatMessageType } from "@/types/chat";
 import type {
+  ChatMessage,
+  ChatMessageType,
   PredictionMarket,
   Trade,
   PositionSide,
   TradeAction,
-} from "@/types/db";
+} from "@/lib/supabase/types";
 
 // ============================================================================
 // Types

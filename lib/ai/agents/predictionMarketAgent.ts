@@ -2,13 +2,13 @@ import { generateText, stepCountIs, type StepResult } from "ai";
 import { getModel } from "@/lib/ai/models";
 import { nanoid } from "nanoid";
 import type {
-  PredictionMarketAgentConfig,
-  MarketContext,
   Trade,
   PositionSide,
   TradeAction,
-} from "@/types/db";
-import type { ChatMessage, ChatMessageType } from "@/types/chat";
+  ChatMessage,
+  ChatMessageType,
+} from "@/lib/supabase/types";
+import type { PredictionMarketAgentConfig, MarketContext } from "./types";
 import { saveChatMessage } from "@/lib/supabase/db";
 import { createAgentTools, type AgentTools } from "@/lib/ai/tools";
 import { TRADING_SYSTEM_PROMPT } from "@/lib/ai/prompts/trading/systemPrompt";
