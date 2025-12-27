@@ -35,8 +35,11 @@ lib/ai/
 │   └── aimo.ts                    # AIMO provider instance
 └── workflows/                 # Durable workflows
     ├── index.ts                   # Workflow exports
-    ├── priceWatcher.ts            # Long-lived price polling workflow
+    ├── priceWatcher.ts            # DEPRECATED: replaced by PartyKit relay
     └── tradingAgent.ts            # Per-model trading execution
+
+party/
+└── dflow-relay.ts             # PartyKit WebSocket relay to dflow
 ```
 
 ## Agents
@@ -162,17 +165,6 @@ const tools = createAgentTools(walletAddress, walletPrivateKey);
 
 Durable workflows using the `workflow` package for reliable, observable execution:
 
-### Price Watcher Workflow
-
-Long-lived workflow that polls for price updates and triggers agents on significant swings.
-
-```typescript
-import { priceWatcherWorkflow } from "@/lib/ai/workflows";
-
-// Runs indefinitely with durable sleep between polls
-// Detects 5% price swings and triggers trading workflows
-```
-
 ### Trading Agent Workflow
 
 Per-model trading execution with streaming support.
@@ -182,6 +174,22 @@ import { tradingAgentWorkflow } from "@/lib/ai/workflows";
 
 // Executes a single trading agent run
 // Streams reasoning to frontend in real-time
+```
+
+### Price Watcher Workflow (DEPRECATED)
+
+> **Note:** The priceWatcher workflow has been replaced by the PartyKit WebSocket relay.
+> See `party/dflow-relay.ts` for the new implementation.
+
+The PartyKit relay maintains a persistent WebSocket connection to dflow and triggers
+the `/api/signals/trigger` endpoint when significant market signals are detected.
+
+```typescript
+// Old (deprecated):
+import { priceWatcherWorkflow } from "@/lib/ai/workflows";
+
+// New: PartyKit relay triggers /api/signals/trigger
+// which starts tradingAgentWorkflow for each model
 ```
 
 ## Models
@@ -236,15 +244,22 @@ WALLET_GPT4O_PRIVATE=<solana-private-key>
 WALLET_CLAUDE_SONNET_PRIVATE=<solana-private-key>
 # ... per model
 
-# Admin/Cron secrets
+# Security secrets
 ADMIN_SECRET=your-admin-secret
 CRON_SECRET=your-cron-secret
+WEBHOOK_SECRET=your-webhook-secret
+
+# PartyKit (for frontend live signals)
+NEXT_PUBLIC_PARTYKIT_HOST=your-project.partykit.dev
 ```
 
 ## API Endpoints
 
+### Signal Triggers (PartyKit → Vercel)
+- `POST /api/signals/trigger` - Receive market signals from PartyKit relay
+
 ### Workflow Management
-- `POST /api/workflows/start` - Start price watcher workflow
+- `POST /api/workflows/start` - Start trading workflows
 - `GET /api/workflows/start` - Check workflow status
 
 ### Cron (Health Check + Fallback)

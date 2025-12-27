@@ -18,35 +18,38 @@ Alpha Arena pits AI models against each other in a live trading competition. Eac
               ▼               ▼               ▼
 ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
 │  /api/sessions  │ │  /api/dflow/*   │ │  /api/chat      │
-│  /api/snapshots │ │  (On-chain)     │ │  (Streaming)    │
+│  /api/signals   │ │  (On-chain)     │ │  (Streaming)    │
 └─────────────────┘ └─────────────────┘ └─────────────────┘
         │                     │                   │
         ▼                     ▼                   ▼
 ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
 │    Supabase     │ │   dflow APIs    │ │   AI Agents     │
 │                 │ │  Swap/Metadata  │ │                 │
-│ - sessions      │ └─────────────────┘ │ - chatAgent     │
-│ - snapshots     │                     │ - Prediction    │
-│ - chat_messages │                     │   MarketAgent   │
-│ - market_prices │                     └─────────────────┘
-└─────────────────┘
-
-┌─────────────────────────────────────────────────────────────────┐
-│                    Autonomous Trading Loop                      │
-│                                                                  │
-│   Vercel Cron (1 min) ──► Fetch Prices ──► Detect Swings       │
-│                                │                                │
-│                                ▼                                │
-│              ┌─────────────────────────────────┐               │
-│              │  For each LLM model:            │               │
-│              │  1. Instantiate agent class     │               │
-│              │  2. Run agentic loop            │               │
-│              │  3. Agent uses tools (research) │               │
-│              │  4. Agent decides & trades      │               │
-│              │  5. Broadcast decision          │               │
-│              └─────────────────────────────────┘               │
-└─────────────────────────────────────────────────────────────────┘
+│ - sessions      │ └────────┬────────┘ │ - chatAgent     │
+│ - snapshots     │          │          │ - Prediction    │
+│ - chat_messages │          │          │   MarketAgent   │
+│ - market_signals│          │          └─────────────────┘
+└─────────────────┘          │
+                    ┌────────┴────────┐
+                    │  dflow WebSocket │
+                    │  wss://...      │
+                    └────────┬────────┘
+                             │
+                ┌────────────┴────────────┐
+                │      PartyKit           │
+                │   (WebSocket Relay)     │
+                │   party/dflow-relay.ts  │
+                └─────────────────────────┘
 ```
+
+### PartyKit WebSocket Relay
+
+PartyKit maintains a persistent WebSocket connection to dflow's market data stream:
+
+1. **Subscribes** to prices, trades, and orderbook channels
+2. **Detects** significant market signals (price swings >5%, volume spikes, orderbook imbalances)
+3. **Triggers** Vercel API endpoint when action is needed
+4. **Broadcasts** live data to connected frontend clients
 
 ## Tech Stack
 
@@ -104,8 +107,12 @@ DFLOW_API_KEY=...
 # Solana RPC
 SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
 
-# Cron authentication
+# PartyKit
+NEXT_PUBLIC_PARTYKIT_HOST=your-project.partykit.dev
+
+# Security
 CRON_SECRET=...
+WEBHOOK_SECRET=...
 
 # Model wallets (public keys)
 WALLET_GPT4O_PUBLIC=...
@@ -129,6 +136,19 @@ cp .env.example .env.local
 
 # Run development server
 pnpm dev
+
+# Run PartyKit relay (in separate terminal)
+pnpm party:dev
+```
+
+## Deployment
+
+```bash
+# Deploy PartyKit WebSocket relay
+pnpm party:deploy
+
+# Deploy to Vercel (automatic via git push)
+git push
 ```
 
 ## Cron Jobs

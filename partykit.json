@@ -1,0 +1,5 @@
+{
+  "name": "aimo-bet-relay",
+  "main": "party/dflow-relay.ts",
+  "compatibilityDate": "2024-01-01"
+}

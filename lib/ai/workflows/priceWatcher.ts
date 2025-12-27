@@ -1,5 +1,18 @@
 "use workflow";
 
+/**
+ * @deprecated This workflow has been replaced by the PartyKit WebSocket relay.
+ *
+ * The new implementation uses PartyKit to maintain a persistent WebSocket
+ * connection to dflow's market data stream, which is more efficient than
+ * polling from Vercel serverless functions.
+ *
+ * See: party/dflow-relay.ts
+ * API: /api/signals/trigger
+ *
+ * This file is kept for reference and backwards compatibility.
+ */
+
 import { sleep } from "workflow";
 import { start } from "workflow/api";
 import { getModelsWithWallets } from "@/lib/ai/models/catalog";
