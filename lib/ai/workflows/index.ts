@@ -7,4 +7,3 @@
 
 export { priceWatcherWorkflow } from "./priceWatcher";
 export { tradingAgentWorkflow } from "./tradingAgent";
-export { dailyReviewWorkflow } from "./dailyReview";

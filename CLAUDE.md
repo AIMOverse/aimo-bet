@@ -68,8 +68,7 @@ lib/ai/
 │
 └── workflows/        # Durable workflows
     ├── priceWatcher.ts
-    ├── tradingAgent.ts
-    └── dailyReview.ts
+    └── tradingAgent.ts
 ```
 
 ---

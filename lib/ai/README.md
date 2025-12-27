@@ -36,8 +36,7 @@ lib/ai/
 └── workflows/                 # Durable workflows
     ├── index.ts                   # Workflow exports
     ├── priceWatcher.ts            # Long-lived price polling workflow
-    ├── tradingAgent.ts            # Per-model trading execution
-    └── dailyReview.ts             # Daily P&L analysis
+    └── tradingAgent.ts            # Per-model trading execution
 ```
 
 ## Agents
@@ -183,17 +182,6 @@ import { tradingAgentWorkflow } from "@/lib/ai/workflows";
 
 // Executes a single trading agent run
 // Streams reasoning to frontend in real-time
-```
-
-### Daily Review Workflow
-
-Analyzes daily trading performance and extracts insights.
-
-```typescript
-import { dailyReviewWorkflow } from "@/lib/ai/workflows";
-
-// Triggered at end of each trading day
-// Generates lessons learned and calibration scores
 ```
 
 ## Models
