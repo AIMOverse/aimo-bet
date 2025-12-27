@@ -5,6 +5,7 @@ import { DefaultChatTransport } from "ai";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { UIMessage } from "ai";
 import type { ChatMessage } from "@/lib/supabase/types";
+import { useRealtimeMessages } from "./useRealtimeMessages";
 
 interface UseChatOptions {
   /** Trading session ID */
@@ -154,6 +155,28 @@ export function useChat({ sessionId }: UseChatOptions): UseChatReturn {
     },
     [setMessages],
   );
+
+  // Realtime: receive agent trade broadcasts instantly
+  const handleRealtimeMessage = useCallback(
+    (message: ChatMessage) => {
+      // Only append messages from agents (not our own or duplicates)
+      if (message.metadata?.authorType === "model") {
+        setMessages((prev) => {
+          // Dedupe check
+          if (prev.some((m) => m.id === message.id)) {
+            return prev;
+          }
+          return [...prev, message];
+        });
+      }
+    },
+    [setMessages],
+  );
+
+  useRealtimeMessages({
+    sessionId,
+    onMessage: handleRealtimeMessage,
+  });
 
   const isLoading =
     status === "streaming" || status === "submitted" || isLoadingHistory;
