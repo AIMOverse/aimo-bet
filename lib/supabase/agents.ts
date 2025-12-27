@@ -94,7 +94,7 @@ export async function getAgentSessions(
   }
 
   return (data || []).map(
-    (row) => mapDbToAgentSession(row as Record<string, unknown>) as AgentSession
+    (row: Record<string, unknown>) => mapDbToAgentSession(row) as AgentSession
   );
 }
 

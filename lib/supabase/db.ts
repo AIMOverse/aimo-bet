@@ -1,10 +1,16 @@
 import { getSupabaseClient } from "./client";
+import type { UIMessage } from "ai";
 import type {
   TradingSession,
   SessionStatus,
+  ChatMetadata,
+  ChatMessage,
 } from "./types";
 import { DEFAULT_STARTING_CAPITAL } from "@/lib/config";
-import type { DbTradingSessionInsert } from "./types";
+import type {
+  DbTradingSessionInsert,
+  DbArenaChatMessageInsert,
+} from "./types";
 
 // ============================================================================
 // CONSTANTS
@@ -180,12 +186,56 @@ export async function updateSessionStatus(
 }
 
 // ============================================================================
-// ARENA CHAT MESSAGES (DEPRECATED - Use agent_decisions via lib/supabase/agents.ts)
+// ARENA CHAT MESSAGES (For user chat - agent messages use agent_decisions)
 // ============================================================================
 
-// NOTE: Chat messages are now stored as agent_decisions.
-// Use recordAgentDecision() from lib/supabase/agents.ts instead.
-// The arena_chat_messages table is deprecated.
+// NOTE: Agent messages are now stored as agent_decisions.
+// Use recordAgentDecision() from lib/supabase/agents.ts for agent messages.
+// These functions are kept for user chat functionality.
+
+export async function getChatMessages(
+  sessionId: string,
+  limit = 100,
+): Promise<ChatMessage[]> {
+  const client = getSupabaseClient();
+  if (!client) return [];
+
+  const { data, error } = await client
+    .from("arena_chat_messages")
+    .select("*")
+    .eq("session_id", sessionId)
+    .order("created_at", { ascending: true })
+    .limit(limit);
+
+  if (error) {
+    console.error("Failed to fetch arena chat messages:", error);
+    return [];
+  }
+
+  return (data || []).map(mapChatMessage);
+}
+
+export async function saveChatMessage(message: ChatMessage): Promise<void> {
+  const client = getSupabaseClient();
+  if (!client) throw new Error("Supabase not configured");
+
+  const insertData: DbArenaChatMessageInsert = {
+    id: message.id,
+    session_id: message.metadata?.sessionId ?? "",
+    role: message.role,
+    parts: message.parts,
+    metadata: message.metadata as unknown as Record<string, unknown>,
+  };
+
+  const { error } = await client
+    .from("arena_chat_messages")
+    .upsert(insertData as never, { onConflict: "id" });
+
+  if (error) {
+    console.error("Failed to save arena chat message:", error);
+    throw error;
+  }
+}
 
 // ============================================================================
 // PERFORMANCE SNAPSHOTS (DEPRECATED - Use agent_decisions via lib/supabase/agents.ts)
@@ -208,5 +258,14 @@ function mapTradingSession(row: Record<string, unknown>): TradingSession {
     startedAt: row.started_at ? new Date(row.started_at as string) : undefined,
     endedAt: row.ended_at ? new Date(row.ended_at as string) : undefined,
     createdAt: new Date(row.created_at as string),
+  };
+}
+
+function mapChatMessage(row: Record<string, unknown>): ChatMessage {
+  return {
+    id: row.id as string,
+    role: row.role as "user" | "assistant",
+    parts: row.parts as UIMessage["parts"],
+    metadata: row.metadata as ChatMetadata,
   };
 }

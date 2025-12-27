@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
 
     // Transform to ChatMessage format
     const messages = decisionsToMessages(
-      (data || []).map((row) => ({
+      (data || []).map((row: Record<string, unknown>) => ({
         id: row.id as string,
         agent_session_id: row.agent_session_id as string,
         trigger_type: row.trigger_type as string,

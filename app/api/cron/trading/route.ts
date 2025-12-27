@@ -10,10 +10,6 @@ import {
   PredictionMarketAgent,
   type PriceSwing,
 } from "@/lib/ai/agents/predictionMarketAgent";
-import {
-  syncPricesAndDetectSwings,
-  type MarketPrice,
-} from "@/lib/supabase/prices";
 import { TRADING_CONFIG } from "@/lib/config";
 import type { PredictionMarket, Trade, Broadcast } from "@/lib/supabase/types";
 import type { MarketContext } from "@/lib/ai/agents/types";
@@ -130,34 +126,17 @@ export async function GET(req: Request) {
       });
     }
 
-    // Convert to MarketPrice format for swing detection
-    const currentPrices: MarketPrice[] = markets.map((m) => ({
-      ticker: m.ticker,
-      yes_bid: m.yesPrice,
-      yes_ask: m.yesPrice,
-      no_bid: m.noPrice,
-      no_ask: m.noPrice,
-    }));
+    // For fallback, we trigger agents with a periodic signal
+    // Price swing detection is now handled by PartyKit
+    // Here we just pick the first market as a trigger
+    const swings: PriceSwing[] = markets.length > 0 ? [{
+      ticker: markets[0].ticker,
+      previousPrice: markets[0].yesPrice,
+      currentPrice: markets[0].yesPrice,
+      changePercent: 0,
+    }] : [];
 
-    // Sync prices and detect swings
-    const swings = await syncPricesAndDetectSwings(
-      currentPrices,
-      TRADING_CONFIG.swingThreshold,
-    );
-
-    console.log(`[cron/trading] Detected ${swings.length} price swings`);
-
-    // If no significant swings, skip agent runs
-    if (swings.length === 0) {
-      return NextResponse.json({
-        message: "No significant price movements",
-        healthy: healthyCount,
-        restarted: restartedCount,
-        fallbackRun: true,
-        swings: 0,
-        modelsRun: 0,
-      });
-    }
+    console.log(`[cron/trading] Fallback: triggering agents with periodic signal`);
 
     // Get global session
     const session = await getGlobalSession();
@@ -174,17 +153,17 @@ export async function GET(req: Request) {
           const hookToken = `signals:${model.id}`;
           try {
             const signal = {
-              type: "price_swing" as const,
-              ticker: swings[0].ticker,
+              type: "periodic" as const,
+              ticker: swings[0]?.ticker || "",
               data: {
-                previousPrice: swings[0].previousPrice,
-                currentPrice: swings[0].currentPrice,
-                changePercent: swings[0].changePercent,
+                previousPrice: swings[0]?.previousPrice || 0,
+                currentPrice: swings[0]?.currentPrice || 0,
+                changePercent: swings[0]?.changePercent || 0,
               },
               timestamp: Date.now(),
             };
             await resumeHook(hookToken, signal);
-            console.log(`[cron/trading] Sent signal via hook for ${model.id}`);
+            console.log(`[cron/trading] Sent periodic signal via hook for ${model.id}`);
             return { modelId: model.id, method: "hook" };
           } catch {
             // Hook not ready, fall back to direct agent execution

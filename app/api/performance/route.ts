@@ -1,12 +1,9 @@
 import { NextResponse } from "next/server";
-import {
-  getPerformanceSnapshots,
-  createPerformanceSnapshot,
-  createBulkSnapshots,
-} from "@/lib/supabase/db";
+import { getChartData } from "@/lib/supabase/agents";
 
 // ============================================================================
-// GET /api/performance - Get performance snapshots for a session
+// GET /api/performance - Get performance data for a session
+// Now fetches from agent_decisions.portfolio_value_after
 // ============================================================================
 
 export async function GET(req: Request) {
@@ -22,90 +19,38 @@ export async function GET(req: Request) {
       );
     }
 
-    const snapshots = await getPerformanceSnapshots(sessionId, hoursBack);
+    // Get chart data from agent decisions
+    const chartData = await getChartData(sessionId, hoursBack);
+
+    // Transform to the expected format for backwards compatibility
+    const snapshots = chartData.map((point) => ({
+      id: `${point.timestamp}-${point.modelName}`,
+      sessionId,
+      modelId: point.modelName, // Using modelName as ID for now
+      accountValue: point.portfolioValue,
+      timestamp: new Date(point.timestamp),
+    }));
+
     return NextResponse.json(snapshots);
   } catch (error) {
-    console.error("Failed to get snapshots:", error);
+    console.error("Failed to get performance data:", error);
     return NextResponse.json(
-      { error: "Failed to get snapshots" },
+      { error: "Failed to get performance data" },
       { status: 500 },
     );
   }
 }
 
 // ============================================================================
-// POST /api/performance - Create performance snapshot(s)
+// POST /api/performance - Deprecated
+// Performance snapshots are now recorded via agent_decisions
 // ============================================================================
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-
-    // Support both single and bulk creation
-    if (Array.isArray(body)) {
-      // Bulk creation
-      const snapshots = body as Array<{
-        sessionId: string;
-        modelId: string;
-        accountValue: number;
-      }>;
-
-      if (snapshots.length === 0) {
-        return NextResponse.json(
-          { error: "At least one snapshot is required" },
-          { status: 400 },
-        );
-      }
-
-      // Validate all entries
-      for (const snapshot of snapshots) {
-        if (
-          !snapshot.sessionId ||
-          !snapshot.modelId ||
-          typeof snapshot.accountValue !== "number"
-        ) {
-          return NextResponse.json(
-            {
-              error:
-                "Each snapshot requires sessionId, modelId, and accountValue",
-            },
-            { status: 400 },
-          );
-        }
-      }
-
-      await createBulkSnapshots(snapshots);
-      return NextResponse.json(
-        { success: true, count: snapshots.length },
-        { status: 201 },
-      );
-    } else {
-      // Single creation
-      const { sessionId, modelId, accountValue } = body as {
-        sessionId: string;
-        modelId: string;
-        accountValue: number;
-      };
-
-      if (!sessionId || !modelId || typeof accountValue !== "number") {
-        return NextResponse.json(
-          { error: "sessionId, modelId, and accountValue are required" },
-          { status: 400 },
-        );
-      }
-
-      const snapshot = await createPerformanceSnapshot(
-        sessionId,
-        modelId,
-        accountValue,
-      );
-      return NextResponse.json(snapshot, { status: 201 });
-    }
-  } catch (error) {
-    console.error("Failed to create snapshot:", error);
-    return NextResponse.json(
-      { error: "Failed to create snapshot" },
-      { status: 500 },
-    );
-  }
+export async function POST() {
+  return NextResponse.json(
+    {
+      error: "Deprecated: Performance snapshots are now recorded via agent decisions. Use recordAgentDecision() instead.",
+    },
+    { status: 410 },
+  );
 }

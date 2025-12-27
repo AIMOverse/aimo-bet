@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import type { ChartDataPoint } from "@/lib/supabase/types";
+import type { RealtimePostgresInsertPayload } from "@supabase/supabase-js";
 
 interface UsePerformanceChartOptions {
   sessionId: string | null;
@@ -162,13 +163,13 @@ export function usePerformanceChart({
           schema: "public",
           table: "agent_decisions",
         },
-        async (payload) => {
+        async (payload: RealtimePostgresInsertPayload<Record<string, unknown>>) => {
           try {
             // Fetch the agent session to get model name
             const { data: agentSession } = await client
               .from("agent_sessions")
               .select("model_name, session_id")
-              .eq("id", payload.new.agent_session_id)
+              .eq("id", payload.new.agent_session_id as string)
               .single();
 
             if (agentSession && agentSession.session_id === sessionId) {
@@ -179,7 +180,7 @@ export function usePerformanceChart({
               };
 
               // Update chart data
-              setChartData((prev) => {
+              setChartData((prev: ChartDataPoint[]) => {
                 const updated = [...prev];
                 const existingPointIndex = updated.findIndex(
                   (p) => p.timestamp === newPoint.created_at
@@ -205,7 +206,7 @@ export function usePerformanceChart({
               });
 
               // Update latest values
-              setLatestValues((prev) => {
+              setLatestValues((prev: Map<string, number>) => {
                 const updated = new Map(prev);
                 updated.set(newPoint.model_name, newPoint.portfolio_value_after);
                 return updated;
@@ -216,7 +217,7 @@ export function usePerformanceChart({
           }
         }
       )
-      .subscribe((status) => {
+      .subscribe((status: string) => {
         console.log(`[usePerformanceChart] Subscription status: ${status}`);
       });
 
