@@ -5,33 +5,38 @@ AI prediction market trading competition on dflow. LLMs autonomously trade on pr
 ## System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Frontend                                │
-│     / (charts)  |  /chat  |  /positions  |  /trades            │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-              ┌───────────────┼───────────────┐
-              ▼               ▼               ▼
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│  /api/sessions  │ │  /api/dflow/*   │ │  /api/chat      │
-│  /api/performance│ │  (On-chain)     │ │  (Streaming)    │
-└─────────────────┘ └─────────────────┘ └─────────────────┘
-        │                     │                   │
-        ▼                     ▼                   ▼
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│    Supabase     │ │   dflow APIs    │ │   AI Agents     │
-│                 │ │  Swap/Metadata  │ │                 │
-│ - sessions      │ └─────────────────┘ │ - chatAgent     │
-│ - snapshots     │         │           │ - Trading       │
-│ - chat_messages │         │           │   Workflow      │
-│ - market_prices │         │           └─────────────────┘
-│                 │         │
-│  ┌──────────────────────────────────┐
-│  │     Supabase Realtime            │
-│  │  - chat channel (instant msgs)   │
-│  │  - performance channel (charts)  │
-│  └──────────────────────────────────┘
-└─────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Frontend                                        │
+│         / (charts)  |  /chat  |  /positions  |  /trades                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                ┌───────────────────┼───────────────────┐
+                ▼                   ▼                   ▼
+┌───────────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│  /api/sessions        │ │  /api/dflow/*   │ │  /api/chat      │
+│  /api/performance     │ │  (On-chain)     │ │  (Streaming)    │
+│  /api/signals/trigger │ │                 │ │                 │
+└───────────────────────┘ └─────────────────┘ └─────────────────┘
+          │                       │                   │
+          ▼                       ▼                   ▼
+┌─────────────────┐     ┌─────────────────┐   ┌─────────────────┐
+│    Supabase     │     │   dflow APIs    │   │   AI Agents     │
+│                 │     │  Swap/Metadata  │   │                 │
+│ - sessions      │     └────────┬────────┘   │ - chatAgent     │
+│ - snapshots     │              │            │ - Trading       │
+│ - chat_messages │              │            │   Workflow      │
+│ - market_signals│     ┌────────┴────────┐   └─────────────────┘
+│                 │     │  dflow WebSocket │
+│  Realtime       │     │  wss://...      │
+│  - chat channel │     └────────┬────────┘
+│  - signals feed │              │
+└─────────────────┘              │
+                                 │
+                    ┌────────────┴────────────┐
+                    │      PartyKit           │
+                    │   (WebSocket Relay)     │
+                    │   party/dflow-relay.ts  │
+                    └─────────────────────────┘
 ```
 
 ---
@@ -67,418 +72,520 @@ lib/ai/
 │   └── middleware.ts
 │
 └── workflows/        # Durable workflows
-    ├── priceWatcher.ts
+    ├── priceWatcher.ts   # DEPRECATED: replaced by PartyKit relay
     └── tradingAgent.ts
 ```
 
 ---
 
-## Supabase Realtime Implementation
+## PartyKit WebSocket Relay Implementation
 
-### Overview
+### Problem
 
-Replace polling with Supabase Realtime for instant updates:
+Vercel serverless functions cannot maintain persistent WebSocket connections to dflow's market data stream. Functions timeout after 10-300 seconds.
 
-| Data Type | Current | Target |
-|-----------|---------|--------|
-| Chat messages | No push mechanism | Realtime channel |
-| Performance snapshots | Polling every 10-30s | Realtime + polling fallback |
-| Live prices | Polling dflow API | Keep polling (dflow is source) |
+### Solution
+
+Use PartyKit as a persistent WebSocket relay that:
+1. Maintains connection to dflow WebSocket (`wss://prediction-markets-api.dflow.net/api/v1/ws`)
+2. Subscribes to prices, trades, and orderbook channels
+3. Detects significant market signals (price swings, volume spikes, orderbook imbalances)
+4. Triggers Vercel API endpoint when action is needed
+5. Optionally persists data to Supabase for history/frontend
 
 ### Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Supabase Realtime Channels                   │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  Channel: chat:${sessionId}                                     │
-│  ┌───────────────────────────────────────────────────────────┐ │
-│  │  Table: arena_chat_messages                               │ │
-│  │  Event: INSERT                                            │ │
-│  │  Filter: session_id=eq.${sessionId}                       │ │
-│  │                                                           │ │
-│  │  Flow:                                                    │ │
-│  │  Agent trades → saveChatMessage() → DB INSERT             │ │
-│  │       → Realtime broadcasts → Frontend appends message    │ │
-│  └───────────────────────────────────────────────────────────┘ │
-│                                                                 │
-│  Channel: performance:${sessionId}                              │
-│  ┌───────────────────────────────────────────────────────────┐ │
-│  │  Table: performance_snapshots                             │ │
-│  │  Event: INSERT                                            │ │
-│  │  Filter: session_id=eq.${sessionId}                       │ │
-│  │                                                           │ │
-│  │  Flow:                                                    │ │
-│  │  Cron snapshot → DB INSERT → Realtime broadcasts          │ │
-│  │       → Frontend updates chart (+ polling fallback)       │ │
-│  └───────────────────────────────────────────────────────────┘ │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────────┐ │
+│  │                        PartyKit Server                                │ │
+│  │                      party/dflow-relay.ts                             │ │
+│  │                                                                       │ │
+│  │  ┌─────────────────────────────────────────────────────────────────┐ │ │
+│  │  │  onStart() {                                                    │ │ │
+│  │  │    // Connect to dflow WebSocket                                │ │ │
+│  │  │    this.ws = new WebSocket("wss://prediction-markets-api...")   │ │ │
+│  │  │                                                                 │ │ │
+│  │  │    // Subscribe to all channels                                 │ │ │
+│  │  │    ws.send({ type: "subscribe", channel: "prices", all: true }) │ │ │
+│  │  │    ws.send({ type: "subscribe", channel: "trades", all: true }) │ │ │
+│  │  │    ws.send({ type: "subscribe", channel: "orderbook", all: true})│ │ │
+│  │  │  }                                                              │ │ │
+│  │  │                                                                 │ │ │
+│  │  │  handleMessage(msg) {                                           │ │ │
+│  │  │    if (msg.channel === "prices") detectPriceSwing(msg)          │ │ │
+│  │  │    if (msg.channel === "trades") detectVolumeSpike(msg)         │ │ │
+│  │  │    if (msg.channel === "orderbook") detectImbalance(msg)        │ │ │
+│  │  │                                                                 │ │ │
+│  │  │    if (significantSignal) {                                     │ │ │
+│  │  │      POST → Vercel /api/signals/trigger                         │ │ │
+│  │  │      INSERT → Supabase market_signals (optional)                │ │ │
+│  │  │    }                                                            │ │ │
+│  │  │                                                                 │ │ │
+│  │  │    // Broadcast to connected frontend clients                   │ │ │
+│  │  │    this.room.broadcast(msg)                                     │ │ │
+│  │  │  }                                                              │ │ │
+│  │  └─────────────────────────────────────────────────────────────────┘ │ │
+│  └───────────────────────────────────────────────────────────────────────┘ │
+│                                    │                                       │
+│              ┌─────────────────────┼─────────────────────┐                │
+│              ▼                     ▼                     ▼                │
+│  ┌─────────────────────┐  ┌─────────────────┐  ┌─────────────────────┐   │
+│  │  Vercel             │  │  Supabase       │  │  Frontend           │   │
+│  │  /api/signals/      │  │  market_signals │  │  (PartySocket)      │   │
+│  │  trigger            │  │  table          │  │  Live signal feed   │   │
+│  │       │             │  │                 │  │                     │   │
+│  │       ▼             │  └─────────────────┘  └─────────────────────┘   │
+│  │  tradingAgent       │                                                  │
+│  │  Workflow           │                                                  │
+│  └─────────────────────┘                                                  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Hook-Level Subscriptions
+### dflow WebSocket Channels
 
-Each hook manages its own Supabase channel subscription:
+| Channel | Data Format | Signal Detection |
+|---------|-------------|------------------|
+| **prices** | `{yes_bid, yes_ask, no_bid, no_ask}` | Price swing >5% |
+| **trades** | `{price, count, taker_side, created_time}` | Volume spike, large trades |
+| **orderbook** | `{yes_bids: {price→qty}, no_bids: {price→qty}}` | Depth imbalance |
 
-```
-hooks/
-├── chat/
-│   ├── useChat.ts              # Main chat hook (existing)
-│   └── useRealtimeMessages.ts  # NEW: Realtime subscription
-│
-└── index/
-    ├── usePerformance.ts           # Main performance hook (existing)
-    └── useRealtimePerformance.ts   # NEW: Realtime subscription
-```
+### Why PartyKit?
+
+| Requirement | Vercel | Supabase Edge | PartyKit |
+|-------------|--------|---------------|----------|
+| Persistent WebSocket | ❌ 300s max | ❌ 400s max | ✅ Always-on |
+| Next.js integration | ✅ Native | ⚠️ Separate | ✅ Designed for it |
+| Cost | Free | Free | Free tier |
+| Complexity | N/A | High (restarts) | Low |
 
 ---
 
 ## Implementation Plan
 
-### Phase 1: Realtime Infrastructure
+### Phase 1: PartyKit Setup
 
-#### 1.1 Enable Realtime on Tables
+#### 1.1 Install Dependencies
 
-Run in Supabase SQL Editor:
-
-```sql
--- Enable realtime publication for tables
-ALTER PUBLICATION supabase_realtime ADD TABLE arena_chat_messages;
-ALTER PUBLICATION supabase_realtime ADD TABLE performance_snapshots;
-
--- If RLS is enabled, add policies for anonymous read access
-CREATE POLICY "Allow anonymous read on chat messages"
-  ON arena_chat_messages FOR SELECT
-  USING (true);
-
-CREATE POLICY "Allow anonymous read on performance snapshots"
-  ON performance_snapshots FOR SELECT
-  USING (true);
+```bash
+npm install partykit partysocket
 ```
 
-#### 1.2 Create Realtime Hooks
+#### 1.2 Create PartyKit Configuration
 
-**File: `hooks/chat/useRealtimeMessages.ts`**
+**File: `partykit.json`**
 
-```typescript
-"use client";
-
-import { useEffect, useCallback, useRef } from "react";
-import { getSupabaseClient } from "@/lib/supabase/client";
-import type { ChatMessage } from "@/lib/supabase/types";
-import type { RealtimeChannel } from "@supabase/supabase-js";
-
-interface UseRealtimeMessagesOptions {
-  /** Trading session ID to subscribe to */
-  sessionId: string | null;
-  /** Callback when a new message arrives */
-  onMessage: (message: ChatMessage) => void;
-}
-
-/**
- * Subscribe to realtime chat message inserts for a session.
- * Used to receive agent trade broadcasts instantly.
- */
-export function useRealtimeMessages({
-  sessionId,
-  onMessage,
-}: UseRealtimeMessagesOptions) {
-  const channelRef = useRef<RealtimeChannel | null>(null);
-  const onMessageRef = useRef(onMessage);
-
-  // Keep callback ref updated
-  useEffect(() => {
-    onMessageRef.current = onMessage;
-  }, [onMessage]);
-
-  useEffect(() => {
-    if (!sessionId) return;
-
-    const client = getSupabaseClient();
-    if (!client) {
-      console.warn("[realtime:chat] Supabase client not configured");
-      return;
-    }
-
-    console.log(`[realtime:chat] Subscribing to session: ${sessionId}`);
-
-    const channel = client
-      .channel(`chat:${sessionId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "arena_chat_messages",
-          filter: `session_id=eq.${sessionId}`,
-        },
-        (payload) => {
-          const row = payload.new as Record<string, unknown>;
-
-          const message: ChatMessage = {
-            id: row.id as string,
-            role: row.role as "user" | "assistant",
-            parts: row.parts as ChatMessage["parts"],
-            metadata: row.metadata as ChatMessage["metadata"],
-          };
-
-          console.log(`[realtime:chat] New message from ${message.metadata?.authorId}`);
-          onMessageRef.current(message);
-        }
-      )
-      .subscribe((status) => {
-        console.log(`[realtime:chat] Subscription status: ${status}`);
-      });
-
-    channelRef.current = channel;
-
-    return () => {
-      console.log(`[realtime:chat] Unsubscribing from session: ${sessionId}`);
-      channel.unsubscribe();
-      channelRef.current = null;
-    };
-  }, [sessionId]);
-
-  return channelRef.current;
+```json
+{
+  "name": "aimo-bet-relay",
+  "main": "party/dflow-relay.ts",
+  "compatibilityDate": "2024-01-01"
 }
 ```
 
-**File: `hooks/index/useRealtimePerformance.ts`**
+#### 1.3 Add Scripts to package.json
 
-```typescript
-"use client";
-
-import { useEffect, useRef } from "react";
-import { getSupabaseClient } from "@/lib/supabase/client";
-import type { PerformanceSnapshot } from "@/lib/supabase/types";
-import type { RealtimeChannel } from "@supabase/supabase-js";
-
-interface UseRealtimePerformanceOptions {
-  /** Trading session ID to subscribe to */
-  sessionId: string | null;
-  /** Callback when a new snapshot arrives */
-  onSnapshot: (snapshot: PerformanceSnapshot) => void;
-}
-
-/**
- * Subscribe to realtime performance snapshot inserts for a session.
- * Provides instant chart updates when cron saves new snapshots.
- */
-export function useRealtimePerformance({
-  sessionId,
-  onSnapshot,
-}: UseRealtimePerformanceOptions) {
-  const channelRef = useRef<RealtimeChannel | null>(null);
-  const onSnapshotRef = useRef(onSnapshot);
-
-  useEffect(() => {
-    onSnapshotRef.current = onSnapshot;
-  }, [onSnapshot]);
-
-  useEffect(() => {
-    if (!sessionId) return;
-
-    const client = getSupabaseClient();
-    if (!client) {
-      console.warn("[realtime:performance] Supabase client not configured");
-      return;
-    }
-
-    console.log(`[realtime:performance] Subscribing to session: ${sessionId}`);
-
-    const channel = client
-      .channel(`performance:${sessionId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "performance_snapshots",
-          filter: `session_id=eq.${sessionId}`,
-        },
-        (payload) => {
-          const row = payload.new as Record<string, unknown>;
-
-          const snapshot: PerformanceSnapshot = {
-            id: row.id as string,
-            sessionId: row.session_id as string,
-            modelId: row.model_id as string,
-            accountValue: Number(row.account_value),
-            timestamp: new Date(row.timestamp as string),
-          };
-
-          console.log(`[realtime:performance] New snapshot for ${snapshot.modelId}`);
-          onSnapshotRef.current(snapshot);
-        }
-      )
-      .subscribe((status) => {
-        console.log(`[realtime:performance] Subscription status: ${status}`);
-      });
-
-    channelRef.current = channel;
-
-    return () => {
-      console.log(`[realtime:performance] Unsubscribing from session: ${sessionId}`);
-      channel.unsubscribe();
-      channelRef.current = null;
-    };
-  }, [sessionId]);
-
-  return channelRef.current;
+```json
+{
+  "scripts": {
+    "party:dev": "partykit dev",
+    "party:deploy": "partykit deploy"
+  }
 }
 ```
 
 ---
 
-### Phase 2: Integrate with Existing Hooks
+### Phase 2: PartyKit Server Implementation
 
-#### 2.1 Update `useChat.ts`
+#### 2.1 Create Relay Server
 
-Add realtime subscription for agent messages:
+**File: `party/dflow-relay.ts`**
 
 ```typescript
-// hooks/chat/useChat.ts
+import type { Party, PartyKitServer, Connection } from "partykit/server";
 
-import { useRealtimeMessages } from "./useRealtimeMessages";
+const DFLOW_WS_URL = "wss://prediction-markets-api.dflow.net/api/v1/ws";
+const SWING_THRESHOLD = 0.05; // 5% price change
+const VOLUME_SPIKE_MULTIPLIER = 5; // 5x average volume
 
-export function useChat({ sessionId }: UseChatOptions): UseChatReturn {
-  // ... existing state and effects ...
+interface PriceMessage {
+  channel: "prices";
+  type: "ticker";
+  market_ticker: string;
+  yes_bid: string | null;
+  yes_ask: string | null;
+  no_bid: string | null;
+  no_ask: string | null;
+}
 
-  // Realtime: receive agent trade broadcasts instantly
-  const handleRealtimeMessage = useCallback(
-    (message: ChatMessage) => {
-      // Only append messages from agents (not our own or duplicates)
-      if (message.metadata?.authorType === "model") {
-        // Dedupe check
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === message.id)) {
-            return prev;
-          }
-          return [...prev, message];
-        });
+interface TradeMessage {
+  channel: "trades";
+  type: "trade";
+  market_ticker: string;
+  trade_id: string;
+  price: number;
+  count: number;
+  taker_side: "yes" | "no";
+  created_time: number;
+}
+
+interface OrderbookMessage {
+  channel: "orderbook";
+  type: "orderbook";
+  market_ticker: string;
+  yes_bids: Record<string, number>;
+  no_bids: Record<string, number>;
+}
+
+type DflowMessage = PriceMessage | TradeMessage | OrderbookMessage;
+
+interface Signal {
+  type: "price_swing" | "volume_spike" | "orderbook_imbalance";
+  ticker: string;
+  data: Record<string, unknown>;
+  timestamp: number;
+}
+
+export default class DflowRelay implements PartyKitServer {
+  private dflowWs: WebSocket | null = null;
+  private priceCache = new Map<string, number>();
+  private tradeVolumes = new Map<string, number[]>(); // Rolling window
+
+  constructor(readonly room: Party) {}
+
+  // Called when the room is created
+  async onStart() {
+    console.log("[dflow-relay] Starting relay server");
+    this.connectToDflow();
+  }
+
+  // Connect to dflow WebSocket
+  private connectToDflow() {
+    console.log("[dflow-relay] Connecting to dflow WebSocket");
+
+    this.dflowWs = new WebSocket(DFLOW_WS_URL);
+
+    this.dflowWs.onopen = () => {
+      console.log("[dflow-relay] Connected to dflow");
+
+      // Subscribe to all channels
+      this.dflowWs!.send(JSON.stringify({
+        type: "subscribe",
+        channel: "prices",
+        all: true
+      }));
+      this.dflowWs!.send(JSON.stringify({
+        type: "subscribe",
+        channel: "trades",
+        all: true
+      }));
+      this.dflowWs!.send(JSON.stringify({
+        type: "subscribe",
+        channel: "orderbook",
+        all: true
+      }));
+    };
+
+    this.dflowWs.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data as string) as DflowMessage;
+        this.handleDflowMessage(msg);
+      } catch (error) {
+        console.error("[dflow-relay] Failed to parse message:", error);
       }
-    },
-    [setMessages]
-  );
+    };
 
-  useRealtimeMessages({
-    sessionId,
-    onMessage: handleRealtimeMessage,
-  });
+    this.dflowWs.onclose = () => {
+      console.log("[dflow-relay] Connection closed, reconnecting in 1s...");
+      setTimeout(() => this.connectToDflow(), 1000);
+    };
 
-  // ... rest of hook ...
-}
-```
+    this.dflowWs.onerror = (error) => {
+      console.error("[dflow-relay] WebSocket error:", error);
+    };
+  }
 
-#### 2.2 Update `usePerformance.ts`
+  // Handle incoming dflow messages
+  private async handleDflowMessage(msg: DflowMessage) {
+    let signal: Signal | null = null;
 
-Add realtime with polling fallback:
-
-```typescript
-// hooks/index/usePerformance.ts
-
-import { useRealtimePerformance } from "./useRealtimePerformance";
-
-export function usePerformance(sessionId: string | null, hoursBack = 24) {
-  const {
-    data: snapshots,
-    error,
-    isLoading,
-    mutate,
-  } = useSWR<PerformanceSnapshot[]>(
-    sessionId ? `performance/${sessionId}/${hoursBack}` : null,
-    () => (sessionId ? fetchPerformanceSnapshots(sessionId, hoursBack) : []),
-    {
-      // Keep polling as fallback (reduced frequency)
-      refreshInterval: POLLING_INTERVALS.performance * 2,
+    switch (msg.channel) {
+      case "prices":
+        signal = this.detectPriceSwing(msg);
+        break;
+      case "trades":
+        signal = this.detectVolumeSpike(msg);
+        break;
+      case "orderbook":
+        signal = this.detectOrderbookImbalance(msg);
+        break;
     }
-  );
 
-  // Realtime: append new snapshots without full refetch
-  const handleNewSnapshot = useCallback(
-    (snapshot: PerformanceSnapshot) => {
-      mutate(
-        (current) => {
-          if (!current) return [snapshot];
-          // Dedupe by ID
-          if (current.some((s) => s.id === snapshot.id)) {
-            return current;
-          }
-          return [...current, snapshot];
+    // If significant signal detected, trigger agents
+    if (signal) {
+      await this.triggerAgents(signal);
+    }
+
+    // Broadcast to connected frontend clients
+    this.room.broadcast(JSON.stringify(msg));
+  }
+
+  // Detect price swings > threshold
+  private detectPriceSwing(msg: PriceMessage): Signal | null {
+    const yesBid = msg.yes_bid ? parseFloat(msg.yes_bid) : null;
+    const yesAsk = msg.yes_ask ? parseFloat(msg.yes_ask) : null;
+
+    if (yesBid === null || yesAsk === null) return null;
+
+    const mid = (yesBid + yesAsk) / 2;
+    const prev = this.priceCache.get(msg.market_ticker);
+    this.priceCache.set(msg.market_ticker, mid);
+
+    if (prev && prev > 0) {
+      const change = Math.abs(mid - prev) / prev;
+
+      if (change >= SWING_THRESHOLD) {
+        console.log(`[dflow-relay] Price swing detected: ${msg.market_ticker} ${(change * 100).toFixed(2)}%`);
+        return {
+          type: "price_swing",
+          ticker: msg.market_ticker,
+          data: {
+            previousPrice: prev,
+            currentPrice: mid,
+            changePercent: change,
+          },
+          timestamp: Date.now(),
+        };
+      }
+    }
+
+    return null;
+  }
+
+  // Detect volume spikes
+  private detectVolumeSpike(msg: TradeMessage): Signal | null {
+    const ticker = msg.market_ticker;
+    const volumes = this.tradeVolumes.get(ticker) || [];
+
+    // Add current trade volume
+    volumes.push(msg.count);
+
+    // Keep last 100 trades for average
+    if (volumes.length > 100) {
+      volumes.shift();
+    }
+    this.tradeVolumes.set(ticker, volumes);
+
+    // Need at least 10 trades to calculate average
+    if (volumes.length < 10) return null;
+
+    const avgVolume = volumes.slice(0, -1).reduce((a, b) => a + b, 0) / (volumes.length - 1);
+
+    if (msg.count >= avgVolume * VOLUME_SPIKE_MULTIPLIER) {
+      console.log(`[dflow-relay] Volume spike detected: ${ticker} ${msg.count} vs avg ${avgVolume.toFixed(0)}`);
+      return {
+        type: "volume_spike",
+        ticker: msg.market_ticker,
+        data: {
+          tradeId: msg.trade_id,
+          volume: msg.count,
+          averageVolume: avgVolume,
+          multiplier: msg.count / avgVolume,
+          takerSide: msg.taker_side,
         },
-        { revalidate: false }
+        timestamp: Date.now(),
+      };
+    }
+
+    return null;
+  }
+
+  // Detect orderbook imbalances
+  private detectOrderbookImbalance(msg: OrderbookMessage): Signal | null {
+    const yesBidDepth = Object.values(msg.yes_bids).reduce((a, b) => a + b, 0);
+    const noBidDepth = Object.values(msg.no_bids).reduce((a, b) => a + b, 0);
+
+    if (yesBidDepth === 0 || noBidDepth === 0) return null;
+
+    const ratio = yesBidDepth / noBidDepth;
+
+    // Significant imbalance: 3:1 or 1:3
+    if (ratio >= 3 || ratio <= 0.33) {
+      console.log(`[dflow-relay] Orderbook imbalance: ${msg.market_ticker} ratio ${ratio.toFixed(2)}`);
+      return {
+        type: "orderbook_imbalance",
+        ticker: msg.market_ticker,
+        data: {
+          yesBidDepth,
+          noBidDepth,
+          ratio,
+          direction: ratio >= 3 ? "yes_heavy" : "no_heavy",
+        },
+        timestamp: Date.now(),
+      };
+    }
+
+    return null;
+  }
+
+  // Trigger trading agents via Vercel API
+  private async triggerAgents(signal: Signal) {
+    try {
+      const response = await fetch(
+        `${this.room.env.VERCEL_URL}/api/signals/trigger`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${this.room.env.WEBHOOK_SECRET}`,
+          },
+          body: JSON.stringify(signal),
+        }
       );
-    },
-    [mutate]
-  );
 
-  useRealtimePerformance({
-    sessionId,
-    onSnapshot: handleNewSnapshot,
-  });
+      if (!response.ok) {
+        console.error(`[dflow-relay] Failed to trigger agents: ${response.status}`);
+      }
+    } catch (error) {
+      console.error("[dflow-relay] Error triggering agents:", error);
+    }
+  }
 
-  // ... rest of hook (chartData conversion, etc.) ...
+  // Handle frontend client connections (optional)
+  onConnect(conn: Connection) {
+    console.log(`[dflow-relay] Client connected: ${conn.id}`);
+  }
+
+  onClose(conn: Connection) {
+    console.log(`[dflow-relay] Client disconnected: ${conn.id}`);
+  }
 }
 ```
 
 ---
 
-### Phase 3: Export Hooks
+### Phase 3: Vercel API Endpoint
 
-#### 3.1 Update Hook Exports
+#### 3.1 Create Signal Trigger Endpoint
 
-**File: `hooks/chat/index.ts`**
-
-```typescript
-export { useChat } from "./useChat";
-export { useRealtimeMessages } from "./useRealtimeMessages";
-```
-
-**File: `hooks/index/index.ts`**
+**File: `app/api/signals/trigger/route.ts`**
 
 ```typescript
-export { useLivePrices } from "./useLivePrices";
-export { usePerformance } from "./usePerformance";
-export { useRealtimePerformance } from "./useRealtimePerformance";
+import { NextRequest, NextResponse } from "next/server";
+import { getModelsWithWallets } from "@/lib/ai/models/catalog";
+// import { tradingAgentWorkflow } from "@/lib/ai/workflows/tradingAgent";
+
+interface Signal {
+  type: "price_swing" | "volume_spike" | "orderbook_imbalance";
+  ticker: string;
+  data: Record<string, unknown>;
+  timestamp: number;
+}
+
+export async function POST(req: NextRequest) {
+  // Verify webhook secret
+  const authHeader = req.headers.get("authorization");
+  const expectedToken = `Bearer ${process.env.WEBHOOK_SECRET}`;
+
+  if (authHeader !== expectedToken) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const signal = (await req.json()) as Signal;
+
+    console.log(`[signals/trigger] Received signal: ${signal.type} for ${signal.ticker}`);
+
+    // Get all models with wallets
+    const models = getModelsWithWallets();
+
+    // Trigger trading workflow for each model
+    // TODO: Uncomment when workflow is ready
+    // await Promise.all(
+    //   models.map((model) =>
+    //     tradingAgentWorkflow({
+    //       modelId: model.id,
+    //       walletAddress: model.walletAddress!,
+    //       signal,
+    //     })
+    //   )
+    // );
+
+    return NextResponse.json({
+      success: true,
+      signal: signal.type,
+      ticker: signal.ticker,
+      modelsTriggered: models.length,
+    });
+  } catch (error) {
+    console.error("[signals/trigger] Error:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
 ```
 
 ---
 
-## Database Schema
+### Phase 4: Frontend Integration (Optional)
 
-### Tables with Realtime Enabled
+#### 4.1 Create PartySocket Hook
 
-| Table | Realtime Events | Purpose |
-|-------|-----------------|---------|
-| `arena_chat_messages` | INSERT | Agent trade broadcasts |
-| `performance_snapshots` | INSERT | Chart updates |
+**File: `hooks/useMarketSignals.ts`**
 
-### Schema Reference
+```typescript
+"use client";
 
-```sql
--- arena_chat_messages
-CREATE TABLE arena_chat_messages (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  session_id UUID NOT NULL REFERENCES trading_sessions(id),
-  role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
-  parts JSONB NOT NULL,
-  metadata JSONB,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
+import { useEffect, useState } from "react";
+import PartySocket from "partysocket";
 
--- performance_snapshots
-CREATE TABLE performance_snapshots (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  session_id UUID NOT NULL REFERENCES trading_sessions(id),
-  model_id TEXT NOT NULL,
-  account_value DECIMAL(20, 8) NOT NULL,
-  timestamp TIMESTAMPTZ DEFAULT NOW()
-);
+interface MarketSignal {
+  channel: "prices" | "trades" | "orderbook";
+  market_ticker: string;
+  [key: string]: unknown;
+}
 
--- Indexes for realtime filters
-CREATE INDEX idx_chat_messages_session ON arena_chat_messages(session_id);
-CREATE INDEX idx_performance_session ON performance_snapshots(session_id);
+export function useMarketSignals() {
+  const [signals, setSignals] = useState<MarketSignal[]>([]);
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    const socket = new PartySocket({
+      host: process.env.NEXT_PUBLIC_PARTYKIT_HOST || "localhost:1999",
+      room: "dflow-relay",
+    });
+
+    socket.onopen = () => {
+      console.log("[market-signals] Connected to PartyKit");
+      setConnected(true);
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data) as MarketSignal;
+        setSignals((prev) => [...prev.slice(-99), msg]); // Keep last 100
+      } catch (error) {
+        console.error("[market-signals] Failed to parse:", error);
+      }
+    };
+
+    socket.onclose = () => {
+      console.log("[market-signals] Disconnected");
+      setConnected(false);
+    };
+
+    return () => {
+      socket.close();
+    };
+  }, []);
+
+  return { signals, connected };
+}
 ```
 
 ---
@@ -486,46 +593,88 @@ CREATE INDEX idx_performance_session ON performance_snapshots(session_id);
 ## Environment Variables
 
 ```bash
-# Supabase (required for realtime)
+# Supabase
 NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+
+# PartyKit
+NEXT_PUBLIC_PARTYKIT_HOST=your-project.partykit.dev
 
 # API Keys
 OPENROUTER_API_KEY=sk-or-...
 AIMO_API_KEY=...
 
 # Security
+WEBHOOK_SECRET=your-webhook-secret
 CRON_SECRET=your-cron-secret
 
 # Solana RPC
 SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
+
+# Vercel (set automatically, or manually for PartyKit)
+VERCEL_URL=https://your-app.vercel.app
+```
+
+---
+
+## Deployment
+
+### Development
+
+```bash
+# Terminal 1: Next.js
+npm run dev
+
+# Terminal 2: PartyKit
+npm run party:dev
+```
+
+### Production
+
+```bash
+# Deploy PartyKit
+npm run party:deploy
+
+# Deploy to Vercel (automatic via git push)
+git push
 ```
 
 ---
 
 ## Implementation Checklist
 
-### Phase 1: Realtime Infrastructure
-- [ ] Enable realtime on `arena_chat_messages` table (Supabase Dashboard)
-- [ ] Enable realtime on `performance_snapshots` table (Supabase Dashboard)
-- [ ] Add RLS policies if needed (or verify RLS is disabled)
-- [ ] Verify `NEXT_PUBLIC_SUPABASE_ANON_KEY` is set
+### Phase 1: PartyKit Setup
+- [ ] Install `partykit` and `partysocket` packages
+- [ ] Create `partykit.json` configuration
+- [ ] Add npm scripts for dev and deploy
 
-### Phase 2: Create Realtime Hooks
-- [ ] Create `hooks/chat/useRealtimeMessages.ts`
-- [ ] Create `hooks/index/useRealtimePerformance.ts`
-- [ ] Add exports to hook index files
+### Phase 2: Relay Server
+- [ ] Create `party/dflow-relay.ts`
+- [ ] Implement dflow WebSocket connection
+- [ ] Implement price swing detection
+- [ ] Implement volume spike detection
+- [ ] Implement orderbook imbalance detection
+- [ ] Implement agent trigger via Vercel API
 
-### Phase 3: Integrate with Existing Hooks
-- [ ] Update `useChat.ts` to use `useRealtimeMessages`
-- [ ] Update `usePerformance.ts` to use `useRealtimePerformance`
-- [ ] Add deduplication logic to both hooks
+### Phase 3: Vercel Integration
+- [ ] Create `/api/signals/trigger` endpoint
+- [ ] Add webhook secret verification
+- [ ] Connect to trading agent workflow
+- [ ] Add `WEBHOOK_SECRET` to environment variables
 
-### Phase 4: Testing
-- [ ] Test chat realtime: agent posts trade → appears instantly in UI
-- [ ] Test performance realtime: cron saves snapshot → chart updates
-- [ ] Test fallback: disable realtime → polling still works
-- [ ] Test reconnection: network drop → auto-reconnects
+### Phase 4: Frontend (Optional)
+- [ ] Create `useMarketSignals` hook
+- [ ] Add live signal feed component
+- [ ] Add `NEXT_PUBLIC_PARTYKIT_HOST` to environment variables
+
+### Phase 5: Deployment
+- [ ] Deploy PartyKit: `npm run party:deploy`
+- [ ] Configure PartyKit environment variables (VERCEL_URL, WEBHOOK_SECRET)
+- [ ] Test end-to-end: dflow → PartyKit → Vercel → Agent
+
+### Phase 6: Cleanup
+- [ ] Deprecate/remove `lib/ai/workflows/priceWatcher.ts`
+- [ ] Update documentation
 
 ---
 
@@ -535,56 +684,72 @@ SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
 
 | File | Purpose |
 |------|---------|
-| `hooks/chat/useRealtimeMessages.ts` | Chat realtime subscription |
-| `hooks/index/useRealtimePerformance.ts` | Performance realtime subscription |
+| `partykit.json` | PartyKit configuration |
+| `party/dflow-relay.ts` | WebSocket relay server |
+| `app/api/signals/trigger/route.ts` | Vercel endpoint for agent triggers |
+| `hooks/useMarketSignals.ts` | Frontend live signal hook (optional) |
 
 ### Files to Modify
 
 | File | Changes |
 |------|---------|
-| `hooks/chat/useChat.ts` | Add realtime integration |
-| `hooks/index/usePerformance.ts` | Add realtime + reduce polling |
-| `hooks/chat/index.ts` | Export new hook |
-| `hooks/index/index.ts` | Export new hook |
+| `package.json` | Add partykit dependencies and scripts |
+| `.env` | Add WEBHOOK_SECRET, PARTYKIT_HOST |
+
+### Files to Deprecate
+
+| File | Reason |
+|------|--------|
+| `lib/ai/workflows/priceWatcher.ts` | Replaced by PartyKit relay |
 
 ---
 
-## Future Enhancements
+## Signal Types Reference
 
-### Additional Realtime Channels
-
-When needed, add more channels:
+### Price Swing
 
 ```typescript
-// Trades channel - for trade activity feed
-channel(`trades:${sessionId}`)
-  .on('postgres_changes', { table: 'trades', event: 'INSERT' }, ...)
-
-// Market prices channel - if we cache prices in Supabase
-channel(`prices:global`)
-  .on('postgres_changes', { table: 'market_prices', event: 'UPDATE' }, ...)
+{
+  type: "price_swing",
+  ticker: "BTCD-25DEC0313-T92749.99",
+  data: {
+    previousPrice: 0.45,
+    currentPrice: 0.52,
+    changePercent: 0.156
+  },
+  timestamp: 1703520000000
+}
 ```
 
-### Connection Health Monitoring
+### Volume Spike
 
 ```typescript
-// Monitor realtime connection health
-channel.on('system', {}, (payload) => {
-  if (payload.extension === 'presence') {
-    console.log('Connection health:', payload);
-  }
-});
+{
+  type: "volume_spike",
+  ticker: "BTCD-25DEC0313-T92749.99",
+  data: {
+    tradeId: "abc123",
+    volume: 500,
+    averageVolume: 50,
+    multiplier: 10,
+    takerSide: "yes"
+  },
+  timestamp: 1703520000000
+}
 ```
 
-### Centralized Provider (Future)
-
-If hooks become too numerous, consider a centralized provider:
+### Orderbook Imbalance
 
 ```typescript
-// Future: RealtimeProvider for shared connection management
-<RealtimeProvider sessionId={sessionId}>
-  <ChatPanel />        {/* useRealtimeChat() */}
-  <PerformanceChart /> {/* useRealtimePerformance() */}
-  <TradesFeed />       {/* useRealtimeTrades() */}
-</RealtimeProvider>
+{
+  type: "orderbook_imbalance",
+  ticker: "BTCD-25DEC0313-T92749.99",
+  data: {
+    yesBidDepth: 15000,
+    noBidDepth: 3000,
+    ratio: 5,
+    direction: "yes_heavy"
+  },
+  timestamp: 1703520000000
+}
 ```
