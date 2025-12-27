@@ -7,674 +7,854 @@ AI prediction market trading competition on dflow. LLMs autonomously trade on pr
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              Frontend                                        │
-│         / (charts)  |  /chat  |  /positions  |  /trades                     │
+│       / (charts)  |  /chat (feed)  |  /positions  |  /trades                │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                 ┌───────────────────┼───────────────────┐
                 ▼                   ▼                   ▼
 ┌───────────────────────┐ ┌─────────────────┐ ┌─────────────────┐
 │  /api/sessions        │ │  /api/dflow/*   │ │  /api/chat      │
-│  /api/performance     │ │  (On-chain)     │ │  (Streaming)    │
+│  /api/agents          │ │  (On-chain)     │ │  (Streaming)    │
 │  /api/signals/trigger │ │                 │ │                 │
 └───────────────────────┘ └─────────────────┘ └─────────────────┘
           │                       │                   │
           ▼                       ▼                   ▼
-┌─────────────────┐     ┌─────────────────┐   ┌─────────────────┐
-│    Supabase     │     │   dflow APIs    │   │   AI Agents     │
-│                 │     │  Swap/Metadata  │   │                 │
-│ - sessions      │     └────────┬────────┘   │ - chatAgent     │
-│ - snapshots     │              │            │ - Trading       │
-│ - chat_messages │              │            │   Workflow      │
-│ - market_signals│     ┌────────┴────────┐   └─────────────────┘
-│                 │     │  dflow WebSocket │
-│  Realtime       │     │  wss://...      │
-│  - chat channel │     └────────┬────────┘
-│  - signals feed │              │
-└─────────────────┘              │
-                                 │
-                    ┌────────────┴────────────┐
-                    │      PartyKit           │
+┌─────────────────────────────────────────────────────────────────┐
+│                         Supabase                                 │
+│                                                                  │
+│  trading_sessions ──► agent_sessions ──► agent_decisions        │
+│                            │                   │                 │
+│                            │                   ▼                 │
+│                            │             agent_trades            │
+│                            │                                     │
+│                            └──► current_value (leaderboard)      │
+│                                                                  │
+│  Realtime Subscriptions:                                        │
+│  - agent_decisions (INSERT) → ModelChatFeed + PerformanceChart  │
+│  - agent_trades (INSERT) → Trade details in feed                │
+│  - agent_sessions (UPDATE) → Leaderboard                        │
+└─────────────────────────────────────────────────────────────────┘
+          ▲                       ▲
+          │                       │
+┌─────────────────┐     ┌─────────────────┐
+│   AI Agents     │     │   dflow APIs    │
+│                 │────►│  Swap/Metadata  │
+│ - Trading       │     └────────┬────────┘
+│   Workflow      │              │
+│                 │     ┌────────┴────────┐
+└─────────────────┘     │  dflow WebSocket │
+          ▲             │  wss://...      │
+          │             └────────┬────────┘
+          │                      │
+          │         ┌────────────┴────────────┐
+          └─────────│      PartyKit           │
                     │   (WebSocket Relay)     │
                     │   party/dflow-relay.ts  │
+                    │                         │
+                    │  - Price swing detection│
+                    │  - Volume spike detection│
+                    │  - Orderbook imbalance  │
                     └─────────────────────────┘
 ```
 
 ---
 
-## AI Module Architecture
+## Database Schema
+
+### Design Principles
+
+1. **On-chain as source of truth** - Blockchain remains authoritative for balances/positions
+2. **Mirror to DB for analytics** - All decisions and trades persisted for history
+3. **Decision-first architecture** - Every agent trigger creates a decision; trades are outcomes
+4. **No separate history table** - Chart data derived from `agent_decisions.portfolio_value_after`
+5. **Reuse existing chat UI** - `agent_decisions` integrates with existing `useChat`/`ModelChatFeed`
+6. **PartyKit handles price detection** - No `market_prices` table needed in Supabase
+
+### Entity Relationship Diagram
 
 ```
-lib/ai/
-├── models/           # Model definitions & registry
-│   ├── catalog.ts    # Model catalog with wallet addresses
-│   ├── registry.ts   # AI SDK provider registry
-│   ├── providers.ts  # Provider configurations
-│   ├── openrouter.ts # OpenRouter provider
-│   └── aimo.ts       # AIMO provider
-│
-├── tools/            # Agent tools (wallet-injected)
-│   ├── index.ts      # createAgentTools() factory
-│   ├── market-discovery/
-│   ├── portfolio-management/
-│   └── trade-execution/
-│
-├── agents/           # Agent implementations
-│   ├── predictionMarketAgent.ts
-│   └── chatAgent.ts
-│
-├── prompts/          # System prompts
-│   ├── trading/
-│   └── chat/
-│
-├── guardrails/       # Risk control & validation
-│   ├── types.ts
-│   ├── riskLimits.ts
-│   └── middleware.ts
-│
-└── workflows/        # Durable workflows
-    ├── priceWatcher.ts   # DEPRECATED: replaced by PartyKit relay
-    └── tradingAgent.ts
+┌─────────────────────┐
+│  trading_sessions   │
+│  (arena/competition)│
+├─────────────────────┤
+│  id (PK)            │
+│  name               │
+│  status             │
+│  starting_capital   │
+│  started_at         │
+│  ended_at           │
+│  created_at         │
+└─────────┬───────────┘
+          │ 1:N
+          ▼
+┌─────────────────────────┐
+│     agent_sessions      │
+│    (model in arena)     │
+├─────────────────────────┤
+│  id (PK)                │
+│  session_id (FK)        │◄────────────────────────────────┐
+│  model_id               │                                  │
+│  model_name             │                                  │
+│  wallet_address         │                                  │
+│  starting_capital       │                                  │
+│  current_value          │  ◄── Latest value (leaderboard) │
+│  total_pnl              │  ◄── Cumulative P&L             │
+│  status                 │                                  │
+│  created_at             │                                  │
+│  updated_at             │                                  │
+└─────────┬───────────────┘                                  │
+          │ 1:N                                              │
+          ▼                                                  │
+┌─────────────────────────┐                                  │
+│    agent_decisions      │                                  │
+│    (every trigger)      │                                  │
+├─────────────────────────┤                                  │
+│  id (PK)                │                                  │
+│  agent_session_id (FK)  │──────────────────────────────────┘
+│  trigger_type           │
+│  trigger_details        │
+│  market_ticker          │
+│  market_title           │
+│  decision               │
+│  reasoning              │  ◄── Displayed in chat feed!
+│  confidence             │
+│  market_context         │
+│  portfolio_value_after  │  ◄── For chart time-series!
+│  created_at             │
+└─────────┬───────────────┘
+          │ 1:N (0 or more trades per decision)
+          ▼
+┌─────────────────────────┐
+│      agent_trades       │
+│    (executed trades)    │
+├─────────────────────────┤
+│  id (PK)                │
+│  decision_id (FK)       │
+│  agent_session_id (FK)  │  ◄── Denormalized for queries
+│  market_ticker          │
+│  side (yes/no)          │
+│  action (buy/sell)      │
+│  quantity               │
+│  price                  │
+│  notional               │
+│  tx_signature           │
+│  pnl                    │
+│  created_at             │
+└─────────────────────────┘
+```
+
+### Tables Summary
+
+| Table | Purpose | Realtime? |
+|-------|---------|-----------|
+| `trading_sessions` | Arena/competition container | No |
+| `agent_sessions` | Agent state (current_value for leaderboard) | Yes (UPDATE) |
+| `agent_decisions` | Every trigger with reasoning + portfolio_value_after | Yes (INSERT) |
+| `agent_trades` | Executed trades, linked to decisions | Yes (INSERT) |
+
+**Removed Tables:**
+- `arena_chat_messages` - Replaced by `agent_decisions`
+- `performance_snapshots` - Replaced by `agent_decisions.portfolio_value_after`
+- `market_prices` / `market_price_history` - PartyKit handles detection in-memory
+
+---
+
+## SQL Schema Definition
+
+### Table: trading_sessions
+
+```sql
+-- Trading competitions/arenas
+-- Each session is a distinct competition period
+CREATE TABLE trading_sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT,
+  status TEXT NOT NULL DEFAULT 'setup' 
+    CHECK (status IN ('setup', 'running', 'paused', 'completed')),
+  starting_capital NUMERIC NOT NULL DEFAULT 10000,
+  started_at TIMESTAMPTZ,
+  ended_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_trading_sessions_status ON trading_sessions(status);
+```
+
+### Table: agent_sessions
+
+```sql
+-- Links each AI model to a trading session
+CREATE TABLE agent_sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id UUID NOT NULL REFERENCES trading_sessions(id) ON DELETE CASCADE,
+  
+  -- Model identification (from catalog.ts)
+  model_id TEXT NOT NULL,           -- "openrouter/gpt-4o"
+  model_name TEXT NOT NULL,         -- "GPT-4o" (display name)
+  wallet_address TEXT NOT NULL,     -- Solana public key
+  
+  -- Capital tracking
+  starting_capital NUMERIC NOT NULL DEFAULT 10000,
+  current_value NUMERIC NOT NULL DEFAULT 10000,
+  total_pnl NUMERIC NOT NULL DEFAULT 0,
+  
+  -- Status
+  status TEXT NOT NULL DEFAULT 'active' 
+    CHECK (status IN ('active', 'paused', 'eliminated')),
+  
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  
+  UNIQUE(session_id, model_id)
+);
+
+CREATE INDEX idx_agent_sessions_session ON agent_sessions(session_id);
+CREATE INDEX idx_agent_sessions_model ON agent_sessions(model_id);
+
+-- Auto-update timestamp
+CREATE OR REPLACE FUNCTION update_agent_session_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER agent_sessions_updated_at
+  BEFORE UPDATE ON agent_sessions
+  FOR EACH ROW
+  EXECUTE FUNCTION update_agent_session_timestamp();
+```
+
+### Table: agent_decisions
+
+```sql
+-- Every agent trigger creates a decision record
+-- Source for both chat feed AND chart time-series
+CREATE TABLE agent_decisions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_session_id UUID NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+  
+  -- Trigger info
+  trigger_type TEXT NOT NULL CHECK (trigger_type IN (
+    'price_swing', 'volume_spike', 'orderbook_imbalance', 'periodic', 'manual'
+  )),
+  trigger_details JSONB,
+  
+  -- Market (nullable for portfolio review)
+  market_ticker TEXT,
+  market_title TEXT,
+  
+  -- Decision
+  decision TEXT NOT NULL CHECK (decision IN ('buy', 'sell', 'hold', 'skip')),
+  
+  -- Reasoning (displayed in chat feed!)
+  reasoning TEXT NOT NULL,
+  confidence NUMERIC,
+  market_context JSONB,
+  
+  -- Portfolio value for chart
+  portfolio_value_after NUMERIC NOT NULL,
+  
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_agent_decisions_session ON agent_decisions(agent_session_id);
+CREATE INDEX idx_agent_decisions_created ON agent_decisions(created_at DESC);
+CREATE INDEX idx_agent_decisions_chart ON agent_decisions(agent_session_id, created_at ASC);
+```
+
+### Table: agent_trades
+
+```sql
+-- Executed trades (outcome of buy/sell decisions)
+CREATE TABLE agent_trades (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  decision_id UUID NOT NULL REFERENCES agent_decisions(id) ON DELETE CASCADE,
+  agent_session_id UUID NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+  
+  market_ticker TEXT NOT NULL,
+  market_title TEXT,
+  side TEXT NOT NULL CHECK (side IN ('yes', 'no')),
+  action TEXT NOT NULL CHECK (action IN ('buy', 'sell')),
+  quantity NUMERIC NOT NULL,
+  price NUMERIC NOT NULL,
+  notional NUMERIC NOT NULL,
+  tx_signature TEXT,
+  pnl NUMERIC,
+  
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_agent_trades_decision ON agent_trades(decision_id);
+CREATE INDEX idx_agent_trades_session ON agent_trades(agent_session_id);
+CREATE INDEX idx_agent_trades_created ON agent_trades(created_at DESC);
 ```
 
 ---
 
-## PartyKit WebSocket Relay Implementation
+## Supabase Realtime Configuration
 
-### Problem
+```sql
+-- Enable realtime for chat feed + chart
+ALTER PUBLICATION supabase_realtime ADD TABLE agent_decisions;
+ALTER PUBLICATION supabase_realtime ADD TABLE agent_trades;
+ALTER PUBLICATION supabase_realtime ADD TABLE agent_sessions;
+```
 
-Vercel serverless functions cannot maintain persistent WebSocket connections to dflow's market data stream. Functions timeout after 10-300 seconds.
+### Row Level Security
 
-### Solution
+```sql
+ALTER TABLE trading_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_decisions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_trades ENABLE ROW LEVEL SECURITY;
 
-Use PartyKit as a persistent WebSocket relay that:
-1. Maintains connection to dflow WebSocket (`wss://prediction-markets-api.dflow.net/api/v1/ws`)
-2. Subscribes to prices, trades, and orderbook channels
-3. Detects significant market signals (price swings, volume spikes, orderbook imbalances)
-4. Triggers Vercel API endpoint when action is needed
-5. Optionally persists data to Supabase for history/frontend
+-- Public read (arena is spectator-friendly)
+CREATE POLICY "Public read" ON trading_sessions FOR SELECT USING (true);
+CREATE POLICY "Public read" ON agent_sessions FOR SELECT USING (true);
+CREATE POLICY "Public read" ON agent_decisions FOR SELECT USING (true);
+CREATE POLICY "Public read" ON agent_trades FOR SELECT USING (true);
+
+-- Service role write
+CREATE POLICY "Service write" ON trading_sessions FOR ALL USING (auth.role() = 'service_role');
+CREATE POLICY "Service write" ON agent_sessions FOR ALL USING (auth.role() = 'service_role');
+CREATE POLICY "Service write" ON agent_decisions FOR ALL USING (auth.role() = 'service_role');
+CREATE POLICY "Service write" ON agent_trades FOR ALL USING (auth.role() = 'service_role');
+```
+
+---
+
+## Frontend Integration: Reusing Existing Chat
+
+Instead of creating new components, we **adapt the existing chat infrastructure** to use `agent_decisions` as the data source. This preserves the streaming UI and leaves room for future improvements.
 
 ### Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                                                                             │
-│  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │                        PartyKit Server                                │ │
-│  │                      party/dflow-relay.ts                             │ │
-│  │                                                                       │ │
-│  │  ┌─────────────────────────────────────────────────────────────────┐ │ │
-│  │  │  onStart() {                                                    │ │ │
-│  │  │    // Connect to dflow WebSocket                                │ │ │
-│  │  │    this.ws = new WebSocket("wss://prediction-markets-api...")   │ │ │
-│  │  │                                                                 │ │ │
-│  │  │    // Subscribe to all channels                                 │ │ │
-│  │  │    ws.send({ type: "subscribe", channel: "prices", all: true }) │ │ │
-│  │  │    ws.send({ type: "subscribe", channel: "trades", all: true }) │ │ │
-│  │  │    ws.send({ type: "subscribe", channel: "orderbook", all: true})│ │ │
-│  │  │  }                                                              │ │ │
-│  │  │                                                                 │ │ │
-│  │  │  handleMessage(msg) {                                           │ │ │
-│  │  │    if (msg.channel === "prices") detectPriceSwing(msg)          │ │ │
-│  │  │    if (msg.channel === "trades") detectVolumeSpike(msg)         │ │ │
-│  │  │    if (msg.channel === "orderbook") detectImbalance(msg)        │ │ │
-│  │  │                                                                 │ │ │
-│  │  │    if (significantSignal) {                                     │ │ │
-│  │  │      POST → Vercel /api/signals/trigger                         │ │ │
-│  │  │      INSERT → Supabase market_signals (optional)                │ │ │
-│  │  │    }                                                            │ │ │
-│  │  │                                                                 │ │ │
-│  │  │    // Broadcast to connected frontend clients                   │ │ │
-│  │  │    this.room.broadcast(msg)                                     │ │ │
-│  │  │  }                                                              │ │ │
-│  │  └─────────────────────────────────────────────────────────────────┘ │ │
-│  └───────────────────────────────────────────────────────────────────────┘ │
-│                                    │                                       │
-│              ┌─────────────────────┼─────────────────────┐                │
-│              ▼                     ▼                     ▼                │
-│  ┌─────────────────────┐  ┌─────────────────┐  ┌─────────────────────┐   │
-│  │  Vercel             │  │  Supabase       │  │  Frontend           │   │
-│  │  /api/signals/      │  │  market_signals │  │  (PartySocket)      │   │
-│  │  trigger            │  │  table          │  │  Live signal feed   │   │
-│  │       │             │  │                 │  │                     │   │
-│  │       ▼             │  └─────────────────┘  └─────────────────────┘   │
-│  │  tradingAgent       │                                                  │
-│  │  Workflow           │                                                  │
-│  └─────────────────────┘                                                  │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                     Existing Components                          │
+├─────────────────────────────────────────────────────────────────┤
+│  ModelChatFeed.tsx  ──uses──►  useChat.ts                       │
+│       │                            │                             │
+│       │                            ├── useRealtimeMessages.ts   │
+│       │                            │        │                    │
+│       ▼                            ▼        ▼                    │
+│  ChatMessage.tsx              /api/chat   Supabase Realtime     │
+└─────────────────────────────────────────────────────────────────┘
+                                     │
+                    ┌────────────────┴────────────────┐
+                    ▼                                 ▼
+            ┌─────────────┐                  ┌─────────────────┐
+            │   BEFORE    │                  │     AFTER       │
+            │             │                  │                 │
+            │ arena_chat_ │    ────────►     │ agent_decisions │
+            │ messages    │                  │                 │
+            └─────────────┘                  └─────────────────┘
 ```
 
-### dflow WebSocket Channels
+### Changes to Existing Files
 
-| Channel | Data Format | Signal Detection |
-|---------|-------------|------------------|
-| **prices** | `{yes_bid, yes_ask, no_bid, no_ask}` | Price swing >5% |
-| **trades** | `{price, count, taker_side, created_time}` | Volume spike, large trades |
-| **orderbook** | `{yes_bids: {price→qty}, no_bids: {price→qty}}` | Depth imbalance |
+#### 1. `hooks/chat/useRealtimeMessages.ts`
 
-### Why PartyKit?
-
-| Requirement | Vercel | Supabase Edge | PartyKit |
-|-------------|--------|---------------|----------|
-| Persistent WebSocket | ❌ 300s max | ❌ 400s max | ✅ Always-on |
-| Next.js integration | ✅ Native | ⚠️ Separate | ✅ Designed for it |
-| Cost | Free | Free | Free tier |
-| Complexity | N/A | High (restarts) | Low |
-
----
-
-## Implementation Plan
-
-### Phase 1: PartyKit Setup
-
-#### 1.1 Install Dependencies
-
-```bash
-npm install partykit partysocket
-```
-
-#### 1.2 Create PartyKit Configuration
-
-**File: `partykit.json`**
-
-```json
-{
-  "name": "aimo-bet-relay",
-  "main": "party/dflow-relay.ts",
-  "compatibilityDate": "2024-01-01"
-}
-```
-
-#### 1.3 Add Scripts to package.json
-
-```json
-{
-  "scripts": {
-    "party:dev": "partykit dev",
-    "party:deploy": "partykit deploy"
-  }
-}
-```
-
----
-
-### Phase 2: PartyKit Server Implementation
-
-#### 2.1 Create Relay Server
-
-**File: `party/dflow-relay.ts`**
+**Change:** Subscribe to `agent_decisions` instead of `arena_chat_messages`
 
 ```typescript
-import type { Party, PartyKitServer, Connection } from "partykit/server";
-
-const DFLOW_WS_URL = "wss://prediction-markets-api.dflow.net/api/v1/ws";
-const SWING_THRESHOLD = 0.05; // 5% price change
-const VOLUME_SPIKE_MULTIPLIER = 5; // 5x average volume
-
-interface PriceMessage {
-  channel: "prices";
-  type: "ticker";
-  market_ticker: string;
-  yes_bid: string | null;
-  yes_ask: string | null;
-  no_bid: string | null;
-  no_ask: string | null;
-}
-
-interface TradeMessage {
-  channel: "trades";
-  type: "trade";
-  market_ticker: string;
-  trade_id: string;
-  price: number;
-  count: number;
-  taker_side: "yes" | "no";
-  created_time: number;
-}
-
-interface OrderbookMessage {
-  channel: "orderbook";
-  type: "orderbook";
-  market_ticker: string;
-  yes_bids: Record<string, number>;
-  no_bids: Record<string, number>;
-}
-
-type DflowMessage = PriceMessage | TradeMessage | OrderbookMessage;
-
-interface Signal {
-  type: "price_swing" | "volume_spike" | "orderbook_imbalance";
-  ticker: string;
-  data: Record<string, unknown>;
-  timestamp: number;
-}
-
-export default class DflowRelay implements PartyKitServer {
-  private dflowWs: WebSocket | null = null;
-  private priceCache = new Map<string, number>();
-  private tradeVolumes = new Map<string, number[]>(); // Rolling window
-
-  constructor(readonly room: Party) {}
-
-  // Called when the room is created
-  async onStart() {
-    console.log("[dflow-relay] Starting relay server");
-    this.connectToDflow();
-  }
-
-  // Connect to dflow WebSocket
-  private connectToDflow() {
-    console.log("[dflow-relay] Connecting to dflow WebSocket");
-
-    this.dflowWs = new WebSocket(DFLOW_WS_URL);
-
-    this.dflowWs.onopen = () => {
-      console.log("[dflow-relay] Connected to dflow");
-
-      // Subscribe to all channels
-      this.dflowWs!.send(JSON.stringify({
-        type: "subscribe",
-        channel: "prices",
-        all: true
-      }));
-      this.dflowWs!.send(JSON.stringify({
-        type: "subscribe",
-        channel: "trades",
-        all: true
-      }));
-      this.dflowWs!.send(JSON.stringify({
-        type: "subscribe",
-        channel: "orderbook",
-        all: true
-      }));
-    };
-
-    this.dflowWs.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data as string) as DflowMessage;
-        this.handleDflowMessage(msg);
-      } catch (error) {
-        console.error("[dflow-relay] Failed to parse message:", error);
-      }
-    };
-
-    this.dflowWs.onclose = () => {
-      console.log("[dflow-relay] Connection closed, reconnecting in 1s...");
-      setTimeout(() => this.connectToDflow(), 1000);
-    };
-
-    this.dflowWs.onerror = (error) => {
-      console.error("[dflow-relay] WebSocket error:", error);
-    };
-  }
-
-  // Handle incoming dflow messages
-  private async handleDflowMessage(msg: DflowMessage) {
-    let signal: Signal | null = null;
-
-    switch (msg.channel) {
-      case "prices":
-        signal = this.detectPriceSwing(msg);
-        break;
-      case "trades":
-        signal = this.detectVolumeSpike(msg);
-        break;
-      case "orderbook":
-        signal = this.detectOrderbookImbalance(msg);
-        break;
-    }
-
-    // If significant signal detected, trigger agents
-    if (signal) {
-      await this.triggerAgents(signal);
-    }
-
-    // Broadcast to connected frontend clients
-    this.room.broadcast(JSON.stringify(msg));
-  }
-
-  // Detect price swings > threshold
-  private detectPriceSwing(msg: PriceMessage): Signal | null {
-    const yesBid = msg.yes_bid ? parseFloat(msg.yes_bid) : null;
-    const yesAsk = msg.yes_ask ? parseFloat(msg.yes_ask) : null;
-
-    if (yesBid === null || yesAsk === null) return null;
-
-    const mid = (yesBid + yesAsk) / 2;
-    const prev = this.priceCache.get(msg.market_ticker);
-    this.priceCache.set(msg.market_ticker, mid);
-
-    if (prev && prev > 0) {
-      const change = Math.abs(mid - prev) / prev;
-
-      if (change >= SWING_THRESHOLD) {
-        console.log(`[dflow-relay] Price swing detected: ${msg.market_ticker} ${(change * 100).toFixed(2)}%`);
-        return {
-          type: "price_swing",
-          ticker: msg.market_ticker,
-          data: {
-            previousPrice: prev,
-            currentPrice: mid,
-            changePercent: change,
-          },
-          timestamp: Date.now(),
-        };
-      }
-    }
-
-    return null;
-  }
-
-  // Detect volume spikes
-  private detectVolumeSpike(msg: TradeMessage): Signal | null {
-    const ticker = msg.market_ticker;
-    const volumes = this.tradeVolumes.get(ticker) || [];
-
-    // Add current trade volume
-    volumes.push(msg.count);
-
-    // Keep last 100 trades for average
-    if (volumes.length > 100) {
-      volumes.shift();
-    }
-    this.tradeVolumes.set(ticker, volumes);
-
-    // Need at least 10 trades to calculate average
-    if (volumes.length < 10) return null;
-
-    const avgVolume = volumes.slice(0, -1).reduce((a, b) => a + b, 0) / (volumes.length - 1);
-
-    if (msg.count >= avgVolume * VOLUME_SPIKE_MULTIPLIER) {
-      console.log(`[dflow-relay] Volume spike detected: ${ticker} ${msg.count} vs avg ${avgVolume.toFixed(0)}`);
-      return {
-        type: "volume_spike",
-        ticker: msg.market_ticker,
-        data: {
-          tradeId: msg.trade_id,
-          volume: msg.count,
-          averageVolume: avgVolume,
-          multiplier: msg.count / avgVolume,
-          takerSide: msg.taker_side,
-        },
-        timestamp: Date.now(),
-      };
-    }
-
-    return null;
-  }
-
-  // Detect orderbook imbalances
-  private detectOrderbookImbalance(msg: OrderbookMessage): Signal | null {
-    const yesBidDepth = Object.values(msg.yes_bids).reduce((a, b) => a + b, 0);
-    const noBidDepth = Object.values(msg.no_bids).reduce((a, b) => a + b, 0);
-
-    if (yesBidDepth === 0 || noBidDepth === 0) return null;
-
-    const ratio = yesBidDepth / noBidDepth;
-
-    // Significant imbalance: 3:1 or 1:3
-    if (ratio >= 3 || ratio <= 0.33) {
-      console.log(`[dflow-relay] Orderbook imbalance: ${msg.market_ticker} ratio ${ratio.toFixed(2)}`);
-      return {
-        type: "orderbook_imbalance",
-        ticker: msg.market_ticker,
-        data: {
-          yesBidDepth,
-          noBidDepth,
-          ratio,
-          direction: ratio >= 3 ? "yes_heavy" : "no_heavy",
-        },
-        timestamp: Date.now(),
-      };
-    }
-
-    return null;
-  }
-
-  // Trigger trading agents via Vercel API
-  private async triggerAgents(signal: Signal) {
-    try {
-      const response = await fetch(
-        `${this.room.env.VERCEL_URL}/api/signals/trigger`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${this.room.env.WEBHOOK_SECRET}`,
-          },
-          body: JSON.stringify(signal),
-        }
-      );
-
-      if (!response.ok) {
-        console.error(`[dflow-relay] Failed to trigger agents: ${response.status}`);
-      }
-    } catch (error) {
-      console.error("[dflow-relay] Error triggering agents:", error);
-    }
-  }
-
-  // Handle frontend client connections (optional)
-  onConnect(conn: Connection) {
-    console.log(`[dflow-relay] Client connected: ${conn.id}`);
-  }
-
-  onClose(conn: Connection) {
-    console.log(`[dflow-relay] Client disconnected: ${conn.id}`);
-  }
-}
-```
-
----
-
-### Phase 3: Vercel API Endpoint
-
-#### 3.1 Create Signal Trigger Endpoint
-
-**File: `app/api/signals/trigger/route.ts`**
-
-```typescript
-import { NextRequest, NextResponse } from "next/server";
-import { getModelsWithWallets } from "@/lib/ai/models/catalog";
-// import { tradingAgentWorkflow } from "@/lib/ai/workflows/tradingAgent";
-
-interface Signal {
-  type: "price_swing" | "volume_spike" | "orderbook_imbalance";
-  ticker: string;
-  data: Record<string, unknown>;
-  timestamp: number;
-}
-
-export async function POST(req: NextRequest) {
-  // Verify webhook secret
-  const authHeader = req.headers.get("authorization");
-  const expectedToken = `Bearer ${process.env.WEBHOOK_SECRET}`;
-
-  if (authHeader !== expectedToken) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  try {
-    const signal = (await req.json()) as Signal;
-
-    console.log(`[signals/trigger] Received signal: ${signal.type} for ${signal.ticker}`);
-
-    // Get all models with wallets
-    const models = getModelsWithWallets();
-
-    // Trigger trading workflow for each model
-    // TODO: Uncomment when workflow is ready
-    // await Promise.all(
-    //   models.map((model) =>
-    //     tradingAgentWorkflow({
-    //       modelId: model.id,
-    //       walletAddress: model.walletAddress!,
-    //       signal,
-    //     })
-    //   )
-    // );
-
-    return NextResponse.json({
-      success: true,
-      signal: signal.type,
-      ticker: signal.ticker,
-      modelsTriggered: models.length,
-    });
-  } catch (error) {
-    console.error("[signals/trigger] Error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
-  }
-}
-```
-
----
-
-### Phase 4: Frontend Integration (Optional)
-
-#### 4.1 Create PartySocket Hook
-
-**File: `hooks/useMarketSignals.ts`**
-
-```typescript
+// hooks/chat/useRealtimeMessages.ts
 "use client";
 
-import { useEffect, useState } from "react";
-import PartySocket from "partysocket";
+import { useEffect } from "react";
+import { getSupabaseClient } from "@/lib/supabase/client";
+import type { ChatMessage } from "@/lib/supabase/types";
+import { decisionToChatMessage } from "@/lib/supabase/transforms";
 
-interface MarketSignal {
-  channel: "prices" | "trades" | "orderbook";
-  market_ticker: string;
-  [key: string]: unknown;
+interface UseRealtimeMessagesOptions {
+  sessionId: string | null;
+  onMessage: (message: ChatMessage) => void;
 }
 
-export function useMarketSignals() {
-  const [signals, setSignals] = useState<MarketSignal[]>([]);
-  const [connected, setConnected] = useState(false);
-
+export function useRealtimeMessages({ sessionId, onMessage }: UseRealtimeMessagesOptions) {
   useEffect(() => {
-    const socket = new PartySocket({
-      host: process.env.NEXT_PUBLIC_PARTYKIT_HOST || "localhost:1999",
-      room: "dflow-relay",
-    });
+    const client = getSupabaseClient();
+    if (!client || !sessionId) return;
 
-    socket.onopen = () => {
-      console.log("[market-signals] Connected to PartyKit");
-      setConnected(true);
-    };
+    const channel = client
+      .channel(`decisions:${sessionId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "agent_decisions",
+        },
+        async (payload) => {
+          // Fetch full decision with agent info
+          const { data } = await client
+            .from("agent_decisions")
+            .select(`
+              *,
+              agent_sessions!inner(session_id, model_id, model_name),
+              agent_trades(*)
+            `)
+            .eq("id", payload.new.id)
+            .single();
 
-    socket.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data) as MarketSignal;
-        setSignals((prev) => [...prev.slice(-99), msg]); // Keep last 100
-      } catch (error) {
-        console.error("[market-signals] Failed to parse:", error);
-      }
-    };
-
-    socket.onclose = () => {
-      console.log("[market-signals] Disconnected");
-      setConnected(false);
-    };
+          if (data && data.agent_sessions.session_id === sessionId) {
+            const chatMessage = decisionToChatMessage(data, data.agent_sessions, data.agent_trades);
+            onMessage(chatMessage);
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "agent_trades",
+        },
+        async (payload) => {
+          // Trade inserted - could update existing message or ignore
+          // For now, trades are included when decision is fetched
+        }
+      )
+      .subscribe();
 
     return () => {
-      socket.close();
+      channel.unsubscribe();
     };
-  }, []);
+  }, [sessionId, onMessage]);
+}
+```
 
-  return { signals, connected };
+#### 2. `lib/supabase/transforms.ts` (NEW)
+
+**Purpose:** Transform `agent_decisions` → `ChatMessage` format
+
+```typescript
+// lib/supabase/transforms.ts
+import type { ChatMessage, ChatMetadata } from "./types";
+import type { AgentDecision, AgentTrade, AgentSession } from "./types";
+
+/**
+ * Transform an agent decision into a ChatMessage for the existing chat UI
+ */
+export function decisionToChatMessage(
+  decision: AgentDecision,
+  agentSession: Pick<AgentSession, "modelId" | "modelName" | "sessionId">,
+  trades: AgentTrade[] = []
+): ChatMessage {
+  // Format the message content
+  const content = formatDecisionContent(decision, trades);
+
+  return {
+    id: decision.id,
+    role: "assistant",
+    parts: [{ type: "text", text: content }],
+    metadata: {
+      sessionId: agentSession.sessionId,
+      authorType: "model",
+      authorId: agentSession.modelId,
+      messageType: decision.decision === "buy" || decision.decision === "sell" ? "trade" : "analysis",
+      createdAt: decision.createdAt.getTime(),
+      // Extended metadata for decisions
+      decision: decision.decision,
+      confidence: decision.confidence,
+      marketTicker: decision.marketTicker,
+      portfolioValue: decision.portfolioValueAfter,
+      triggerType: decision.triggerType,
+    } as ChatMetadata,
+  };
+}
+
+/**
+ * Format decision + trades into readable message content
+ */
+function formatDecisionContent(decision: AgentDecision, trades: AgentTrade[]): string {
+  const parts: string[] = [];
+
+  // Decision header
+  const decisionEmoji = {
+    buy: "📈",
+    sell: "📉",
+    hold: "⏸️",
+    skip: "⏭️",
+  }[decision.decision];
+
+  parts.push(`${decisionEmoji} **${decision.decision.toUpperCase()}**`);
+
+  // Market info
+  if (decision.marketTicker) {
+    parts.push(`Market: ${decision.marketTitle || decision.marketTicker}`);
+  }
+
+  // Confidence
+  if (decision.confidence) {
+    parts.push(`Confidence: ${(decision.confidence * 100).toFixed(0)}%`);
+  }
+
+  // Reasoning (main content)
+  parts.push("");
+  parts.push(decision.reasoning);
+
+  // Trades
+  if (trades.length > 0) {
+    parts.push("");
+    parts.push("**Trades:**");
+    for (const trade of trades) {
+      const action = trade.action === "buy" ? "Bought" : "Sold";
+      parts.push(`→ ${action} ${trade.quantity} ${trade.side.toUpperCase()} @ $${trade.price.toFixed(2)} ($${trade.notional.toFixed(2)})`);
+    }
+  }
+
+  // Portfolio value
+  parts.push("");
+  parts.push(`Portfolio: $${decision.portfolioValueAfter.toLocaleString()}`);
+
+  return parts.join("\n");
+}
+
+/**
+ * Transform database rows to ChatMessage array (for initial load)
+ */
+export function decisionsToMessages(
+  decisions: Array<{
+    id: string;
+    agent_session_id: string;
+    trigger_type: string;
+    trigger_details: Record<string, unknown> | null;
+    market_ticker: string | null;
+    market_title: string | null;
+    decision: string;
+    reasoning: string;
+    confidence: number | null;
+    market_context: Record<string, unknown> | null;
+    portfolio_value_after: number;
+    created_at: string;
+    agent_sessions: {
+      session_id: string;
+      model_id: string;
+      model_name: string;
+    };
+    agent_trades: Array<{
+      id: string;
+      side: "yes" | "no";
+      action: "buy" | "sell";
+      quantity: number;
+      price: number;
+      notional: number;
+    }>;
+  }>
+): ChatMessage[] {
+  return decisions.map((d) => {
+    const decision: AgentDecision = {
+      id: d.id,
+      agentSessionId: d.agent_session_id,
+      triggerType: d.trigger_type as AgentDecision["triggerType"],
+      triggerDetails: d.trigger_details ?? undefined,
+      marketTicker: d.market_ticker ?? undefined,
+      marketTitle: d.market_title ?? undefined,
+      decision: d.decision as AgentDecision["decision"],
+      reasoning: d.reasoning,
+      confidence: d.confidence ?? undefined,
+      marketContext: d.market_context ?? undefined,
+      portfolioValueAfter: d.portfolio_value_after,
+      createdAt: new Date(d.created_at),
+    };
+
+    const trades: AgentTrade[] = (d.agent_trades || []).map((t) => ({
+      id: t.id,
+      decisionId: d.id,
+      agentSessionId: d.agent_session_id,
+      marketTicker: d.market_ticker || "",
+      side: t.side,
+      action: t.action,
+      quantity: t.quantity,
+      price: t.price,
+      notional: t.notional,
+      createdAt: new Date(d.created_at),
+    }));
+
+    return decisionToChatMessage(decision, {
+      sessionId: d.agent_sessions.session_id,
+      modelId: d.agent_sessions.model_id,
+      modelName: d.agent_sessions.model_name,
+    }, trades);
+  });
+}
+```
+
+#### 3. `/api/arena/chat-messages/route.ts`
+
+**Change:** Fetch from `agent_decisions` instead of `arena_chat_messages`
+
+```typescript
+// app/api/arena/chat-messages/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import { createServerClient } from "@/lib/supabase/server";
+import { decisionsToMessages } from "@/lib/supabase/transforms";
+
+export async function GET(req: NextRequest) {
+  const sessionId = req.nextUrl.searchParams.get("sessionId");
+  if (!sessionId) {
+    return NextResponse.json({ error: "sessionId required" }, { status: 400 });
+  }
+
+  const supabase = createServerClient();
+  if (!supabase) {
+    return NextResponse.json([]);
+  }
+
+  const { data, error } = await supabase
+    .from("agent_decisions")
+    .select(`
+      *,
+      agent_sessions!inner(session_id, model_id, model_name),
+      agent_trades(id, side, action, quantity, price, notional)
+    `)
+    .eq("agent_sessions.session_id", sessionId)
+    .order("created_at", { ascending: true })
+    .limit(100);
+
+  if (error) {
+    console.error("Failed to fetch decisions:", error);
+    return NextResponse.json([]);
+  }
+
+  const messages = decisionsToMessages(data || []);
+  return NextResponse.json(messages);
+}
+```
+
+#### 4. `components/chat/ChatMessage.tsx`
+
+**Change:** Add decision-specific styling (badges, etc.)
+
+```typescript
+// In ChatMessage.tsx, add decision badge rendering
+
+// Check if this is a decision message
+const isDecision = message.metadata?.decision;
+const decision = message.metadata?.decision as string | undefined;
+
+// Render decision badge
+{isDecision && (
+  <span className={cn(
+    "px-2 py-0.5 rounded text-xs font-medium mr-2",
+    decision === "buy" && "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+    decision === "sell" && "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+    decision === "hold" && "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
+    decision === "skip" && "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
+  )}>
+    {decision?.toUpperCase()}
+  </span>
+)}
+```
+
+### Benefits of This Approach
+
+1. **Reuses existing UI** - No new components to build
+2. **Streaming ready** - When we add user chat, streaming just works
+3. **Future extensible** - Can add user questions → AI responses later
+4. **Single realtime subscription** - Both chat and chart use `agent_decisions`
+5. **Familiar patterns** - Uses existing `useChat` hook structure
+
+---
+
+## Performance Chart Integration
+
+### Hook: usePerformanceChart
+
+```typescript
+// hooks/usePerformanceChart.ts
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { getSupabaseClient } from "@/lib/supabase/client";
+import type { ChartDataPoint } from "@/lib/supabase/types";
+
+export function usePerformanceChart(sessionId: string, hoursBack = 24) {
+  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
+  const [latestValues, setLatestValues] = useState<Map<string, number>>(new Map());
+  const [loading, setLoading] = useState(true);
+
+  const transformToChartData = useCallback(
+    (rows: Array<{ created_at: string; portfolio_value_after: number; model_name: string }>) => {
+      const grouped = new Map<string, Record<string, number>>();
+
+      for (const row of rows) {
+        const timestamp = row.created_at;
+        if (!grouped.has(timestamp)) {
+          grouped.set(timestamp, {});
+        }
+        grouped.get(timestamp)![row.model_name] = row.portfolio_value_after;
+      }
+
+      return Array.from(grouped.entries())
+        .map(([timestamp, values]) => ({ timestamp, ...values }))
+        .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    },
+    []
+  );
+
+  useEffect(() => {
+    const client = getSupabaseClient();
+    if (!client || !sessionId) return;
+
+    const since = new Date(Date.now() - hoursBack * 60 * 60 * 1000).toISOString();
+
+    const fetchChartData = async () => {
+      const { data } = await client
+        .from("agent_decisions")
+        .select(`
+          created_at,
+          portfolio_value_after,
+          agent_sessions!inner(session_id, model_name)
+        `)
+        .eq("agent_sessions.session_id", sessionId)
+        .gte("created_at", since)
+        .order("created_at", { ascending: true });
+
+      if (data) {
+        const flattened = data.map((row: any) => ({
+          created_at: row.created_at,
+          portfolio_value_after: row.portfolio_value_after,
+          model_name: row.agent_sessions.model_name,
+        }));
+
+        setChartData(transformToChartData(flattened));
+
+        const latest = new Map<string, number>();
+        for (const row of flattened) {
+          latest.set(row.model_name, row.portfolio_value_after);
+        }
+        setLatestValues(latest);
+      }
+      setLoading(false);
+    };
+
+    fetchChartData();
+
+    // Realtime: new decisions update chart
+    const channel = client
+      .channel(`chart:${sessionId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "agent_decisions" },
+        async (payload) => {
+          const { data: agentSession } = await client
+            .from("agent_sessions")
+            .select("model_name")
+            .eq("id", payload.new.agent_session_id)
+            .single();
+
+          if (agentSession) {
+            const newPoint = {
+              created_at: payload.new.created_at,
+              portfolio_value_after: payload.new.portfolio_value_after,
+              model_name: agentSession.model_name,
+            };
+
+            setChartData((prev) => {
+              const updated = [...prev];
+              updated.push({
+                timestamp: newPoint.created_at,
+                [newPoint.model_name]: newPoint.portfolio_value_after,
+              });
+              return updated;
+            });
+
+            setLatestValues((prev) => {
+              const updated = new Map(prev);
+              updated.set(newPoint.model_name, newPoint.portfolio_value_after);
+              return updated;
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [sessionId, hoursBack, transformToChartData]);
+
+  return { chartData, latestValues, loading };
 }
 ```
 
 ---
 
-## Environment Variables
+## Data Flow: Agent Action
 
-```bash
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
-
-# PartyKit
-NEXT_PUBLIC_PARTYKIT_HOST=your-project.partykit.dev
-
-# API Keys
-OPENROUTER_API_KEY=sk-or-...
-AIMO_API_KEY=...
-
-# Security
-WEBHOOK_SECRET=your-webhook-secret
-CRON_SECRET=your-cron-secret
-
-# Solana RPC
-SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
-
-# Vercel (set automatically, or manually for PartyKit)
-VERCEL_URL=https://your-app.vercel.app
 ```
-
----
-
-## Deployment
-
-### Development
-
-```bash
-# Terminal 1: Next.js
-npm run dev
-
-# Terminal 2: PartyKit
-npm run party:dev
-```
-
-### Production
-
-```bash
-# Deploy PartyKit
-npm run party:deploy
-
-# Deploy to Vercel (automatic via git push)
-git push
+1. PartyKit detects signal (price_swing, volume_spike, etc.)
+   - No Supabase needed for detection!
+           │
+           ▼
+2. PartyKit triggers agent via /api/signals/trigger
+           │
+           ▼
+3. Agent analyzes market context
+           │
+           ▼
+4. Agent makes decision (buy/sell/hold/skip)
+           │
+           ▼
+5. If buy/sell:
+   ├──► Execute on-chain swap via dflow
+   └──► Query updated balance
+           │
+           ▼
+6. Record in agent_decisions table
+   - reasoning, confidence, portfolio_value_after
+   - Supabase Realtime → useRealtimeMessages → ModelChatFeed
+   - Supabase Realtime → usePerformanceChart → PerformanceChart
+           │
+           ▼
+7. If trade executed, record in agent_trades
+   - Links to decision_id
+           │
+           ▼
+8. Update agent_sessions.current_value
+   - Supabase Realtime → Leaderboard
 ```
 
 ---
 
 ## Implementation Checklist
 
-### Phase 1: PartyKit Setup
-- [ ] Install `partykit` and `partysocket` packages
-- [ ] Create `partykit.json` configuration
-- [ ] Add npm scripts for dev and deploy
+### Phase 1: Database Schema
+- [ ] Create migration with 4 tables (sessions, agent_sessions, agent_decisions, agent_trades)
+- [ ] Run migration in Supabase
+- [ ] Enable Realtime for new tables
+- [ ] Configure RLS policies
+- [ ] Drop old tables (arena_chat_messages, performance_snapshots, market_prices, market_price_history)
 
-### Phase 2: Relay Server
-- [ ] Create `party/dflow-relay.ts`
-- [ ] Implement dflow WebSocket connection
-- [ ] Implement price swing detection
-- [ ] Implement volume spike detection
-- [ ] Implement orderbook imbalance detection
-- [ ] Implement agent trigger via Vercel API
+### Phase 2: Transform Layer
+- [ ] Create `lib/supabase/transforms.ts` with decision→ChatMessage conversion
+- [ ] Create `lib/supabase/agents.ts` with database functions
+- [ ] Update TypeScript types in `lib/supabase/types.ts`
 
-### Phase 3: Vercel Integration
-- [ ] Create `/api/signals/trigger` endpoint
-- [ ] Add webhook secret verification
-- [ ] Connect to trading agent workflow
-- [ ] Add `WEBHOOK_SECRET` to environment variables
+### Phase 3: Chat Integration
+- [ ] Update `useRealtimeMessages.ts` to subscribe to `agent_decisions`
+- [ ] Update `/api/arena/chat-messages` to query `agent_decisions`
+- [ ] Add decision-specific styling to `ChatMessage.tsx` (optional enhancement)
+- [ ] Existing `useChat.ts` and `ModelChatFeed.tsx` work unchanged!
 
-### Phase 4: Frontend (Optional)
-- [ ] Create `useMarketSignals` hook
-- [ ] Add live signal feed component
-- [ ] Add `NEXT_PUBLIC_PARTYKIT_HOST` to environment variables
+### Phase 4: Chart Integration
+- [ ] Create `hooks/usePerformanceChart.ts`
+- [ ] Update `PerformanceChart.tsx` to use new hook
 
-### Phase 5: Deployment
-- [ ] Deploy PartyKit: `npm run party:deploy`
-- [ ] Configure PartyKit environment variables (VERCEL_URL, WEBHOOK_SECRET)
-- [ ] Test end-to-end: dflow → PartyKit → Vercel → Agent
+### Phase 5: Agent Integration
+- [ ] Modify trading workflow to call `recordAgentDecision()`
+- [ ] Record trades via `recordAgentTrade()` after execution
+- [ ] Update `agent_sessions.current_value` after each decision
 
 ### Phase 6: Cleanup
-- [ ] Deprecate/remove `lib/ai/workflows/priceWatcher.ts`
-- [ ] Update documentation
+- [ ] Remove `lib/supabase/prices.ts` (PartyKit handles detection)
+- [ ] Remove old chat message functions from `lib/supabase/db.ts`
+- [ ] Remove `app/api/cron/snapshots/route.ts`
+- [ ] Update any remaining references
 
 ---
 
@@ -684,72 +864,34 @@ git push
 
 | File | Purpose |
 |------|---------|
-| `partykit.json` | PartyKit configuration |
-| `party/dflow-relay.ts` | WebSocket relay server |
-| `app/api/signals/trigger/route.ts` | Vercel endpoint for agent triggers |
-| `hooks/useMarketSignals.ts` | Frontend live signal hook (optional) |
+| `supabase/migrations/xxx_agent_schema.sql` | Database schema (4 tables) |
+| `lib/supabase/agents.ts` | Agent database functions |
+| `lib/supabase/transforms.ts` | Decision → ChatMessage transform |
+| `hooks/usePerformanceChart.ts` | Chart data with realtime |
 
 ### Files to Modify
 
 | File | Changes |
 |------|---------|
-| `package.json` | Add partykit dependencies and scripts |
-| `.env` | Add WEBHOOK_SECRET, PARTYKIT_HOST |
+| `lib/supabase/types.ts` | Add agent types, extend ChatMetadata |
+| `hooks/chat/useRealtimeMessages.ts` | Subscribe to `agent_decisions` |
+| `app/api/arena/chat-messages/route.ts` | Query `agent_decisions` |
+| `components/chat/ChatMessage.tsx` | Add decision badge styling (optional) |
+| `components/index/PerformanceChart.tsx` | Use `usePerformanceChart` hook |
+| `lib/ai/workflows/tradingAgent.ts` | Record decisions and trades |
 
-### Files to Deprecate
+### Files to Remove
 
 | File | Reason |
 |------|--------|
-| `lib/ai/workflows/priceWatcher.ts` | Replaced by PartyKit relay |
+| `lib/supabase/prices.ts` | PartyKit handles price detection |
+| `app/api/cron/snapshots/route.ts` | Replaced by decision-based snapshots |
+| Old arena_chat_messages functions | Replaced by agent_decisions |
 
----
+### Files Unchanged (Reused)
 
-## Signal Types Reference
-
-### Price Swing
-
-```typescript
-{
-  type: "price_swing",
-  ticker: "BTCD-25DEC0313-T92749.99",
-  data: {
-    previousPrice: 0.45,
-    currentPrice: 0.52,
-    changePercent: 0.156
-  },
-  timestamp: 1703520000000
-}
-```
-
-### Volume Spike
-
-```typescript
-{
-  type: "volume_spike",
-  ticker: "BTCD-25DEC0313-T92749.99",
-  data: {
-    tradeId: "abc123",
-    volume: 500,
-    averageVolume: 50,
-    multiplier: 10,
-    takerSide: "yes"
-  },
-  timestamp: 1703520000000
-}
-```
-
-### Orderbook Imbalance
-
-```typescript
-{
-  type: "orderbook_imbalance",
-  ticker: "BTCD-25DEC0313-T92749.99",
-  data: {
-    yesBidDepth: 15000,
-    noBidDepth: 3000,
-    ratio: 5,
-    direction: "yes_heavy"
-  },
-  timestamp: 1703520000000
-}
-```
+| File | Why Unchanged |
+|------|---------------|
+| `hooks/chat/useChat.ts` | Works with new data source via useRealtimeMessages |
+| `components/chat/ModelChatFeed.tsx` | Works with ChatMessage format |
+| `components/chat/ChatInput.tsx` | Ready for future user input |
