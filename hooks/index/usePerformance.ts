@@ -1,10 +1,12 @@
 "use client";
 
+import { useCallback } from "react";
 import useSWR from "swr";
 import { POLLING_INTERVALS } from "@/lib/config";
 import { MODELS } from "@/lib/ai/models/models";
 import type { PerformanceSnapshot, ChartDataPoint } from "@/lib/supabase/types";
 import type { ModelDefinition } from "@/lib/ai/models/types";
+import { useRealtimePerformance } from "./useRealtimePerformance";
 
 /**
  * Convert performance snapshots to chart data format for Recharts.
@@ -65,9 +67,33 @@ export function usePerformance(sessionId: string | null, hoursBack = 24) {
     sessionId ? `performance/${sessionId}/${hoursBack}` : null,
     () => (sessionId ? fetchPerformanceSnapshots(sessionId, hoursBack) : []),
     {
-      refreshInterval: POLLING_INTERVALS.performance,
+      // Reduced polling frequency since we have realtime (fallback only)
+      refreshInterval: POLLING_INTERVALS.performance * 2,
     },
   );
+
+  // Realtime: append new snapshots without full refetch
+  const handleNewSnapshot = useCallback(
+    (snapshot: PerformanceSnapshot) => {
+      mutate(
+        (current) => {
+          if (!current) return [snapshot];
+          // Dedupe by ID
+          if (current.some((s) => s.id === snapshot.id)) {
+            return current;
+          }
+          return [...current, snapshot];
+        },
+        { revalidate: false },
+      );
+    },
+    [mutate],
+  );
+
+  useRealtimePerformance({
+    sessionId,
+    onSnapshot: handleNewSnapshot,
+  });
 
   // Get enabled models for arena
   const arenaModels = MODELS.filter((m) => m.enabled);
