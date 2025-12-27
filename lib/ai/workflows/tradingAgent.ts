@@ -31,6 +31,8 @@ interface TradingInput {
   modelId: string;
   walletAddress: string;
   priceSwings: PriceSwing[];
+  /** Optional: full signal data for richer context */
+  signal?: MarketSignal;
 }
 
 interface PriceSwing {
@@ -38,6 +40,14 @@ interface PriceSwing {
   previousPrice: number;
   currentPrice: number;
   changePercent: number;
+}
+
+/** Market signal from PartyKit relay */
+interface MarketSignal {
+  type: "price_swing" | "volume_spike" | "orderbook_imbalance";
+  ticker: string;
+  data: Record<string, unknown>;
+  timestamp: number;
 }
 
 interface StreamChunk {
@@ -245,6 +255,7 @@ async function runAgent(
       price: t.price,
     })),
     priceSwings: input.priceSwings,
+    signal: input.signal, // Pass full signal for richer context
   };
   const contextPrompt = buildContextPrompt(promptInput);
 
