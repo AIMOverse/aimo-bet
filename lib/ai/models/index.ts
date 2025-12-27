@@ -20,11 +20,10 @@ export {
 } from "./catalog";
 
 // Provider configurations
-export { PROVIDERS, getProviderById, getDefaultProvider } from "./providers";
+export { PROVIDERS, getProviderById, getDefaultProvider } from "./config";
 
 // Provider instances
-export { openrouter } from "./openrouter";
-export { aimo } from "./aimo";
+export { openrouter, aimo } from "./providers";
 
 // Registry and model access
 export { registry, getModel } from "./registry";

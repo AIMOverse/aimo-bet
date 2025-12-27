@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getActiveSession, createBulkSnapshots } from "@/lib/supabase/db";
-import { MODELS } from "@/lib/ai/models/models";
+import { MODELS } from "@/lib/ai/models";
 
 // ============================================================================
 // Cron Job: Snapshot Performance Data from dflow

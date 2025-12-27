@@ -3,7 +3,7 @@
 import { useCallback } from "react";
 import useSWR from "swr";
 import { POLLING_INTERVALS } from "@/lib/config";
-import { MODELS } from "@/lib/ai/models/models";
+import { MODELS } from "@/lib/ai/models";
 import type { PerformanceSnapshot, ChartDataPoint } from "@/lib/supabase/types";
 import type { ModelDefinition } from "@/lib/ai/models/types";
 import { useRealtimePerformance } from "./useRealtimePerformance";

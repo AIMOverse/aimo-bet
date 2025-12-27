@@ -1,5 +1,5 @@
 import { createProviderRegistry } from "ai";
-import { openrouter } from "./openrouter";
+import { openrouter, aimo } from "./providers";
 
 /**
  * Unified provider registry for all AI models.
@@ -15,8 +15,7 @@ import { openrouter } from "./openrouter";
 export const registry = createProviderRegistry(
   {
     openrouter,
-    // Future providers can be added here:
-    // anthropic,
+    aimo,
   },
   { separator: "/" },
 );

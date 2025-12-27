@@ -15,7 +15,12 @@ export const PROVIDERS: ProviderConfig[] = [
     modelsEndpoint: "/models",
     envKey: "OPENROUTER_API_KEY",
   },
-  // Future providers can be added here
+  {
+    id: "aimo",
+    name: "AiMo",
+    baseUrl: "https://api.aimo.ai/v1",
+    envKey: "AIMO_API_KEY",
+  },
 ];
 
 /**

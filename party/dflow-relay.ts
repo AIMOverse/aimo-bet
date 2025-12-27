@@ -21,6 +21,10 @@ interface TradeMessage {
   trade_id: string;
   price: number;
   count: number;
+  yes_price: number;
+  no_price: number;
+  yes_price_dollars: string;
+  no_price_dollars: string;
   taker_side: "yes" | "no";
   created_time: number;
 }
@@ -30,7 +34,9 @@ interface OrderbookMessage {
   type: "orderbook";
   market_ticker: string;
   yes_bids: Record<string, number>;
+  yes_asks: Record<string, number>;
   no_bids: Record<string, number>;
+  no_asks: Record<string, number>;
 }
 
 type DflowMessage = PriceMessage | TradeMessage | OrderbookMessage;
@@ -70,21 +76,21 @@ export default class DflowRelay implements PartyKitServer {
           type: "subscribe",
           channel: "prices",
           all: true,
-        })
+        }),
       );
       this.dflowWs!.send(
         JSON.stringify({
           type: "subscribe",
           channel: "trades",
           all: true,
-        })
+        }),
       );
       this.dflowWs!.send(
         JSON.stringify({
           type: "subscribe",
           channel: "orderbook",
           all: true,
-        })
+        }),
       );
     };
 
@@ -148,7 +154,7 @@ export default class DflowRelay implements PartyKitServer {
 
       if (change >= SWING_THRESHOLD) {
         console.log(
-          `[dflow-relay] Price swing detected: ${msg.market_ticker} ${(change * 100).toFixed(2)}%`
+          `[dflow-relay] Price swing detected: ${msg.market_ticker} ${(change * 100).toFixed(2)}%`,
         );
         return {
           type: "price_swing",
@@ -188,7 +194,7 @@ export default class DflowRelay implements PartyKitServer {
 
     if (msg.count >= avgVolume * VOLUME_SPIKE_MULTIPLIER) {
       console.log(
-        `[dflow-relay] Volume spike detected: ${ticker} ${msg.count} vs avg ${avgVolume.toFixed(0)}`
+        `[dflow-relay] Volume spike detected: ${ticker} ${msg.count} vs avg ${avgVolume.toFixed(0)}`,
       );
       return {
         type: "volume_spike",
@@ -209,24 +215,47 @@ export default class DflowRelay implements PartyKitServer {
 
   // Detect orderbook imbalances
   private detectOrderbookImbalance(msg: OrderbookMessage): Signal | null {
-    const yesBidDepth = Object.values(msg.yes_bids).reduce((a, b) => a + b, 0);
-    const noBidDepth = Object.values(msg.no_bids).reduce((a, b) => a + b, 0);
+    // Safely handle potentially missing fields with defaults
+    const yesBidDepth = Object.values(msg.yes_bids || {}).reduce(
+      (a, b) => a + b,
+      0,
+    );
+    const yesAskDepth = Object.values(msg.yes_asks || {}).reduce(
+      (a, b) => a + b,
+      0,
+    );
+    const noBidDepth = Object.values(msg.no_bids || {}).reduce(
+      (a, b) => a + b,
+      0,
+    );
+    const noAskDepth = Object.values(msg.no_asks || {}).reduce(
+      (a, b) => a + b,
+      0,
+    );
 
-    if (yesBidDepth === 0 || noBidDepth === 0) return null;
+    // Total depth on each side (YES vs NO)
+    const yesTotalDepth = yesBidDepth + yesAskDepth;
+    const noTotalDepth = noBidDepth + noAskDepth;
 
-    const ratio = yesBidDepth / noBidDepth;
+    if (yesTotalDepth === 0 || noTotalDepth === 0) return null;
+
+    const ratio = yesTotalDepth / noTotalDepth;
 
     // Significant imbalance: 3:1 or 1:3
     if (ratio >= 3 || ratio <= 0.33) {
       console.log(
-        `[dflow-relay] Orderbook imbalance: ${msg.market_ticker} ratio ${ratio.toFixed(2)}`
+        `[dflow-relay] Orderbook imbalance: ${msg.market_ticker} ratio ${ratio.toFixed(2)}`,
       );
       return {
         type: "orderbook_imbalance",
         ticker: msg.market_ticker,
         data: {
           yesBidDepth,
+          yesAskDepth,
+          yesTotalDepth,
           noBidDepth,
+          noAskDepth,
+          noTotalDepth,
           ratio,
           direction: ratio >= 3 ? "yes_heavy" : "no_heavy",
         },
@@ -244,7 +273,7 @@ export default class DflowRelay implements PartyKitServer {
 
     if (!vercelUrl || !webhookSecret) {
       console.warn(
-        "[dflow-relay] Missing VERCEL_URL or WEBHOOK_SECRET, skipping agent trigger"
+        "[dflow-relay] Missing VERCEL_URL or WEBHOOK_SECRET, skipping agent trigger",
       );
       return;
     }
@@ -261,7 +290,7 @@ export default class DflowRelay implements PartyKitServer {
 
       if (!response.ok) {
         console.error(
-          `[dflow-relay] Failed to trigger agents: ${response.status}`
+          `[dflow-relay] Failed to trigger agents: ${response.status}`,
         );
       }
     } catch (error) {

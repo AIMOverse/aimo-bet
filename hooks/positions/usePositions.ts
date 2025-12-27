@@ -2,7 +2,7 @@
 
 import useSWR from "swr";
 import { POLLING_INTERVALS } from "@/lib/config";
-import { MODELS } from "@/lib/ai/models/models";
+import { MODELS } from "@/lib/ai/models";
 
 // ============================================================================
 // Types for dflow positions

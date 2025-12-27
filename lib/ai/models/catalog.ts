@@ -20,7 +20,6 @@ export const MODELS: ModelDefinition[] = [
     description: "OpenAI's most capable model",
     supportsVision: true,
     supportsFunctions: true,
-    outputModalities: ["text"],
     // Arena config
     series: "openai",
     chartColor: "#10b981", // Emerald
@@ -37,7 +36,6 @@ export const MODELS: ModelDefinition[] = [
     description: "Fast and affordable GPT-4o variant",
     supportsVision: true,
     supportsFunctions: true,
-    outputModalities: ["text"],
     // Arena config
     series: "openai",
     chartColor: "#22c55e", // Green
@@ -54,7 +52,6 @@ export const MODELS: ModelDefinition[] = [
     description: "Anthropic's balanced model for most tasks",
     supportsVision: true,
     supportsFunctions: true,
-    outputModalities: ["text"],
     // Arena config
     series: "claude",
     chartColor: "#f97316", // Orange
@@ -71,7 +68,6 @@ export const MODELS: ModelDefinition[] = [
     description: "Fast and efficient Claude model",
     supportsVision: true,
     supportsFunctions: true,
-    outputModalities: ["text"],
     // Arena config
     series: "claude",
     chartColor: "#fb923c", // Amber
@@ -88,7 +84,6 @@ export const MODELS: ModelDefinition[] = [
     description: "Google's fast multimodal model",
     supportsVision: true,
     supportsFunctions: true,
-    outputModalities: ["text"],
     // Arena config
     series: "gemini",
     chartColor: "#3b82f6", // Blue
@@ -105,7 +100,6 @@ export const MODELS: ModelDefinition[] = [
     description: "Powerful and cost-effective model",
     supportsVision: false,
     supportsFunctions: true,
-    outputModalities: ["text"],
     // Arena config
     series: "deepseek",
     chartColor: "#8b5cf6", // Violet
@@ -122,7 +116,6 @@ export const MODELS: ModelDefinition[] = [
     description: "Meta's open-source flagship model",
     supportsVision: false,
     supportsFunctions: true,
-    outputModalities: ["text"],
     // Arena config
     series: "llama",
     chartColor: "#ec4899", // Pink
@@ -139,7 +132,6 @@ export const MODELS: ModelDefinition[] = [
     description: "Mistral's most capable model",
     supportsVision: false,
     supportsFunctions: true,
-    outputModalities: ["text"],
     // Arena config
     series: "mistral",
     chartColor: "#06b6d4", // Cyan

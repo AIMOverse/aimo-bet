@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { MODELS } from "@/lib/ai/models/models";
+import { MODELS } from "@/lib/ai/models";
 import type { ArenaTab } from "@/lib/supabase/types";
 
 const APP_TABS: { value: ArenaTab; label: string; icon: React.ReactNode }[] = [

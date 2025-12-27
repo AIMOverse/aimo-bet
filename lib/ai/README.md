@@ -35,8 +35,8 @@ lib/ai/
 │   └── aimo.ts                    # AIMO provider instance
 └── workflows/                 # Durable workflows
     ├── index.ts                   # Workflow exports
-    ├── priceWatcher.ts            # DEPRECATED: replaced by PartyKit relay
-    └── tradingAgent.ts            # Per-model trading execution
+    ├── signalListener.ts          # Long-running hook-based signal listener (per model)
+    └── tradingAgent.ts            # Per-model trading execution (legacy)
 
 party/
 └── dflow-relay.ts             # PartyKit WebSocket relay to dflow
@@ -165,31 +165,46 @@ const tools = createAgentTools(walletAddress, walletPrivateKey);
 
 Durable workflows using the `workflow` package for reliable, observable execution:
 
-### Trading Agent Workflow
+### Signal Listener Workflow (Recommended)
 
-Per-model trading execution with streaming support.
+Long-running workflow per model that listens for signals via hooks:
+
+```typescript
+import { signalListenerWorkflow } from "@/lib/ai/workflows";
+
+// One instance per model - uses deterministic token for signal routing
+// Hook token format: signals:${modelId}
+```
+
+**Architecture:**
+```
+PartyKit (dflow-relay.ts)
+         │
+         │ POST /api/signals/trigger
+         ▼
+┌─────────────────────────────────────┐
+│  resumeHook(`signals:${modelId}`,   │
+│              signal)                │
+└─────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────┐
+│  signalListenerWorkflow             │
+│  for await (signal of signalHook) { │
+│    processSignal(signal)            │
+│  }                                  │
+└─────────────────────────────────────┘
+```
+
+### Trading Agent Workflow (Legacy)
+
+Per-model trading execution with streaming support. Used by cron fallback.
 
 ```typescript
 import { tradingAgentWorkflow } from "@/lib/ai/workflows";
 
 // Executes a single trading agent run
 // Streams reasoning to frontend in real-time
-```
-
-### Price Watcher Workflow (DEPRECATED)
-
-> **Note:** The priceWatcher workflow has been replaced by the PartyKit WebSocket relay.
-> See `party/dflow-relay.ts` for the new implementation.
-
-The PartyKit relay maintains a persistent WebSocket connection to dflow and triggers
-the `/api/signals/trigger` endpoint when significant market signals are detected.
-
-```typescript
-// Old (deprecated):
-import { priceWatcherWorkflow } from "@/lib/ai/workflows";
-
-// New: PartyKit relay triggers /api/signals/trigger
-// which starts tradingAgentWorkflow for each model
 ```
 
 ## Models
@@ -256,14 +271,14 @@ NEXT_PUBLIC_PARTYKIT_HOST=your-project.partykit.dev
 ## API Endpoints
 
 ### Signal Triggers (PartyKit → Vercel)
-- `POST /api/signals/trigger` - Receive market signals from PartyKit relay
+- `POST /api/signals/trigger` - Receive market signals from PartyKit, resumes model hooks
 
 ### Workflow Management
-- `POST /api/workflows/start` - Start trading workflows
-- `GET /api/workflows/start` - Check workflow status
+- `POST /api/workflows/start` - Start signal listener workflows for all models
+- `GET /api/workflows/start` - Check status of all signal listener workflows
 
 ### Cron (Health Check + Fallback)
-- `GET /api/cron/trading` - Checks workflow health, falls back to direct execution
+- `GET /api/cron/trading` - Health check for signal listeners, restarts if needed, fallback to direct execution
 
 ### Streaming
 - `GET /api/chat/stream?runId=xxx` - Resumable stream for agent reasoning

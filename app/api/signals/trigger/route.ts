@@ -1,66 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { start } from "workflow/api";
+import { resumeHook } from "workflow/api";
 import { getModelsWithWallets } from "@/lib/ai/models/catalog";
-import { tradingAgentWorkflow } from "@/lib/ai/workflows/tradingAgent";
-
-interface Signal {
-  type: "price_swing" | "volume_spike" | "orderbook_imbalance";
-  ticker: string;
-  data: Record<string, unknown>;
-  timestamp: number;
-}
-
-interface PriceSwing {
-  ticker: string;
-  previousPrice: number;
-  currentPrice: number;
-  changePercent: number;
-}
+import type { MarketSignal } from "@/lib/ai/workflows";
 
 /**
- * Convert a market signal to the PriceSwing format expected by tradingAgentWorkflow.
- * All signal types are normalized to price swing format for the agent to process.
+ * Signal Trigger Endpoint
+ *
+ * Called by PartyKit relay when significant market signals are detected.
+ * Uses resumeHook to send signals to long-running signalListenerWorkflow instances.
  */
-function signalToPriceSwing(signal: Signal): PriceSwing {
-  switch (signal.type) {
-    case "price_swing":
-      return {
-        ticker: signal.ticker,
-        previousPrice: signal.data.previousPrice as number,
-        currentPrice: signal.data.currentPrice as number,
-        changePercent: signal.data.changePercent as number,
-      };
-
-    case "volume_spike":
-      // Volume spike indicates market activity - create a synthetic price swing
-      // The agent will use tools to get current prices
-      return {
-        ticker: signal.ticker,
-        previousPrice: 0,
-        currentPrice: 0,
-        changePercent: 0,
-      };
-
-    case "orderbook_imbalance":
-      // Orderbook imbalance indicates potential price movement
-      // The agent will analyze the current state
-      return {
-        ticker: signal.ticker,
-        previousPrice: 0,
-        currentPrice: 0,
-        changePercent: 0,
-      };
-
-    default:
-      return {
-        ticker: signal.ticker,
-        previousPrice: 0,
-        currentPrice: 0,
-        changePercent: 0,
-      };
-  }
-}
-
 export async function POST(req: NextRequest) {
   // Verify webhook secret
   const authHeader = req.headers.get("authorization");
@@ -71,10 +19,10 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const signal = (await req.json()) as Signal;
+    const signal = (await req.json()) as MarketSignal;
 
     console.log(
-      `[signals/trigger] Received signal: ${signal.type} for ${signal.ticker}`
+      `[signals/trigger] Received signal: ${signal.type} for ${signal.ticker}`,
     );
 
     // Get all models with wallets
@@ -91,39 +39,51 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Convert signal to price swing format
-    const priceSwing = signalToPriceSwing(signal);
-
-    // Start trading workflow for each model (parallel)
-    const workflowPromises = models.map((model) =>
-      start(tradingAgentWorkflow, [
-        {
-          modelId: model.id,
-          walletAddress: model.walletAddress!,
-          priceSwings: [priceSwing],
-          signal, // Pass full signal for richer context
-        },
-      ])
+    // Resume each model's signal listener hook
+    // The hook token format is: signals:${modelId}
+    const results = await Promise.allSettled(
+      models.map(async (model) => {
+        const token = `signals:${model.id}`;
+        try {
+          await resumeHook(token, signal);
+          console.log(`[signals/trigger] Resumed hook for model ${model.id}`);
+          return { modelId: model.id, success: true };
+        } catch (error) {
+          // Hook might not exist yet if workflow hasn't started
+          console.warn(
+            `[signals/trigger] Failed to resume hook for ${model.id}:`,
+            error,
+          );
+          return { modelId: model.id, success: false, error };
+        }
+      }),
     );
 
-    // Wait for all workflows to start (not complete)
-    await Promise.all(workflowPromises);
+    const succeeded = results.filter(
+      (r) => r.status === "fulfilled" && r.value.success,
+    ).length;
+    const failed = results.filter(
+      (r) =>
+        r.status === "rejected" ||
+        (r.status === "fulfilled" && !r.value.success),
+    ).length;
 
     console.log(
-      `[signals/trigger] Started ${models.length} trading workflows for ${signal.ticker}`
+      `[signals/trigger] Triggered ${succeeded}/${models.length} models for ${signal.ticker}`,
     );
 
     return NextResponse.json({
       success: true,
       signal: signal.type,
       ticker: signal.ticker,
-      modelsTriggered: models.length,
+      modelsTriggered: succeeded,
+      modelsFailed: failed,
     });
   } catch (error) {
     console.error("[signals/trigger] Error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

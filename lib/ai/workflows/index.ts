@@ -5,5 +5,9 @@
  * Uses useWorkflow for reliable, observable execution.
  */
 
-export { priceWatcherWorkflow } from "./priceWatcher";
 export { tradingAgentWorkflow } from "./tradingAgent";
+export {
+  signalListenerWorkflow,
+  type SignalListenerInput,
+  type MarketSignal,
+} from "./signalListener";

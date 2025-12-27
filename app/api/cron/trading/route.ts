@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getRun, start } from "workflow/api";
-import { priceWatcherWorkflow } from "@/lib/ai/workflows";
+import { getHookByToken, start, resumeHook } from "workflow/api";
+import { signalListenerWorkflow } from "@/lib/ai/workflows";
 import { getGlobalSession } from "@/lib/supabase/db";
 import {
   getModelsWithWallets,
@@ -19,12 +19,17 @@ import type { PredictionMarket, Trade, Broadcast } from "@/lib/supabase/types";
 import type { MarketContext } from "@/lib/ai/agents/types";
 
 // ============================================================================
-// Cron Job: Health Check for Price Watcher Workflow
-// Falls back to manual trading loop if workflow isn't running
-// Triggered by Vercel Cron every 1 minute (requires Pro plan)
+// Cron Job: Health Check for Signal Listener Workflows
+// Falls back to manual trading loop if workflows aren't running
+// Triggered by Vercel Cron every 1 minute
 // ============================================================================
 
-const PRICE_WATCHER_RUN_ID = "price-watcher-singleton";
+/**
+ * Get the hook token for a model's signal listener
+ */
+function getHookToken(modelId: string): string {
+  return `signals:${modelId}`;
+}
 
 export async function GET(req: Request) {
   // Verify cron secret for security
@@ -35,49 +40,91 @@ export async function GET(req: Request) {
   }
 
   try {
-    // First, check if price watcher workflow is running
-    let workflowStatus = "unknown";
-    let workflowRestarted = false;
+    const models = getModelsWithWallets();
 
-    try {
-      const run = await getRun(PRICE_WATCHER_RUN_ID);
-      const runStatus = run ? await run.status : null;
-
-      if (!run || runStatus !== "running") {
-        console.log("[cron/trading] Price watcher not running, restarting...");
-
-        await start(priceWatcherWorkflow, []);
-
-        workflowStatus = "restarted";
-        workflowRestarted = true;
-      } else {
-        workflowStatus = "running";
-        // Workflow is handling everything, just return health status
-        return NextResponse.json({
-          message: "Price watcher healthy",
-          workflowStatus: "running",
-          timestamp: new Date().toISOString(),
-        });
-      }
-    } catch (workflowError) {
-      console.error("[cron/trading] Workflow check failed:", workflowError);
-      workflowStatus = "error";
-      // Fall through to legacy behavior
+    if (models.length === 0) {
+      return NextResponse.json({
+        message: "No models with wallets configured",
+        healthy: 0,
+        restarted: 0,
+        fallbackRun: false,
+      });
     }
 
-    // Fallback: Run trading loop directly if workflow isn't handling it
-    console.log("[cron/trading] Running fallback trading loop");
+    // ========================================================================
+    // Step 1: Health check - ensure all signal listeners are running
+    // ========================================================================
+
+    let healthyCount = 0;
+    let restartedCount = 0;
+    const unhealthyModels: typeof models = [];
+
+    for (const model of models) {
+      const hookToken = getHookToken(model.id);
+
+      try {
+        // Check if hook exists - if it does, workflow is running and waiting
+        const hook = await getHookByToken(hookToken);
+
+        if (hook) {
+          healthyCount++;
+          console.log(`[cron/trading] ${model.id}: healthy (hook exists)`);
+        } else {
+          // Workflow not running (no hook), restart it
+          console.log(
+            `[cron/trading] ${model.id}: not running (no hook), restarting...`,
+          );
+
+          await start(signalListenerWorkflow, [
+            {
+              modelId: model.id,
+              walletAddress: model.walletAddress!,
+            },
+          ]);
+
+          restartedCount++;
+          // Mark as unhealthy for fallback since it just restarted
+          unhealthyModels.push(model);
+        }
+      } catch (error) {
+        console.error(
+          `[cron/trading] Error checking/restarting ${model.id}:`,
+          error,
+        );
+        unhealthyModels.push(model);
+      }
+    }
+
+    // If all workflows are healthy, just return status
+    if (unhealthyModels.length === 0) {
+      return NextResponse.json({
+        message: "All signal listeners healthy",
+        healthy: healthyCount,
+        restarted: restartedCount,
+        fallbackRun: false,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // ========================================================================
+    // Step 2: Fallback - detect price swings and trigger agents directly
+    // Only for models that had unhealthy workflows
+    // ========================================================================
+
+    console.log(
+      `[cron/trading] Running fallback for ${unhealthyModels.length} unhealthy models`,
+    );
 
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
 
-    // 1. Fetch current prices from dflow
+    // Fetch current prices from dflow
     const markets = await fetchMarkets(baseUrl);
     if (markets.length === 0) {
-      console.log("[cron/trading] No markets available");
       return NextResponse.json({
-        message: "No markets available",
-        workflowStatus,
-        workflowRestarted,
+        message: "No markets available for fallback",
+        healthy: healthyCount,
+        restarted: restartedCount,
+        fallbackRun: true,
         swings: 0,
         modelsRun: 0,
       });
@@ -92,7 +139,7 @@ export async function GET(req: Request) {
       no_ask: m.noPrice,
     }));
 
-    // 2. Sync prices and detect swings
+    // Sync prices and detect swings
     const swings = await syncPricesAndDetectSwings(
       currentPrices,
       TRADING_CONFIG.swingThreshold,
@@ -100,41 +147,51 @@ export async function GET(req: Request) {
 
     console.log(`[cron/trading] Detected ${swings.length} price swings`);
 
-    // 3. If no significant swings, skip agent runs (save cost)
+    // If no significant swings, skip agent runs
     if (swings.length === 0) {
       return NextResponse.json({
         message: "No significant price movements",
-        workflowStatus,
-        workflowRestarted,
+        healthy: healthyCount,
+        restarted: restartedCount,
+        fallbackRun: true,
         swings: 0,
         modelsRun: 0,
       });
     }
 
-    // 4. Get models with wallets configured
-    const enabledModels = getModelsWithWallets();
-    if (enabledModels.length === 0) {
-      console.log("[cron/trading] No enabled models with wallets");
-      return NextResponse.json({
-        message: "No models with wallets configured",
-        workflowStatus,
-        workflowRestarted,
-        swings: swings.length,
-        modelsRun: 0,
-      });
-    }
-
-    console.log(`[cron/trading] Processing ${enabledModels.length} models`);
-
-    // 5. Get global session
+    // Get global session
     const session = await getGlobalSession();
-    console.log(`[cron/trading] Using session: ${session.id}`);
 
-    // 6. Run agent for each model
+    // Run agent for each unhealthy model
     const results = await Promise.allSettled(
-      enabledModels.map(async (model) => {
+      unhealthyModels.map(async (model) => {
         try {
-          console.log(`[cron/trading] Processing model: ${model.name}`);
+          console.log(
+            `[cron/trading] Fallback processing model: ${model.name}`,
+          );
+
+          // First, try to send signal via hook (in case workflow just restarted)
+          const hookToken = `signals:${model.id}`;
+          try {
+            const signal = {
+              type: "price_swing" as const,
+              ticker: swings[0].ticker,
+              data: {
+                previousPrice: swings[0].previousPrice,
+                currentPrice: swings[0].currentPrice,
+                changePercent: swings[0].changePercent,
+              },
+              timestamp: Date.now(),
+            };
+            await resumeHook(hookToken, signal);
+            console.log(`[cron/trading] Sent signal via hook for ${model.id}`);
+            return { modelId: model.id, method: "hook" };
+          } catch {
+            // Hook not ready, fall back to direct agent execution
+            console.log(
+              `[cron/trading] Hook not ready for ${model.id}, running agent directly`,
+            );
+          }
 
           // Create agent with wallet context
           const agent = new PredictionMarketAgent({
@@ -162,7 +219,7 @@ export async function GET(req: Request) {
 
           return {
             modelId: model.id,
-            reasoning: result.reasoning,
+            method: "direct",
             trades: result.trades.length,
             steps: result.steps.length,
           };
@@ -173,20 +230,16 @@ export async function GET(req: Request) {
       }),
     );
 
-    // Count successes and failures
     const successes = results.filter((r) => r.status === "fulfilled").length;
     const failures = results.filter((r) => r.status === "rejected").length;
 
-    console.log(
-      `[cron/trading] Completed: ${successes} successes, ${failures} failures`,
-    );
-
     return NextResponse.json({
       success: true,
-      workflowStatus,
-      workflowRestarted,
+      healthy: healthyCount,
+      restarted: restartedCount,
+      fallbackRun: true,
       swings: swings.length,
-      modelsRun: enabledModels.length,
+      modelsRun: unhealthyModels.length,
       successes,
       failures,
       timestamp: new Date().toISOString(),
@@ -204,14 +257,10 @@ export async function GET(req: Request) {
 // Helper Functions
 // ============================================================================
 
-// Solana RPC endpoint
 const SOLANA_RPC_URL =
   process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
-
-// Token-2022 Program ID
 const TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 
-// Market type for batch response
 interface MarketData {
   ticker: string;
   title: string;
@@ -221,12 +270,6 @@ interface MarketData {
   };
 }
 
-/**
- * Fetch positions using the 3-step flow:
- * 1. RPC query for token accounts
- * 2. Filter to outcome mints
- * 3. Get market details
- */
 async function fetchPositions(
   baseUrl: string,
   walletAddress: string,
@@ -327,7 +370,6 @@ async function fetchPositions(
     const market = marketByMint.get(outcomeMint.mint);
     const quantity = tokenBalanceMap.get(outcomeMint.mint) || 0;
 
-    // Determine YES or NO based on mint
     const side: "yes" | "no" =
       market?.accounts?.noMint === outcomeMint.mint ? "no" : "yes";
 
@@ -338,7 +380,7 @@ async function fetchPositions(
       marketTitle: market?.title || outcomeMint.marketTicker,
       side,
       quantity,
-      avgEntryPrice: 0, // Not available from on-chain data
+      avgEntryPrice: 0,
       status: "open" as const,
       openedAt: new Date(),
     });
@@ -390,7 +432,7 @@ async function buildMarketContext(
     console.error("[cron/trading] Failed to fetch balance:", error);
   }
 
-  // Fetch positions using the new 3-step flow
+  // Fetch positions
   const positions: MarketContext["portfolio"]["positions"] = [];
   try {
     const positionsData = await fetchPositions(baseUrl, walletAddress);

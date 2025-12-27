@@ -15,7 +15,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { ChartDataPoint, LeaderboardEntry } from "@/lib/supabase/types";
-import { MODELS } from "@/lib/ai/models/models";
+import { MODELS } from "@/lib/ai/models";
 import { getSeriesLogoPath } from "@/lib/ai/models/catalog";
 import { DEFAULT_STARTING_CAPITAL, CHART_CONFIG } from "@/lib/config";
 import { useMemo, useState } from "react";
