@@ -3,6 +3,59 @@
  */
 
 // =============================================================================
+// Provider Types & Configuration
+// =============================================================================
+
+/**
+ * Model provider configuration
+ */
+export interface ProviderConfig {
+  /** Unique provider identifier */
+  id: string;
+  /** Display name */
+  name: string;
+  /** API base URL */
+  baseUrl: string;
+  /** Endpoint for fetching available models (if supported) */
+  modelsEndpoint?: string;
+  /** Environment variable key for API key */
+  envKey: string;
+}
+
+/**
+ * API provider configurations
+ */
+export const PROVIDERS: ProviderConfig[] = [
+  {
+    id: "openrouter",
+    name: "OpenRouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    modelsEndpoint: "/models",
+    envKey: "OPENROUTER_API_KEY",
+  },
+  {
+    id: "aimo",
+    name: "AiMo",
+    baseUrl: "https://api.aimo.ai/v1",
+    envKey: "AIMO_API_KEY",
+  },
+];
+
+/**
+ * Get provider by ID
+ */
+export function getProviderById(id: string): ProviderConfig | undefined {
+  return PROVIDERS.find((p) => p.id === id);
+}
+
+/**
+ * Get default provider
+ */
+export function getDefaultProvider(): ProviderConfig {
+  return PROVIDERS[0];
+}
+
+// =============================================================================
 // Default Values
 // =============================================================================
 

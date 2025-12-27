@@ -36,21 +36,7 @@ export interface ModelDefinition {
   enabled?: boolean;
 }
 
-/**
- * Model provider configuration
- */
-export interface ProviderConfig {
-  /** Unique provider identifier */
-  id: string;
-  /** Display name */
-  name: string;
-  /** API base URL */
-  baseUrl: string;
-  /** Endpoint for fetching available models (if supported) */
-  modelsEndpoint?: string;
-  /** Environment variable key for API key */
-  envKey: string;
-}
+// ProviderConfig is now in lib/config.ts
 
 /**
  * Model selection state

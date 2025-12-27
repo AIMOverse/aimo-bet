@@ -20,7 +20,12 @@ export {
 } from "./catalog";
 
 // Provider configurations
-export { PROVIDERS, getProviderById, getDefaultProvider } from "./config";
+export {
+  PROVIDERS,
+  getProviderById,
+  getDefaultProvider,
+  type ProviderConfig,
+} from "@/lib/config";
 
 // Provider instances
 export { openrouter, aimo } from "./providers";
