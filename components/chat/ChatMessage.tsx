@@ -6,11 +6,16 @@ import {
   MessageCircle,
   User,
   Bot,
+  TrendingUp,
+  TrendingDown,
+  Pause,
+  SkipForward,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type {
   ChatMessage as ChatMessageType,
   ChatMessageType as MessageType,
+  DecisionType,
 } from "@/lib/supabase/types";
 
 interface ChatMessageProps {
@@ -70,6 +75,38 @@ function getTypeBadgeStyle(type: MessageType): string {
       return "bg-indigo-500/10 text-indigo-500";
     default:
       return "bg-muted text-muted-foreground";
+  }
+}
+
+// Get decision badge style
+function getDecisionBadgeStyle(decision: DecisionType): string {
+  switch (decision) {
+    case "buy":
+      return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
+    case "sell":
+      return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200";
+    case "hold":
+      return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200";
+    case "skip":
+      return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200";
+    default:
+      return "bg-muted text-muted-foreground";
+  }
+}
+
+// Get decision icon
+function DecisionIcon({ decision }: { decision: DecisionType }) {
+  switch (decision) {
+    case "buy":
+      return <TrendingUp className="h-3 w-3" />;
+    case "sell":
+      return <TrendingDown className="h-3 w-3" />;
+    case "hold":
+      return <Pause className="h-3 w-3" />;
+    case "skip":
+      return <SkipForward className="h-3 w-3" />;
+    default:
+      return null;
   }
 }
 
@@ -141,6 +178,11 @@ export function ChatMessage({ message, modelInfo }: ChatMessageProps) {
   // Use 0 as fallback - createdAt should always be set by the time messages are saved
   const createdAt = metadata?.createdAt ?? 0;
 
+  // Decision-specific metadata
+  const decision = metadata?.decision;
+  const confidence = metadata?.confidence;
+  const portfolioValue = metadata?.portfolioValue;
+
   const authorName = getAuthorName(
     authorType,
     metadata?.authorId ?? "",
@@ -152,6 +194,7 @@ export function ChatMessage({ message, modelInfo }: ChatMessageProps) {
   const content = getMessageText(message);
 
   const isModel = authorType === "model";
+  const isDecision = !!decision;
 
   return (
     <div
@@ -177,17 +220,37 @@ export function ChatMessage({ message, modelInfo }: ChatMessageProps) {
           </div>
         </div>
 
-        {/* Only show type badge for model messages */}
+        {/* Show decision badge for agent decisions, or type badge for other model messages */}
         {isModel && (
-          <span
-            className={cn(
-              "flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium",
-              badgeStyle,
+          <div className="flex items-center gap-2">
+            {isDecision && (
+              <span
+                className={cn(
+                  "flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium",
+                  getDecisionBadgeStyle(decision),
+                )}
+              >
+                <DecisionIcon decision={decision} />
+                {decision.toUpperCase()}
+              </span>
             )}
-          >
-            <MessageTypeIcon type={messageType} />
-            {messageType}
-          </span>
+            {confidence !== undefined && (
+              <span className="text-xs text-muted-foreground">
+                {(confidence * 100).toFixed(0)}% conf
+              </span>
+            )}
+            {!isDecision && (
+              <span
+                className={cn(
+                  "flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium",
+                  badgeStyle,
+                )}
+              >
+                <MessageTypeIcon type={messageType} />
+                {messageType}
+              </span>
+            )}
+          </div>
         )}
       </div>
 
@@ -195,6 +258,15 @@ export function ChatMessage({ message, modelInfo }: ChatMessageProps) {
       <div className="text-sm leading-relaxed whitespace-pre-wrap">
         {content}
       </div>
+
+      {/* Portfolio value footer for decision messages */}
+      {isDecision && portfolioValue !== undefined && (
+        <div className="mt-2 pt-2 border-t border-border/50">
+          <span className="text-xs text-muted-foreground">
+            Portfolio: ${portfolioValue.toLocaleString()}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

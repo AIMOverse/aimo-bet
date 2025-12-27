@@ -1,18 +1,10 @@
 import { getSupabaseClient } from "./client";
-import type { UIMessage } from "ai";
 import type {
   TradingSession,
-  PerformanceSnapshot,
   SessionStatus,
-  ChatMetadata,
-  ChatMessage,
 } from "./types";
 import { DEFAULT_STARTING_CAPITAL } from "@/lib/config";
-import type {
-  DbTradingSessionInsert,
-  DbPerformanceSnapshotInsert,
-  DbArenaChatMessageInsert,
-} from "./types";
+import type { DbTradingSessionInsert } from "./types";
 
 // ============================================================================
 // CONSTANTS
@@ -188,156 +180,20 @@ export async function updateSessionStatus(
 }
 
 // ============================================================================
-// ARENA CHAT MESSAGES
+// ARENA CHAT MESSAGES (DEPRECATED - Use agent_decisions via lib/supabase/agents.ts)
 // ============================================================================
 
-export async function getChatMessages(
-  sessionId: string,
-  limit = 100,
-): Promise<ChatMessage[]> {
-  const client = getSupabaseClient();
-  if (!client) return [];
-
-  const { data, error } = await client
-    .from("arena_chat_messages")
-    .select("*")
-    .eq("session_id", sessionId)
-    .order("created_at", { ascending: true })
-    .limit(limit);
-
-  if (error) {
-    console.error("Failed to fetch arena chat messages:", error);
-    throw error;
-  }
-
-  return (data || []).map(mapChatMessage);
-}
-
-export async function saveChatMessage(message: ChatMessage): Promise<void> {
-  const client = getSupabaseClient();
-  if (!client) throw new Error("Supabase not configured");
-
-  const insertData: DbArenaChatMessageInsert = {
-    id: message.id,
-    session_id: message.metadata?.sessionId ?? "",
-    role: message.role,
-    parts: message.parts,
-    metadata: message.metadata as unknown as Record<string, unknown>,
-  };
-
-  const { error } = await client
-    .from("arena_chat_messages")
-    .upsert(insertData as never, { onConflict: "id" });
-
-  if (error) {
-    console.error("Failed to save arena chat message:", error);
-    throw error;
-  }
-}
-
-export async function saveChatMessages(messages: ChatMessage[]): Promise<void> {
-  const client = getSupabaseClient();
-  if (!client) throw new Error("Supabase not configured");
-
-  const inserts: DbArenaChatMessageInsert[] = messages.map((msg) => ({
-    id: msg.id,
-    session_id: msg.metadata?.sessionId ?? "",
-    role: msg.role,
-    parts: msg.parts,
-    metadata: msg.metadata as unknown as Record<string, unknown>,
-  }));
-
-  const { error } = await client
-    .from("arena_chat_messages")
-    .upsert(inserts as never[], { onConflict: "id" });
-
-  if (error) {
-    console.error("Failed to save arena chat messages:", error);
-    throw error;
-  }
-}
+// NOTE: Chat messages are now stored as agent_decisions.
+// Use recordAgentDecision() from lib/supabase/agents.ts instead.
+// The arena_chat_messages table is deprecated.
 
 // ============================================================================
-// PERFORMANCE SNAPSHOTS
+// PERFORMANCE SNAPSHOTS (DEPRECATED - Use agent_decisions via lib/supabase/agents.ts)
 // ============================================================================
 
-export async function getPerformanceSnapshots(
-  sessionId: string,
-  hoursBack = 24,
-): Promise<PerformanceSnapshot[]> {
-  const client = getSupabaseClient();
-  if (!client) return [];
-
-  const since = new Date(Date.now() - hoursBack * 60 * 60 * 1000).toISOString();
-
-  const { data, error } = await client
-    .from("performance_snapshots")
-    .select("*")
-    .eq("session_id", sessionId)
-    .gte("timestamp", since)
-    .order("timestamp", { ascending: true });
-
-  if (error) {
-    console.error("Failed to fetch performance snapshots:", error);
-    throw error;
-  }
-
-  return (data || []).map(mapPerformanceSnapshot);
-}
-
-export async function createPerformanceSnapshot(
-  sessionId: string,
-  modelId: string,
-  accountValue: number,
-): Promise<PerformanceSnapshot> {
-  const client = getSupabaseClient();
-  if (!client) throw new Error("Supabase not configured");
-
-  const insertData: DbPerformanceSnapshotInsert = {
-    session_id: sessionId,
-    model_id: modelId,
-    account_value: accountValue,
-  };
-
-  const { data, error } = await client
-    .from("performance_snapshots")
-    .insert(insertData as never)
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Failed to create performance snapshot:", error);
-    throw error;
-  }
-
-  return mapPerformanceSnapshot(data);
-}
-
-export async function createBulkSnapshots(
-  snapshots: Array<{
-    sessionId: string;
-    modelId: string;
-    accountValue: number;
-  }>,
-): Promise<void> {
-  const client = getSupabaseClient();
-  if (!client) throw new Error("Supabase not configured");
-
-  const inserts: DbPerformanceSnapshotInsert[] = snapshots.map((s) => ({
-    session_id: s.sessionId,
-    model_id: s.modelId,
-    account_value: s.accountValue,
-  }));
-
-  const { error } = await client
-    .from("performance_snapshots")
-    .insert(inserts as never[]);
-
-  if (error) {
-    console.error("Failed to create bulk snapshots:", error);
-    throw error;
-  }
-}
+// NOTE: Performance snapshots are now derived from agent_decisions.portfolio_value_after.
+// Use getChartData() from lib/supabase/agents.ts or the usePerformanceChart hook instead.
+// The performance_snapshots table is deprecated.
 
 // ============================================================================
 // MAPPERS
@@ -352,26 +208,5 @@ function mapTradingSession(row: Record<string, unknown>): TradingSession {
     startedAt: row.started_at ? new Date(row.started_at as string) : undefined,
     endedAt: row.ended_at ? new Date(row.ended_at as string) : undefined,
     createdAt: new Date(row.created_at as string),
-  };
-}
-
-function mapPerformanceSnapshot(
-  row: Record<string, unknown>,
-): PerformanceSnapshot {
-  return {
-    id: row.id as string,
-    sessionId: row.session_id as string,
-    modelId: row.model_id as string,
-    accountValue: Number(row.account_value),
-    timestamp: new Date(row.timestamp as string),
-  };
-}
-
-function mapChatMessage(row: Record<string, unknown>): ChatMessage {
-  return {
-    id: row.id as string,
-    role: row.role as "user" | "assistant",
-    parts: row.parts as UIMessage["parts"],
-    metadata: row.metadata as ChatMetadata,
   };
 }

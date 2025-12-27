@@ -36,6 +36,18 @@ export interface ChatMetadata {
   relatedTradeId?: string;
   /** Timestamp in milliseconds */
   createdAt: number;
+
+  // Decision-specific metadata (from agent_decisions)
+  /** Decision type (buy/sell/hold/skip) */
+  decision?: DecisionType;
+  /** Confidence level (0-1) */
+  confidence?: number;
+  /** Market ticker */
+  marketTicker?: string;
+  /** Portfolio value after decision */
+  portfolioValue?: number;
+  /** What triggered this decision */
+  triggerType?: TriggerType;
 }
 
 /**
@@ -260,6 +272,163 @@ export interface PriceSwing {
 }
 
 // =============================================================================
+// Agent Types (New Schema)
+// =============================================================================
+
+export type AgentSessionStatus = "active" | "paused" | "eliminated";
+export type TriggerType =
+  | "price_swing"
+  | "volume_spike"
+  | "orderbook_imbalance"
+  | "periodic"
+  | "manual";
+export type DecisionType = "buy" | "sell" | "hold" | "skip";
+
+/**
+ * Agent session - links a model to a trading session
+ */
+export interface AgentSession {
+  id: string;
+  sessionId: string;
+  modelId: string;
+  modelName: string;
+  walletAddress: string;
+  startingCapital: number;
+  currentValue: number;
+  totalPnl: number;
+  status: AgentSessionStatus;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * Agent decision - every trigger creates a decision record
+ */
+export interface AgentDecision {
+  id: string;
+  agentSessionId: string;
+  triggerType: TriggerType;
+  triggerDetails?: Record<string, unknown>;
+  marketTicker?: string;
+  marketTitle?: string;
+  decision: DecisionType;
+  reasoning: string;
+  confidence?: number;
+  marketContext?: Record<string, unknown>;
+  portfolioValueAfter: number;
+  createdAt: Date;
+}
+
+/**
+ * Agent trade - executed trades linked to decisions
+ */
+export interface AgentTrade {
+  id: string;
+  decisionId: string;
+  agentSessionId: string;
+  marketTicker: string;
+  marketTitle?: string;
+  side: PositionSide;
+  action: TradeAction;
+  quantity: number;
+  price: number;
+  notional: number;
+  txSignature?: string;
+  pnl?: number;
+  createdAt: Date;
+}
+
+// =============================================================================
+// Agent Database Row Types (snake_case for DB)
+// =============================================================================
+
+export interface DbAgentSession {
+  id: string;
+  session_id: string;
+  model_id: string;
+  model_name: string;
+  wallet_address: string;
+  starting_capital: number;
+  current_value: number;
+  total_pnl: number;
+  status: AgentSessionStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbAgentSessionInsert {
+  id?: string;
+  session_id: string;
+  model_id: string;
+  model_name: string;
+  wallet_address: string;
+  starting_capital?: number;
+  current_value?: number;
+  total_pnl?: number;
+  status?: AgentSessionStatus;
+}
+
+export interface DbAgentDecision {
+  id: string;
+  agent_session_id: string;
+  trigger_type: TriggerType;
+  trigger_details: Record<string, unknown> | null;
+  market_ticker: string | null;
+  market_title: string | null;
+  decision: DecisionType;
+  reasoning: string;
+  confidence: number | null;
+  market_context: Record<string, unknown> | null;
+  portfolio_value_after: number;
+  created_at: string;
+}
+
+export interface DbAgentDecisionInsert {
+  id?: string;
+  agent_session_id: string;
+  trigger_type: TriggerType;
+  trigger_details?: Record<string, unknown> | null;
+  market_ticker?: string | null;
+  market_title?: string | null;
+  decision: DecisionType;
+  reasoning: string;
+  confidence?: number | null;
+  market_context?: Record<string, unknown> | null;
+  portfolio_value_after: number;
+}
+
+export interface DbAgentTrade {
+  id: string;
+  decision_id: string;
+  agent_session_id: string;
+  market_ticker: string;
+  market_title: string | null;
+  side: PositionSide;
+  action: TradeAction;
+  quantity: number;
+  price: number;
+  notional: number;
+  tx_signature: string | null;
+  pnl: number | null;
+  created_at: string;
+}
+
+export interface DbAgentTradeInsert {
+  id?: string;
+  decision_id: string;
+  agent_session_id: string;
+  market_ticker: string;
+  market_title?: string | null;
+  side: PositionSide;
+  action: TradeAction;
+  quantity: number;
+  price: number;
+  notional: number;
+  tx_signature?: string | null;
+  pnl?: number | null;
+}
+
+// =============================================================================
 // Supabase Database Row Types (snake_case for DB)
 // =============================================================================
 
@@ -348,6 +517,24 @@ export interface Database {
         Row: DbArenaChatMessage;
         Insert: DbArenaChatMessageInsert;
         Update: Partial<DbArenaChatMessageInsert>;
+        Relationships: GenericRelationship[];
+      };
+      agent_sessions: {
+        Row: DbAgentSession;
+        Insert: DbAgentSessionInsert;
+        Update: Partial<DbAgentSessionInsert>;
+        Relationships: GenericRelationship[];
+      };
+      agent_decisions: {
+        Row: DbAgentDecision;
+        Insert: DbAgentDecisionInsert;
+        Update: Partial<DbAgentDecisionInsert>;
+        Relationships: GenericRelationship[];
+      };
+      agent_trades: {
+        Row: DbAgentTrade;
+        Insert: DbAgentTradeInsert;
+        Update: Partial<DbAgentTradeInsert>;
         Relationships: GenericRelationship[];
       };
     };
