@@ -79,6 +79,4 @@ export function useRealtimePerformance({
       channelRef.current = null;
     };
   }, [sessionId]);
-
-  return channelRef.current;
 }

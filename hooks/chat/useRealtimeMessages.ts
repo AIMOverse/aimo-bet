@@ -77,6 +77,4 @@ export function useRealtimeMessages({
       channelRef.current = null;
     };
   }, [sessionId]);
-
-  return channelRef.current;
 }
