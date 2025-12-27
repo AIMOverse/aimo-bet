@@ -181,6 +181,71 @@ import { createServerClient } from "@/lib/supabase/server";
 const supabase = createServerClient();
 ```
 
+## Realtime
+
+Supabase Realtime is used for instant updates to chat messages and performance charts.
+
+### Enable Realtime on Tables
+
+Run in Supabase SQL Editor:
+
+```sql
+-- Enable realtime publication for tables
+ALTER PUBLICATION supabase_realtime ADD TABLE arena_chat_messages;
+ALTER PUBLICATION supabase_realtime ADD TABLE performance_snapshots;
+```
+
+Or enable via Supabase Dashboard:
+1. Go to **Database → Replication**
+2. Find `arena_chat_messages` and `performance_snapshots`
+3. Toggle "Realtime" on for each table
+
+### RLS Policies (if RLS is enabled)
+
+```sql
+-- Allow anonymous read access for realtime subscriptions
+CREATE POLICY "Allow anonymous read on chat messages"
+  ON arena_chat_messages FOR SELECT
+  USING (true);
+
+CREATE POLICY "Allow anonymous read on performance snapshots"
+  ON performance_snapshots FOR SELECT
+  USING (true);
+```
+
+### Realtime Channels
+
+| Channel | Table | Event | Purpose |
+|---------|-------|-------|---------|
+| `chat:${sessionId}` | `arena_chat_messages` | INSERT | Agent trade broadcasts |
+| `performance:${sessionId}` | `performance_snapshots` | INSERT | Chart updates |
+
+### Realtime Hooks
+
+```typescript
+import { useRealtimeMessages } from "@/hooks/chat/useRealtimeMessages";
+import { useRealtimePerformance } from "@/hooks/index/useRealtimePerformance";
+
+// Subscribe to chat messages
+useRealtimeMessages({
+  sessionId,
+  onMessage: (message) => console.log("New message:", message),
+});
+
+// Subscribe to performance snapshots
+useRealtimePerformance({
+  sessionId,
+  onSnapshot: (snapshot) => console.log("New snapshot:", snapshot),
+});
+```
+
+### Integrated Hooks
+
+The main hooks automatically use realtime:
+
+- `useChat` - Receives agent broadcasts instantly via `useRealtimeMessages`
+- `usePerformance` - Updates charts instantly via `useRealtimePerformance` (with polling fallback)
+
 ## Environment Variables
 
 ```bash
