@@ -11,16 +11,24 @@ import {
   buildContextPrompt,
   type ContextPromptInput,
 } from "@/lib/ai/prompts/trading/contextBuilder";
-import { getGlobalSession, saveChatMessage } from "@/lib/supabase/db";
+import { getGlobalSession } from "@/lib/supabase/db";
+import {
+  getOrCreateAgentSession,
+  recordAgentDecision,
+  recordAgentTrade,
+  updateAgentSessionValue,
+} from "@/lib/supabase/agents";
 import { TRADING_CONFIG } from "@/lib/config";
 import { nanoid } from "nanoid";
+import { getModelName } from "@/lib/ai/models/catalog";
 import type {
-  ChatMessage,
-  ChatMessageType,
   PredictionMarket,
   Trade,
   PositionSide,
   TradeAction,
+  TriggerType,
+  DecisionType,
+  AgentSession,
 } from "@/lib/supabase/types";
 
 // ============================================================================
@@ -75,6 +83,11 @@ interface TradingResult {
   reasoning: string;
   trades: Trade[];
   steps: number;
+  decision: DecisionType;
+  confidence?: number;
+  marketTicker?: string;
+  marketTitle?: string;
+  portfolioValue: number;
 }
 
 // ============================================================================
@@ -105,19 +118,26 @@ export async function tradingAgentWorkflow(
     // Step 1: Get session
     const session = await getSession();
 
-    // Step 2: Fetch market context
+    // Step 2: Get or create agent session
+    const agentSession = await getAgentSessionStep(
+      session.id,
+      input.modelId,
+      input.walletAddress
+    );
+
+    // Step 3: Fetch market context
     const context = await fetchContext(input.walletAddress);
 
-    // Step 3: Run agent with streaming
-    const result = await runAgent(input, context, session.id, stream);
+    // Step 4: Run agent with streaming
+    const result = await runAgent(input, context, session.id, agentSession, stream);
 
-    // Step 4: Wait for any pending order fills
+    // Step 5: Wait for any pending order fills
     if (result.trades.length > 0) {
       await waitForFills(result.trades);
     }
 
-    // Step 5: Broadcast final summary
-    await broadcastSummary(session.id, input.modelId, result);
+    // Step 6: Record decision and trades to database
+    await recordDecisionAndTrades(agentSession, input, result);
 
     stream.write({ type: "complete" });
     stream.close();
@@ -137,6 +157,21 @@ export async function tradingAgentWorkflow(
 async function getSession() {
   "use step";
   return await getGlobalSession();
+}
+
+async function getAgentSessionStep(
+  sessionId: string,
+  modelId: string,
+  walletAddress: string
+): Promise<AgentSession> {
+  "use step";
+  const modelName = getModelName(modelId) || modelId;
+  return await getOrCreateAgentSession(
+    sessionId,
+    modelId,
+    modelName,
+    walletAddress
+  );
 }
 
 interface MarketContext {
@@ -212,6 +247,7 @@ async function runAgent(
   input: TradingInput,
   context: MarketContext,
   sessionId: string,
+  agentSession: AgentSession,
   stream: WorkflowWritable<StreamChunk>,
 ): Promise<TradingResult> {
   "use step";
@@ -299,10 +335,30 @@ async function runAgent(
   // Extract trades from results
   const trades = extractTrades(result.steps);
 
+  // Determine decision type based on trades
+  let decision: DecisionType = "hold";
+  if (trades.length > 0) {
+    decision = trades[0].action === "buy" ? "buy" : "sell";
+  } else if (result.text?.toLowerCase().includes("skip")) {
+    decision = "skip";
+  }
+
+  // Get the primary market from signal or first trade
+  const marketTicker =
+    input.signal?.ticker || trades[0]?.marketTicker || input.priceSwings[0]?.ticker;
+  const marketTitle = trades[0]?.marketTitle;
+
+  // Calculate portfolio value (use current value from context)
+  const portfolioValue = context.portfolio.totalValue;
+
   return {
     reasoning: result.text || "No reasoning provided.",
     trades,
     steps: result.steps.length,
+    decision,
+    marketTicker,
+    marketTitle,
+    portfolioValue,
   };
 }
 
@@ -380,29 +436,65 @@ async function waitForFills(trades: Trade[]): Promise<void> {
   }
 }
 
-async function broadcastSummary(
-  sessionId: string,
-  modelId: string,
-  result: TradingResult,
+/**
+ * Record the agent's decision and any trades to the database.
+ * This replaces the old broadcastSummary function.
+ */
+async function recordDecisionAndTrades(
+  agentSession: AgentSession,
+  input: TradingInput,
+  result: TradingResult
 ): Promise<void> {
   "use step";
 
-  const messageType: ChatMessageType =
-    result.trades.length > 0 ? "trade" : "commentary";
+  // Determine trigger type from signal
+  let triggerType: TriggerType = "periodic";
+  if (input.signal) {
+    triggerType = input.signal.type;
+  } else if (input.priceSwings.length > 0) {
+    triggerType = "price_swing";
+  }
 
-  const message: ChatMessage = {
-    id: nanoid(),
-    role: "assistant",
-    parts: [{ type: "text", text: result.reasoning }],
-    metadata: {
-      sessionId,
-      authorType: "model",
-      authorId: modelId,
-      messageType,
-      relatedTradeId: result.trades[0]?.id,
-      createdAt: Date.now(),
+  // Record the decision
+  const decision = await recordAgentDecision({
+    agentSessionId: agentSession.id,
+    triggerType,
+    triggerDetails: input.signal?.data || {
+      priceSwings: input.priceSwings,
     },
-  };
+    marketTicker: result.marketTicker,
+    marketTitle: result.marketTitle,
+    decision: result.decision,
+    reasoning: result.reasoning,
+    confidence: result.confidence,
+    portfolioValueAfter: result.portfolioValue,
+  });
 
-  await saveChatMessage(message);
+  console.log(
+    `[tradingAgent:${input.modelId}] Recorded decision: ${result.decision} (id: ${decision.id})`
+  );
+
+  // Record each trade
+  for (const trade of result.trades) {
+    await recordAgentTrade({
+      decisionId: decision.id,
+      agentSessionId: agentSession.id,
+      marketTicker: trade.marketTicker,
+      marketTitle: trade.marketTitle,
+      side: trade.side,
+      action: trade.action,
+      quantity: trade.quantity,
+      price: trade.price,
+      notional: trade.notional,
+      txSignature: trade.id, // Use trade ID as tx signature for now
+      pnl: trade.pnl,
+    });
+  }
+
+  // Update agent session's current value
+  await updateAgentSessionValue(
+    agentSession.id,
+    result.portfolioValue,
+    result.portfolioValue - agentSession.startingCapital
+  );
 }

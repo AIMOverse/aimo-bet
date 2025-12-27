@@ -148,6 +148,13 @@ export function getModelById(id: string): ModelDefinition | undefined {
 }
 
 /**
+ * Get model display name by ID
+ */
+export function getModelName(id: string): string | undefined {
+  return MODELS.find((m) => m.id === id)?.name;
+}
+
+/**
  * Get models by provider
  */
 export function getModelsByProvider(provider: string): ModelDefinition[] {

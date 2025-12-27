@@ -1,6 +1,6 @@
 # Supabase Database
 
-Database layer for Alpha Arena trading sessions, performance tracking, and chat.
+Database layer for Alpha Arena trading sessions, agent decisions, and trades.
 
 ## Architecture
 
@@ -8,86 +8,33 @@ Database layer for Alpha Arena trading sessions, performance tracking, and chat.
 lib/supabase/
 ├── client.ts          # Browser client (singleton)
 ├── server.ts          # Server client factory
-├── db.ts              # Database operations
-├── prices.ts          # Price storage and swing detection
+├── db.ts              # Trading session operations
+├── agents.ts          # Agent decision and trade operations (NEW)
+├── transforms.ts      # Decision → ChatMessage transforms (NEW)
 └── types.ts           # Database type definitions
 ```
 
 ## Database Schema
 
-### trading_sessions
+See `/supabase/README.md` for full schema documentation.
 
-Stores arena trading sessions. A global "Global Arena" session always exists.
+### Primary Tables (New Schema)
 
-```sql
-CREATE TABLE trading_sessions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT,
-  status TEXT NOT NULL DEFAULT 'setup' 
-    CHECK (status IN ('setup', 'running', 'paused', 'completed')),
-  starting_capital NUMERIC NOT NULL DEFAULT 10000,
-  started_at TIMESTAMPTZ,
-  ended_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-```
+| Table | Purpose |
+|-------|---------|
+| `trading_sessions` | Arena/competition container |
+| `agent_sessions` | Agent state (current_value for leaderboard) |
+| `agent_decisions` | Every trigger with reasoning + portfolio_value_after |
+| `agent_trades` | Executed trades linked to decisions |
 
-### performance_snapshots
+### Deprecated Tables
 
-Tracks model account values over time for performance charts.
-
-```sql
-CREATE TABLE performance_snapshots (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  session_id UUID NOT NULL REFERENCES trading_sessions(id) ON DELETE CASCADE,
-  model_id TEXT NOT NULL,
-  account_value NUMERIC NOT NULL,
-  timestamp TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-```
-
-### arena_chat_messages
-
-Unified chat storage for model broadcasts, user questions, and assistant responses.
-
-```sql
-CREATE TABLE arena_chat_messages (
-  id TEXT PRIMARY KEY,
-  session_id UUID NOT NULL REFERENCES trading_sessions(id) ON DELETE CASCADE,
-  role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
-  parts JSONB NOT NULL,
-  metadata JSONB,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-```
-
-### market_prices
-
-Current price snapshot for swing detection.
-
-```sql
-CREATE TABLE market_prices (
-  ticker TEXT PRIMARY KEY,
-  yes_bid NUMERIC,
-  yes_ask NUMERIC,
-  no_bid NUMERIC,
-  no_ask NUMERIC,
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-```
-
-### market_price_history
-
-Historical prices for trend analysis.
-
-```sql
-CREATE TABLE market_price_history (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  ticker TEXT,
-  yes_mid NUMERIC,
-  recorded_at TIMESTAMPTZ DEFAULT NOW()
-);
-```
+| Table | Replacement |
+|-------|-------------|
+| `arena_chat_messages` | `agent_decisions` (reasoning displayed in chat) |
+| `performance_snapshots` | `agent_decisions.portfolio_value_after` |
+| `market_prices` | PartyKit handles detection in-memory |
+| `market_price_history` | PartyKit handles trends in-memory |
 
 ## Core Functions
 
@@ -117,50 +64,103 @@ const active = await getActiveSession();
 await updateSessionStatus(id, "running");
 ```
 
-### Chat Messages
+### Agent Sessions (NEW)
 
 ```typescript
 import {
-  getChatMessages,
-  saveChatMessage,
-  saveChatMessages,
-} from "@/lib/supabase/db";
+  getOrCreateAgentSession,
+  getAgentSessions,
+  updateAgentSessionValue,
+} from "@/lib/supabase/agents";
 
-const messages = await getChatMessages(sessionId, limit);
-await saveChatMessage(message);
-await saveChatMessages(messages);
+// Get or create agent session for a model
+const agentSession = await getOrCreateAgentSession(
+  sessionId,
+  modelId,
+  modelName,
+  walletAddress
+);
+
+// Get all agents in a session (for leaderboard)
+const agents = await getAgentSessions(sessionId);
+
+// Update portfolio value
+await updateAgentSessionValue(agentSessionId, currentValue, totalPnl);
 ```
 
-### Performance Snapshots
+### Agent Decisions (NEW)
 
 ```typescript
 import {
-  getPerformanceSnapshots,
-  createPerformanceSnapshot,
-  createBulkSnapshots,
-} from "@/lib/supabase/db";
+  recordAgentDecision,
+  getDecisions,
+} from "@/lib/supabase/agents";
 
-const snapshots = await getPerformanceSnapshots(sessionId, hoursBack);
-await createPerformanceSnapshot(sessionId, modelId, accountValue);
-await createBulkSnapshots([{ sessionId, modelId, accountValue }]);
+// Record a decision (replaces saveChatMessage)
+const decision = await recordAgentDecision({
+  agentSessionId: "...",
+  triggerType: "price_swing",
+  triggerDetails: { ... },
+  marketTicker: "TRUMP-2024",
+  marketTitle: "Trump wins 2024",
+  decision: "buy",
+  reasoning: "High confidence based on polling data...",
+  confidence: 0.85,
+  portfolioValueAfter: 10500,
+});
+
+// Get decisions for chat feed
+const decisions = await getDecisions(sessionId, 100);
 ```
 
-### Price Swing Detection
+### Agent Trades (NEW)
 
 ```typescript
 import {
-  syncPricesAndDetectSwings,
-  detectPriceSwings,
-  getStoredPrices,
-  updateStoredPrices,
-} from "@/lib/supabase/prices";
+  recordAgentTrade,
+  getAgentTrades,
+} from "@/lib/supabase/agents";
 
-// Sync prices and detect swings in one operation
-const swings = await syncPricesAndDetectSwings(currentPrices, threshold);
+// Record an executed trade
+await recordAgentTrade({
+  decisionId: decision.id,
+  agentSessionId: "...",
+  marketTicker: "TRUMP-2024",
+  side: "yes",
+  action: "buy",
+  quantity: 100,
+  price: 0.65,
+  notional: 65,
+  txSignature: "...",
+});
 
-// Manual swing detection
-const storedPrices = await getStoredPrices();
-const swings = detectPriceSwings(currentPrices, storedPrices, 0.05);
+// Get recent trades
+const trades = await getAgentTrades(sessionId, 100);
+```
+
+### Chart Data (NEW)
+
+```typescript
+import { getChartData } from "@/lib/supabase/agents";
+
+// Get chart data from decisions
+const chartData = await getChartData(sessionId, 24); // last 24 hours
+// Returns: [{ timestamp, modelName, portfolioValue }, ...]
+```
+
+### Transforms (NEW)
+
+```typescript
+import {
+  decisionToChatMessage,
+  decisionsToMessages,
+} from "@/lib/supabase/transforms";
+
+// Convert decision to ChatMessage for existing UI
+const chatMessage = decisionToChatMessage(decision, agentSession, trades);
+
+// Batch convert for initial load
+const messages = decisionsToMessages(dbRows);
 ```
 
 ## Client Usage
@@ -183,68 +183,41 @@ const supabase = createServerClient();
 
 ## Realtime
 
-Supabase Realtime is used for instant updates to chat messages and performance charts.
+Supabase Realtime is used for instant updates to chat and charts.
 
 ### Enable Realtime on Tables
 
-Run in Supabase SQL Editor:
-
 ```sql
--- Enable realtime publication for tables
-ALTER PUBLICATION supabase_realtime ADD TABLE arena_chat_messages;
-ALTER PUBLICATION supabase_realtime ADD TABLE performance_snapshots;
-```
-
-Or enable via Supabase Dashboard:
-1. Go to **Database → Replication**
-2. Find `arena_chat_messages` and `performance_snapshots`
-3. Toggle "Realtime" on for each table
-
-### RLS Policies (if RLS is enabled)
-
-```sql
--- Allow anonymous read access for realtime subscriptions
-CREATE POLICY "Allow anonymous read on chat messages"
-  ON arena_chat_messages FOR SELECT
-  USING (true);
-
-CREATE POLICY "Allow anonymous read on performance snapshots"
-  ON performance_snapshots FOR SELECT
-  USING (true);
+ALTER PUBLICATION supabase_realtime ADD TABLE agent_decisions;
+ALTER PUBLICATION supabase_realtime ADD TABLE agent_trades;
+ALTER PUBLICATION supabase_realtime ADD TABLE agent_sessions;
 ```
 
 ### Realtime Channels
 
 | Channel | Table | Event | Purpose |
 |---------|-------|-------|---------|
-| `chat:${sessionId}` | `arena_chat_messages` | INSERT | Agent trade broadcasts |
-| `performance:${sessionId}` | `performance_snapshots` | INSERT | Chart updates |
+| `decisions:${sessionId}` | `agent_decisions` | INSERT | Chat feed + chart updates |
+| `chart:${sessionId}` | `agent_decisions` | INSERT | Performance chart updates |
 
 ### Realtime Hooks
 
 ```typescript
 import { useRealtimeMessages } from "@/hooks/chat/useRealtimeMessages";
-import { useRealtimePerformance } from "@/hooks/index/useRealtimePerformance";
+import { usePerformanceChart } from "@/hooks/usePerformanceChart";
 
-// Subscribe to chat messages
+// Subscribe to agent decisions (for chat feed)
 useRealtimeMessages({
   sessionId,
-  onMessage: (message) => console.log("New message:", message),
+  onMessage: (message) => console.log("New decision:", message),
 });
 
-// Subscribe to performance snapshots
-useRealtimePerformance({
+// Get chart data with realtime updates
+const { chartData, latestValues, loading } = usePerformanceChart({
   sessionId,
-  onSnapshot: (snapshot) => console.log("New snapshot:", snapshot),
+  hoursBack: 24,
 });
 ```
-
-### Integrated Hooks
-
-The main hooks automatically use realtime:
-
-- `useChat` - Receives agent broadcasts instantly via `useRealtimeMessages`
-- `usePerformance` - Updates charts instantly via `useRealtimePerformance` (with polling fallback)
 
 ## Environment Variables
 
@@ -258,30 +231,59 @@ SUPABASE_SERVICE_ROLE_KEY=eyJ...  # Server-side only
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/arena/sessions` | GET | List trading sessions |
-| `/api/arena/sessions` | POST | Create new session |
-| `/api/arena/snapshots` | GET | Get performance snapshots |
-| `/api/arena/chat-messages` | GET | Get chat messages for session |
+| `/api/sessions` | GET | List trading sessions |
+| `/api/arena/chat-messages` | GET | Get decisions as chat messages |
 | `/api/chat` | POST | Send chat message (uses global session) |
-
-## Cron Jobs
-
-| Path | Schedule | Purpose |
-|------|----------|---------|
-| `/api/cron/snapshots` | Every 5 min | Save performance snapshots |
-| `/api/cron/trading` | Every 1 min | Run autonomous trading loop |
+| `/api/signals/trigger` | POST | Trigger agent from PartyKit signal |
 
 ## Message Metadata
 
-Chat messages use metadata to track author and type:
+Chat messages (converted from decisions) include extended metadata:
 
 ```typescript
 interface ChatMetadata {
   sessionId: string;
   authorType: "model" | "user" | "assistant";
-  authorId: string;        // model_id, visitorIP, or 'assistant'
+  authorId: string;
   messageType: "analysis" | "trade" | "commentary" | "user" | "assistant";
-  relatedTradeId?: string;
   createdAt: number;
+
+  // Decision-specific (NEW)
+  decision?: "buy" | "sell" | "hold" | "skip";
+  confidence?: number;
+  marketTicker?: string;
+  portfolioValue?: number;
+  triggerType?: "price_swing" | "volume_spike" | "orderbook_imbalance" | "periodic" | "manual";
 }
+```
+
+## Data Flow
+
+```
+1. PartyKit detects signal (price_swing, volume_spike, etc.)
+   │
+   ▼
+2. PartyKit triggers agent via /api/signals/trigger
+   │
+   ▼
+3. Agent analyzes market context
+   │
+   ▼
+4. Agent makes decision (buy/sell/hold/skip)
+   │
+   ▼
+5. If buy/sell:
+   ├── Execute on-chain swap via dflow
+   └── Query updated balance
+   │
+   ▼
+6. Record in agent_decisions table
+   - Supabase Realtime → useRealtimeMessages → Chat
+   - Supabase Realtime → usePerformanceChart → Chart
+   │
+   ▼
+7. If trade executed, record in agent_trades
+   │
+   ▼
+8. Update agent_sessions.current_value → Leaderboard
 ```
