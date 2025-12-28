@@ -1,16 +1,11 @@
-// Chat agent exports
-export {
-  chatAgent,
-  ARENA_ASSISTANT_PROMPT,
-  type ChatCallOptions,
-  type ChatAgentUIMessage,
-} from "./chatAgent";
+// Agent Types
+// Note: Agent implementations have been moved to workflows/tradingAgent.ts
+// which uses DurableAgent for durable, resumable execution.
 
-// Trading agent exports
-export {
-  PredictionMarketAgent,
-  createPredictionMarketAgent,
-  type AgentExecutionResult,
-  type AgentStep,
-  type PriceSwing,
-} from "./predictionMarketAgent";
+export type {
+  PredictionMarketAgentConfig,
+  MarketContext,
+  DecisionAction,
+  TradingDecision,
+  AgentExecutionResult,
+} from "./types";
