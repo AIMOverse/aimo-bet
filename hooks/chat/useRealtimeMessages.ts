@@ -2,9 +2,46 @@
 
 import { useEffect, useRef } from "react";
 import { getSupabaseClient } from "@/lib/supabase/client";
-import type { ChatMessage } from "@/lib/supabase/types";
+import type {
+  ChatMessage,
+  TriggerType,
+  DecisionType,
+  PositionSide,
+  TradeAction,
+} from "@/lib/supabase/types";
 import { decisionToChatMessage } from "@/lib/supabase/transforms";
 import type { RealtimeChannel } from "@supabase/supabase-js";
+
+/**
+ * Query result type for agent_decisions with joined agent_sessions and agent_trades
+ */
+interface DecisionQueryResult {
+  id: string;
+  agent_session_id: string;
+  trigger_type: TriggerType;
+  trigger_details: Record<string, unknown> | null;
+  market_ticker: string | null;
+  market_title: string | null;
+  decision: DecisionType;
+  reasoning: string;
+  confidence: number | null;
+  market_context: Record<string, unknown> | null;
+  portfolio_value_after: number;
+  created_at: string;
+  agent_sessions: {
+    session_id: string;
+    model_id: string;
+    model_name: string;
+  };
+  agent_trades: Array<{
+    id: string;
+    side: PositionSide;
+    action: TradeAction;
+    quantity: number;
+    price: number;
+    notional: number;
+  }>;
+}
 
 interface UseRealtimeMessagesOptions {
   /** Trading session ID to subscribe to */
@@ -38,7 +75,9 @@ export function useRealtimeMessages({
       return;
     }
 
-    console.log(`[realtime:chat] Subscribing to decisions for session: ${sessionId}`);
+    console.log(
+      `[realtime:chat] Subscribing to decisions for session: ${sessionId}`,
+    );
 
     const channel = client
       .channel(`decisions:${sessionId}`)
@@ -59,67 +98,62 @@ export function useRealtimeMessages({
                 *,
                 agent_sessions!inner(session_id, model_id, model_name),
                 agent_trades(id, side, action, quantity, price, notional)
-              `
+              `,
               )
               .eq("id", payload.new.id)
               .single();
 
             if (data) {
-              const agentSessions = data.agent_sessions as {
-                session_id: string;
-                model_id: string;
-                model_name: string;
-              };
+              const typedData = data as unknown as DecisionQueryResult;
+              const agentSessions = typedData.agent_sessions;
 
               // Only process if it's for our session
               if (agentSessions.session_id === sessionId) {
-                const agentTrades = (data.agent_trades as Array<{
-                  id: string;
-                  side: "yes" | "no";
-                  action: "buy" | "sell";
-                  quantity: number;
-                  price: number;
-                  notional: number;
-                }>) || [];
+                const agentTrades = typedData.agent_trades || [];
 
                 // Transform to AgentDecision
                 const decision = {
-                  id: data.id as string,
-                  agentSessionId: data.agent_session_id as string,
-                  triggerType: data.trigger_type as "price_swing" | "volume_spike" | "orderbook_imbalance" | "periodic" | "manual",
-                  triggerDetails: (data.trigger_details as Record<string, unknown>) ?? undefined,
-                  marketTicker: (data.market_ticker as string) ?? undefined,
-                  marketTitle: (data.market_title as string) ?? undefined,
-                  decision: data.decision as "buy" | "sell" | "hold" | "skip",
-                  reasoning: data.reasoning as string,
-                  confidence: (data.confidence as number) ?? undefined,
-                  marketContext: (data.market_context as Record<string, unknown>) ?? undefined,
-                  portfolioValueAfter: data.portfolio_value_after as number,
-                  createdAt: new Date(data.created_at as string),
+                  id: typedData.id,
+                  agentSessionId: typedData.agent_session_id,
+                  triggerType: typedData.trigger_type,
+                  triggerDetails: typedData.trigger_details ?? undefined,
+                  marketTicker: typedData.market_ticker ?? undefined,
+                  marketTitle: typedData.market_title ?? undefined,
+                  decision: typedData.decision,
+                  reasoning: typedData.reasoning,
+                  confidence: typedData.confidence ?? undefined,
+                  marketContext: typedData.market_context ?? undefined,
+                  portfolioValueAfter: typedData.portfolio_value_after,
+                  createdAt: new Date(typedData.created_at),
                 };
 
                 // Transform trades
                 const trades = agentTrades.map((t) => ({
                   id: t.id,
-                  decisionId: data.id as string,
-                  agentSessionId: data.agent_session_id as string,
-                  marketTicker: (data.market_ticker as string) || "",
-                  side: t.side as "yes" | "no",
-                  action: t.action as "buy" | "sell",
+                  decisionId: typedData.id,
+                  agentSessionId: typedData.agent_session_id,
+                  marketTicker: typedData.market_ticker || "",
+                  side: t.side,
+                  action: t.action,
                   quantity: t.quantity,
                   price: t.price,
                   notional: t.notional,
-                  createdAt: new Date(data.created_at as string),
+                  createdAt: new Date(typedData.created_at),
                 }));
 
+                // Transform snake_case to camelCase for decisionToChatMessage
                 const chatMessage = decisionToChatMessage(
                   decision,
-                  agentSessions,
-                  trades
+                  {
+                    sessionId: agentSessions.session_id,
+                    modelId: agentSessions.model_id,
+                    modelName: agentSessions.model_name,
+                  },
+                  trades,
                 );
 
                 console.log(
-                  `[realtime:chat] New decision from ${agentSessions.model_id}: ${decision.decision}`
+                  `[realtime:chat] New decision from ${agentSessions.model_id}: ${decision.decision}`,
                 );
                 onMessageRef.current(chatMessage);
               }
@@ -127,7 +161,7 @@ export function useRealtimeMessages({
           } catch (error) {
             console.error("[realtime:chat] Error processing decision:", error);
           }
-        }
+        },
       )
       .on(
         "postgres_changes",
@@ -139,7 +173,7 @@ export function useRealtimeMessages({
         async () => {
           // Trade inserted - trades are included when decision is fetched
           // Could update existing message if needed
-        }
+        },
       )
       .subscribe((status) => {
         console.log(`[realtime:chat] Subscription status: ${status}`);
