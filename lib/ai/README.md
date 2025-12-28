@@ -6,10 +6,9 @@ Autonomous trading agents and LLM infrastructure for Alpha Arena prediction mark
 
 ```
 lib/ai/
-├── agents/                    # Trading and chat agents
-│   ├── predictionMarketAgent.ts   # Autonomous trading agent
-│   ├── chatAgent.ts               # Arena assistant for user questions
-│   └── index.ts                   # Agent exports
+├── agents/                    # Agent types (implementations moved to workflows)
+│   ├── types.ts                   # PredictionMarketAgentConfig, MarketContext, etc.
+│   └── index.ts                   # Type exports only
 ├── prompts/                   # System prompts (top-level)
 │   ├── index.ts                   # Prompt exports
 │   ├── trading/
@@ -33,51 +32,167 @@ lib/ai/
 │   ├── registry.ts                # Model access via AI SDK
 │   ├── openrouter.ts              # OpenRouter provider instance
 │   └── aimo.ts                    # AIMO provider instance
-└── workflows/                 # Durable workflows
+└── workflows/                 # Durable workflows (main entry point)
     ├── index.ts                   # Workflow exports
     ├── signalListener.ts          # Long-running hook-based signal listener (per model)
-    └── tradingAgent.ts            # Per-model trading execution (legacy)
+    └── tradingAgent.ts            # DurableAgent-based trading execution
 
 party/
 └── dflow-relay.ts             # PartyKit WebSocket relay to dflow
 ```
 
-## Agents
+## DurableAgent Workflow
 
-### PredictionMarketAgent
+The trading system uses a single `DurableAgent` workflow that:
 
-Autonomous trading agent using AI SDK's agentic loop pattern. Each model gets its own agent instance with wallet context.
+1. **Streams AI-SDK format** - `UIMessageChunk` compatible with `useChat`
+2. **Durable tool execution** - Tools marked with `"use step"` are retryable
+3. **Resumable streams** - Clients can reconnect via `WorkflowChatTransport`
+4. **Records decisions** - Writes to `agent_decisions` table (triggers Realtime)
+
+### Usage
 
 ```typescript
-import { PredictionMarketAgent } from "@/lib/ai/agents";
+import { tradingAgentWorkflow } from "@/lib/ai/workflows";
 
-const agent = new PredictionMarketAgent({
+// Workflow is triggered via POST /api/chat
+const input = {
   modelId: "openrouter/gpt-4o",
-  modelIdentifier: "openrouter/gpt-4o",
   walletAddress: "...",
-  walletPrivateKey: "...",
-  sessionId: "...",
-});
+  priceSwings: [...],
+  signal: { type: "price_swing", ticker: "BTC", ... }
+};
 
-const result = await agent.executeTradingLoop(context, priceSwings);
-// Returns: { reasoning, trades, steps }
+// Returns streaming response with x-workflow-run-id header
 ```
 
-**Agentic Loop Features:**
-- Uses `generateText` with `stopWhen: stepCountIs(5)` for multi-step reasoning
-- Tools bound to wallet context for each agent instance
-- Extracts trades from `placeOrder` tool call results
-- Saves reasoning and trades to chat messages
+### Durable Tools
 
-### Chat Agent
-
-Arena assistant for answering user questions about trading activity.
+Tools are defined with `"use step"` directive for durability:
 
 ```typescript
-import { chatAgent } from "@/lib/ai/agents";
+const tools = {
+  getMarkets: {
+    description: "Get list of prediction markets.",
+    inputSchema: z.object({ ... }),
+    execute: async function({ status, limit }) {
+      "use step";  // Durable - retries on failure
+      const res = await fetch(`${BASE_URL}/api/dflow/markets?...`);
+      return { success: true, markets: await res.json() };
+    },
+  },
 
-// Uses gpt-4o-mini for fast, cheap responses
-// Read-only assistant with no trading tools
+  cancelOrder: {
+    description: "Cancel a pending order.",
+    inputSchema: z.object({ ... }),
+    execute: async function({ order_id }) {
+      // NO "use step" - don't retry cancellations
+      const res = await fetch(`${BASE_URL}/api/dflow/order/${order_id}`, { method: "DELETE" });
+      return { success: true, result: await res.json() };
+    },
+  },
+};
+```
+
+### Available Tools
+
+| Tool | Durable | Purpose |
+|------|---------|---------|
+| `getMarkets` | Yes | List prediction markets |
+| `getMarketDetails` | Yes | Get specific market info |
+| `getLiveData` | Yes | Get live prices/orderbook |
+| `getBalance` | Yes | Check wallet balance |
+| `getPositions` | Yes | List current positions |
+| `getTradeHistory` | Yes | Recent trade history |
+| `placeOrder` | Yes | Execute buy/sell |
+| `getOrderStatus` | Yes | Check order status |
+| `cancelOrder` | No | Cancel pending order |
+
+## Unified API Endpoint
+
+### `/api/chat`
+
+Single endpoint handles all chat-related operations:
+
+| Method | Query Params | Purpose |
+|--------|--------------|---------|
+| `POST` | - | Trigger trading workflow (from signal) |
+| `GET` | `runId` | Resume workflow stream |
+| `GET` | `runId` + `startIndex` | Resume from specific position |
+| `GET` | `sessionId` | Fetch historical messages |
+
+### Request Examples
+
+```typescript
+// POST - Start trading workflow
+const response = await fetch('/api/chat', {
+  method: 'POST',
+  body: JSON.stringify({
+    modelId: 'openrouter/gpt-4o',
+    walletAddress: '...',
+    priceSwings: [...],
+    signal: { type: 'price_swing', ... }
+  })
+});
+// Response headers include x-workflow-run-id for resumability
+
+// GET - Resume stream
+const stream = await fetch(`/api/chat?runId=${runId}`);
+
+// GET - Fetch history
+const messages = await fetch(`/api/chat?sessionId=${sessionId}`);
+```
+
+## Frontend Integration
+
+### WorkflowChatTransport
+
+Use AI-SDK's `useChat` with `WorkflowChatTransport` for resumable streams:
+
+```typescript
+import { useChat } from "@ai-sdk/react";
+import { WorkflowChatTransport } from "@workflow/ai";
+
+function TradingFeed() {
+  const transport = new WorkflowChatTransport({
+    api: "/api/chat",
+    onChatSendMessage: (response) => {
+      const runId = response.headers.get("x-workflow-run-id");
+      // Store for resumption
+    },
+    prepareReconnectToStreamRequest: ({ chatId }) => ({
+      url: `/api/chat?runId=${chatId}`,
+    }),
+  });
+
+  const { messages } = useChat({ transport });
+  return <ModelChatFeed messages={messages} />;
+}
+```
+
+### Supabase Realtime
+
+Subscribe to `agent_decisions` for real-time updates:
+
+```typescript
+// hooks/chat/useRealtimeMessages.ts
+export function useRealtimeMessages({ sessionId, onMessage }) {
+  useEffect(() => {
+    const channel = supabase
+      .channel(`decisions:${sessionId}`)
+      .on("postgres_changes", {
+        event: "INSERT",
+        schema: "public",
+        table: "agent_decisions",
+      }, async (payload) => {
+        const message = await fetchAndTransformDecision(payload.new.id);
+        onMessage(message);
+      })
+      .subscribe();
+
+    return () => channel.unsubscribe();
+  }, [sessionId, onMessage]);
+}
 ```
 
 ## Prompts
@@ -127,84 +242,6 @@ const middleware = createTradingMiddleware({
   maxTradesPerRun: 3,
   modelId: "openrouter/gpt-4o",
 });
-```
-
-## Tools
-
-Tools are created via factory function with wallet context injection:
-
-```typescript
-import { createAgentTools } from "@/lib/ai/tools";
-
-const tools = createAgentTools(walletAddress, walletPrivateKey);
-// Returns wallet-bound tools for market discovery, portfolio, and trading
-```
-
-### Market Discovery (Read-only)
-| Tool | Description |
-|------|-------------|
-| `getMarkets` | List prediction markets with filtering |
-| `getMarketDetails` | Get detailed market information |
-| `getLiveData` | Get live prices and orderbook |
-
-### Portfolio Management (Wallet-bound)
-| Tool | Description |
-|------|-------------|
-| `getBalance` | Check wallet balance (USDC) |
-| `getPositions` | Get current open positions |
-| `getTradeHistory` | Review past trades |
-
-### Trade Execution (Wallet-bound with signing)
-| Tool | Description |
-|------|-------------|
-| `placeOrder` | Execute buy/sell orders |
-| `getOrderStatus` | Check order fill status |
-| `cancelOrder` | Cancel pending orders |
-
-## Workflows
-
-Durable workflows using the `workflow` package for reliable, observable execution:
-
-### Signal Listener Workflow (Recommended)
-
-Long-running workflow per model that listens for signals via hooks:
-
-```typescript
-import { signalListenerWorkflow } from "@/lib/ai/workflows";
-
-// One instance per model - uses deterministic token for signal routing
-// Hook token format: signals:${modelId}
-```
-
-**Architecture:**
-```
-PartyKit (dflow-relay.ts)
-         │
-         │ POST /api/signals/trigger
-         ▼
-┌─────────────────────────────────────┐
-│  resumeHook(`signals:${modelId}`,   │
-│              signal)                │
-└─────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────┐
-│  signalListenerWorkflow             │
-│  for await (signal of signalHook) { │
-│    processSignal(signal)            │
-│  }                                  │
-└─────────────────────────────────────┘
-```
-
-### Trading Agent Workflow (Legacy)
-
-Per-model trading execution with streaming support. Used by cron fallback.
-
-```typescript
-import { tradingAgentWorkflow } from "@/lib/ai/workflows";
-
-// Executes a single trading agent run
-// Streams reasoning to frontend in real-time
 ```
 
 ## Models
@@ -268,17 +305,43 @@ WEBHOOK_SECRET=your-webhook-secret
 NEXT_PUBLIC_PARTYKIT_HOST=your-project.partykit.dev
 ```
 
-## API Endpoints
+## Key Dependencies
 
-### Signal Triggers (PartyKit → Vercel)
-- `POST /api/signals/trigger` - Receive market signals from PartyKit, resumes model hooks
+```json
+{
+  "dependencies": {
+    "workflow": "^4.x",
+    "@workflow/ai": "^4.x",
+    "ai": "^6.x",
+    "zod": "^4.x"
+  }
+}
+```
 
-### Workflow Management
-- `POST /api/workflows/start` - Start signal listener workflows for all models
-- `GET /api/workflows/start` - Check status of all signal listener workflows
+## Data Flow
 
-### Cron (Health Check + Fallback)
-- `GET /api/cron/trading` - Health check for signal listeners, restarts if needed, fallback to direct execution
+```
+Signal (PartyKit) → POST /api/chat → tradingAgentWorkflow
+                                          │
+                    ┌─────────────────────┼─────────────────────┐
+                    ▼                     ▼                     ▼
+              DurableAgent.stream()  recordAgentDecision()  Supabase Realtime
+                    │                     │                     │
+                    ▼                     ▼                     ▼
+              UIMessageChunk         agent_decisions      useRealtimeMessages
+              (live stream)          (persistence)        (chat feed update)
+```
 
-### Streaming
-- `GET /api/chat/stream?runId=xxx` - Resumable stream for agent reasoning
+## Migration Notes
+
+### Deleted Files
+- `lib/ai/agents/chatAgent.ts` - Replaced by DurableAgent workflow
+- `lib/ai/agents/predictionMarketAgent.ts` - Merged into tradingAgent.ts
+- `app/api/chat/stream/route.ts` - Merged into /api/chat GET handler
+- `app/api/arena/chat-messages/route.ts` - Merged into /api/chat?sessionId=
+
+### Updated Files
+- `lib/ai/workflows/tradingAgent.ts` - Now uses DurableAgent with durable tools
+- `app/api/chat/route.ts` - Unified POST/GET handlers
+- `hooks/chat/useChat.ts` - Uses WorkflowChatTransport
+- `lib/ai/agents/index.ts` - Types only (implementations in workflows)

@@ -1,10 +1,11 @@
 "use workflow";
 
 import { getWritable, sleep } from "workflow";
-import { generateText, wrapLanguageModel, stepCountIs } from "ai";
+import { DurableAgent } from "@workflow/ai";
+import type { UIMessageChunk } from "ai";
+import { z } from "zod";
 import { getModel } from "@/lib/ai/models";
 import { getWalletPrivateKey } from "@/lib/ai/models/catalog";
-import { createAgentTools } from "@/lib/ai/tools";
 import { createTradingMiddleware } from "@/lib/ai/guardrails";
 import { TRADING_SYSTEM_PROMPT } from "@/lib/ai/prompts/trading/systemPrompt";
 import {
@@ -35,7 +36,7 @@ import type {
 // Types
 // ============================================================================
 
-interface TradingInput {
+export interface TradingInput {
   modelId: string;
   walletAddress: string;
   priceSwings: PriceSwing[];
@@ -58,28 +59,7 @@ interface MarketSignal {
   timestamp: number;
 }
 
-interface StreamChunk {
-  type: "reasoning" | "tool_call" | "trade" | "complete";
-  text?: string;
-  toolName?: string;
-  trade?: {
-    ticker: string;
-    side: string;
-    quantity: number;
-    price: number;
-  };
-}
-
-/**
- * Workflow writable stream interface.
- * At runtime, getWritable() returns this type, but TypeScript sees WritableStream.
- */
-interface WorkflowWritable<T> {
-  write(chunk: T): void;
-  close(): void;
-}
-
-interface TradingResult {
+export interface TradingResult {
   reasoning: string;
   trades: Trade[];
   steps: number;
@@ -97,20 +77,239 @@ interface TradingResult {
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
 
 // ============================================================================
+// Durable Tools Factory
+// ============================================================================
+
+/**
+ * Creates durable tools for the trading agent.
+ * Each tool marked with "use step" is retryable and persistent.
+ */
+function createDurableTools(walletAddress: string, privateKey?: string) {
+  return {
+    getMarkets: {
+      description:
+        "Get list of prediction markets. Use to discover trading opportunities.",
+      inputSchema: z.object({
+        status: z
+          .enum(["active", "inactive", "closed", "determined", "finalized"])
+          .optional()
+          .default("active")
+          .describe("Filter by market status"),
+        limit: z
+          .number()
+          .optional()
+          .default(20)
+          .describe("Max markets to return"),
+      }),
+      execute: async function ({ status, limit }: { status?: string; limit?: number }) {
+        "use step"; // Durable - retries on failure
+        const params = new URLSearchParams();
+        params.set("status", status || "active");
+        params.set("limit", String(limit || 20));
+        const res = await fetch(`${BASE_URL}/api/dflow/markets?${params}`);
+        if (!res.ok) {
+          return { success: false, error: `Failed: ${res.status}` };
+        }
+        const markets = await res.json();
+        return { success: true, markets, count: markets.length };
+      },
+    },
+
+    getMarketDetails: {
+      description: "Get detailed information about a specific prediction market.",
+      inputSchema: z.object({
+        ticker: z.string().describe("Market ticker to get details for"),
+      }),
+      execute: async function ({ ticker }: { ticker: string }) {
+        "use step"; // Durable - retries on failure
+        const res = await fetch(`${BASE_URL}/api/dflow/markets/${ticker}`);
+        if (!res.ok) {
+          return { success: false, error: `Failed: ${res.status}` };
+        }
+        return { success: true, market: await res.json() };
+      },
+    },
+
+    getLiveData: {
+      description: "Get live price and orderbook data for a market.",
+      inputSchema: z.object({
+        ticker: z.string().describe("Market ticker to get live data for"),
+      }),
+      execute: async function ({ ticker }: { ticker: string }) {
+        "use step"; // Durable - retries on failure
+        const res = await fetch(`${BASE_URL}/api/dflow/markets/${ticker}/live`);
+        if (!res.ok) {
+          return { success: false, error: `Failed: ${res.status}` };
+        }
+        return { success: true, liveData: await res.json() };
+      },
+    },
+
+    getBalance: {
+      description: "Check wallet balance (USDC).",
+      inputSchema: z.object({
+        currency: z
+          .enum(["USDC", "CASH"])
+          .optional()
+          .default("USDC")
+          .describe("Settlement currency to check"),
+      }),
+      execute: async function ({ currency }: { currency?: string }) {
+        "use step"; // Durable - retries on failure
+        const params = new URLSearchParams();
+        params.set("wallet", walletAddress);
+        params.set("currency", currency || "USDC");
+        const res = await fetch(`${BASE_URL}/api/solana/balance?${params}`);
+        if (!res.ok) {
+          return { success: false, error: `Failed: ${res.status}` };
+        }
+        const data = await res.json();
+        return {
+          success: true,
+          wallet: data.wallet,
+          balance: data.balance,
+          formatted: data.formatted,
+        };
+      },
+    },
+
+    getPositions: {
+      description: "Get current positions (outcome token holdings).",
+      inputSchema: z.object({}),
+      execute: async function () {
+        "use step"; // Durable - retries on failure
+        const res = await fetch(
+          `${BASE_URL}/api/dflow/positions?wallet=${walletAddress}`
+        );
+        if (!res.ok) {
+          return { success: true, wallet: walletAddress, positions: [], count: 0 };
+        }
+        const data = await res.json();
+        return {
+          success: true,
+          wallet: walletAddress,
+          positions: data.positions || [],
+          count: data.positions?.length || 0,
+        };
+      },
+    },
+
+    getTradeHistory: {
+      description: "Get recent trade history.",
+      inputSchema: z.object({
+        limit: z.number().optional().default(20).describe("Max trades to return"),
+      }),
+      execute: async function ({ limit }: { limit?: number }) {
+        "use step"; // Durable - retries on failure
+        const params = new URLSearchParams();
+        params.set("wallet", walletAddress);
+        params.set("limit", String(limit || 20));
+        const res = await fetch(`${BASE_URL}/api/dflow/trades?${params}`);
+        if (!res.ok) {
+          return { success: false, error: `Failed: ${res.status}` };
+        }
+        const data = await res.json();
+        return { success: true, trades: data.trades || [], count: data.trades?.length || 0 };
+      },
+    },
+
+    placeOrder: {
+      description:
+        "Place a buy or sell order on a prediction market.",
+      inputSchema: z.object({
+        market_ticker: z.string().describe("Market to trade"),
+        side: z.enum(["yes", "no"]).describe("Which outcome to trade"),
+        action: z.enum(["buy", "sell"]).describe("Buy or sell"),
+        quantity: z.number().positive().describe("Number of outcome tokens"),
+        limit_price: z
+          .number()
+          .min(0)
+          .max(1)
+          .optional()
+          .describe("Limit price (0-1)"),
+      }),
+      execute: async function (args: {
+        market_ticker: string;
+        side: "yes" | "no";
+        action: "buy" | "sell";
+        quantity: number;
+        limit_price?: number;
+      }) {
+        "use step"; // Durable - retries on failure
+        const res = await fetch(`${BASE_URL}/api/dflow/order`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            wallet: walletAddress,
+            wallet_private_key: privateKey,
+            market_ticker: args.market_ticker,
+            side: args.side,
+            action: args.action,
+            quantity: args.quantity,
+            limit_price: args.limit_price,
+            execution_mode: "sync",
+          }),
+        });
+        if (!res.ok) {
+          const errorText = await res.text();
+          return { success: false, error: `Failed: ${res.status} - ${errorText}` };
+        }
+        return { success: true, order: await res.json() };
+      },
+    },
+
+    getOrderStatus: {
+      description: "Check the status of an order.",
+      inputSchema: z.object({
+        order_id: z.string().describe("Order ID to check"),
+      }),
+      execute: async function ({ order_id }: { order_id: string }) {
+        "use step"; // Durable - retries on failure
+        const res = await fetch(`${BASE_URL}/api/dflow/order/${order_id}`);
+        if (!res.ok) {
+          return { success: false, error: `Failed: ${res.status}` };
+        }
+        return { success: true, order: await res.json() };
+      },
+    },
+
+    cancelOrder: {
+      description: "Cancel a pending order.",
+      inputSchema: z.object({
+        order_id: z.string().describe("Order ID to cancel"),
+      }),
+      execute: async function ({ order_id }: { order_id: string }) {
+        // NO "use step" - don't retry cancellations
+        const res = await fetch(`${BASE_URL}/api/dflow/order/${order_id}`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            wallet: walletAddress,
+            wallet_private_key: privateKey,
+          }),
+        });
+        if (!res.ok) {
+          return { success: false, error: `Failed: ${res.status}` };
+        }
+        return { success: true, result: await res.json() };
+      },
+    },
+  };
+}
+
+// ============================================================================
 // Trading Agent Workflow
 // ============================================================================
 
 /**
- * Executes a trading agent with streaming output.
- * Each agent run is a separate workflow instance.
+ * DurableAgent-based trading workflow.
+ * Streams UIMessageChunk for AI-SDK compatibility with useChat.
  */
 export async function tradingAgentWorkflow(
-  input: TradingInput,
+  input: TradingInput
 ): Promise<TradingResult> {
-  // Get writable stream for real-time updates to frontend
-  // Cast needed because workflow runtime types aren't visible to TypeScript
-  const stream =
-    getWritable<StreamChunk>() as unknown as WorkflowWritable<StreamChunk>;
+  // Get writable stream for real-time UI updates (AI-SDK format)
+  const writable = getWritable<UIMessageChunk>();
 
   console.log(`[tradingAgent:${input.modelId}] Starting trading workflow`);
 
@@ -128,24 +327,101 @@ export async function tradingAgentWorkflow(
     // Step 3: Fetch market context
     const context = await fetchContext(input.walletAddress);
 
-    // Step 4: Run agent with streaming
-    const result = await runAgent(input, context, session.id, agentSession, stream);
+    // Step 4: Build context prompt
+    const promptInput: ContextPromptInput = {
+      availableMarkets: context.availableMarkets.map((m) => ({
+        ticker: m.ticker,
+        title: m.title,
+        yesPrice: m.yesPrice,
+        noPrice: m.noPrice,
+        volume: m.volume,
+        status: m.status,
+      })),
+      portfolio: {
+        cashBalance: context.portfolio.cashBalance,
+        totalValue: context.portfolio.totalValue,
+        positions: context.portfolio.positions,
+      },
+      recentTrades: context.recentTrades.map((t) => ({
+        marketTicker: t.marketTicker,
+        side: t.side,
+        action: t.action,
+        quantity: t.quantity,
+        price: t.price,
+      })),
+      priceSwings: input.priceSwings,
+      signal: input.signal,
+    };
+    const contextPrompt = buildContextPrompt(promptInput);
 
-    // Step 5: Wait for any pending order fills
-    if (result.trades.length > 0) {
-      await waitForFills(result.trades);
+    // Step 5: Create durable tools with wallet context
+    const privateKey = getWalletPrivateKey(input.modelId);
+    const tools = createDurableTools(input.walletAddress, privateKey);
+
+    // Step 6: Create DurableAgent
+    // Note: Use 'as any' to handle AI SDK v6 model compatibility
+    const agent = new DurableAgent({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      model: () => Promise.resolve(getModel(input.modelId) as any),
+      system: TRADING_SYSTEM_PROMPT,
+      tools,
+      maxOutputTokens: 4096,
+    });
+
+    // Step 7: Run agent with streaming
+    const result = await agent.stream({
+      messages: [{ role: "user", content: contextPrompt }],
+      writable,
+      maxSteps: TRADING_CONFIG.maxStepsPerAgent,
+      onStepFinish: (step) => {
+        console.log(`[tradingAgent:${input.modelId}] Step finished:`, {
+          hasText: !!step.text,
+          toolCallCount: step.toolCalls?.length ?? 0,
+        });
+      },
+    });
+
+    // Step 8: Extract trades from results
+    const trades = extractTrades(result.steps);
+
+    // Step 9: Determine decision type
+    let decision: DecisionType = "hold";
+    const lastStep = result.steps[result.steps.length - 1];
+    const reasoning = lastStep?.text || "No reasoning provided.";
+
+    if (trades.length > 0) {
+      decision = trades[0].action === "buy" ? "buy" : "sell";
+    } else if (reasoning.toLowerCase().includes("skip")) {
+      decision = "skip";
     }
 
-    // Step 6: Record decision and trades to database
-    await recordDecisionAndTrades(agentSession, input, result);
+    // Step 10: Get market info
+    const marketTicker =
+      input.signal?.ticker || trades[0]?.marketTicker || input.priceSwings[0]?.ticker;
+    const marketTitle = trades[0]?.marketTitle;
+    const portfolioValue = context.portfolio.totalValue;
 
-    stream.write({ type: "complete" });
-    stream.close();
+    const tradingResult: TradingResult = {
+      reasoning,
+      trades,
+      steps: result.steps.length,
+      decision,
+      marketTicker,
+      marketTitle,
+      portfolioValue,
+    };
 
-    return result;
+    // Step 11: Wait for fills
+    if (trades.length > 0) {
+      await waitForFills(trades);
+    }
+
+    // Step 12: Record to database (triggers Supabase Realtime → chat feed)
+    await recordDecisionAndTrades(agentSession, input, tradingResult);
+
+    return tradingResult;
   } catch (error) {
     console.error(`[tradingAgent:${input.modelId}] Error:`, error);
-    stream.close();
     throw error;
   }
 }
@@ -166,12 +442,7 @@ async function getAgentSessionStep(
 ): Promise<AgentSession> {
   "use step";
   const modelName = getModelName(modelId) || modelId;
-  return await getOrCreateAgentSession(
-    sessionId,
-    modelId,
-    modelName,
-    walletAddress
-  );
+  return await getOrCreateAgentSession(sessionId, modelId, modelName, walletAddress);
 }
 
 interface MarketContext {
@@ -196,7 +467,7 @@ async function fetchContext(walletAddress: string): Promise<MarketContext> {
   let cashBalance = 0;
   try {
     const balanceRes = await fetch(
-      `${BASE_URL}/api/solana/balance?wallet=${walletAddress}`,
+      `${BASE_URL}/api/solana/balance?wallet=${walletAddress}`
     );
     if (balanceRes.ok) {
       const balanceData = await balanceRes.json();
@@ -229,7 +500,6 @@ async function fetchContext(walletAddress: string): Promise<MarketContext> {
     console.error("[tradingAgent] Failed to fetch markets:", error);
   }
 
-  // Positions would be fetched from on-chain data
   const positions: MarketContext["portfolio"]["positions"] = [];
 
   return {
@@ -240,125 +510,6 @@ async function fetchContext(walletAddress: string): Promise<MarketContext> {
       positions,
     },
     recentTrades: [],
-  };
-}
-
-async function runAgent(
-  input: TradingInput,
-  context: MarketContext,
-  sessionId: string,
-  agentSession: AgentSession,
-  stream: WorkflowWritable<StreamChunk>,
-): Promise<TradingResult> {
-  "use step";
-
-  // Create model with guardrails middleware
-  const baseModel = getModel(input.modelId);
-  const model = wrapLanguageModel({
-    model: baseModel,
-    middleware: createTradingMiddleware({
-      maxTokens: 4096,
-      maxToolCalls: 20,
-      maxTradesPerRun: 3,
-      modelId: input.modelId,
-    }),
-  });
-
-  // Create tools with wallet context
-  const privateKey = getWalletPrivateKey(input.modelId);
-  const tools = createAgentTools(input.walletAddress, privateKey);
-
-  // Build context prompt
-  const promptInput: ContextPromptInput = {
-    availableMarkets: context.availableMarkets.map((m) => ({
-      ticker: m.ticker,
-      title: m.title,
-      yesPrice: m.yesPrice,
-      noPrice: m.noPrice,
-      volume: m.volume,
-      status: m.status,
-    })),
-    portfolio: {
-      cashBalance: context.portfolio.cashBalance,
-      totalValue: context.portfolio.totalValue,
-      positions: context.portfolio.positions,
-    },
-    recentTrades: context.recentTrades.map((t) => ({
-      marketTicker: t.marketTicker,
-      side: t.side,
-      action: t.action,
-      quantity: t.quantity,
-      price: t.price,
-    })),
-    priceSwings: input.priceSwings,
-    signal: input.signal, // Pass full signal for richer context
-  };
-  const contextPrompt = buildContextPrompt(promptInput);
-
-  // Execute agentic loop
-  const result = await generateText({
-    model,
-    system: TRADING_SYSTEM_PROMPT,
-    prompt: contextPrompt,
-    tools,
-    stopWhen: stepCountIs(TRADING_CONFIG.maxStepsPerAgent),
-    onStepFinish: (step) => {
-      // Stream reasoning to frontend
-      if (step.text) {
-        stream.write({ type: "reasoning", text: step.text });
-      }
-
-      // Stream tool calls
-      if (step.toolCalls) {
-        for (const call of step.toolCalls) {
-          stream.write({ type: "tool_call", toolName: call.toolName });
-
-          // If it's a trade, stream the trade details
-          if (call.toolName === "placeOrder") {
-            const args =
-              (call as { input?: Record<string, unknown> }).input || {};
-            stream.write({
-              type: "trade",
-              trade: {
-                ticker: args.market_ticker as string,
-                side: args.side as string,
-                quantity: args.quantity as number,
-                price: (args.limit_price as number) || 0,
-              },
-            });
-          }
-        }
-      }
-    },
-  });
-
-  // Extract trades from results
-  const trades = extractTrades(result.steps);
-
-  // Determine decision type based on trades
-  let decision: DecisionType = "hold";
-  if (trades.length > 0) {
-    decision = trades[0].action === "buy" ? "buy" : "sell";
-  } else if (result.text?.toLowerCase().includes("skip")) {
-    decision = "skip";
-  }
-
-  // Get the primary market from signal or first trade
-  const marketTicker =
-    input.signal?.ticker || trades[0]?.marketTicker || input.priceSwings[0]?.ticker;
-  const marketTitle = trades[0]?.marketTitle;
-
-  // Calculate portfolio value (use current value from context)
-  const portfolioValue = context.portfolio.totalValue;
-
-  return {
-    reasoning: result.text || "No reasoning provided.",
-    trades,
-    steps: result.steps.length,
-    decision,
-    marketTicker,
-    marketTitle,
-    portfolioValue,
   };
 }
 
@@ -383,7 +534,7 @@ function extractTrades(steps: unknown[]): Trade[] {
     for (const call of typedStep.toolCalls) {
       if (call.toolName === "placeOrder") {
         const result = typedStep.toolResults.find(
-          (r) => r.toolCallId === call.toolCallId,
+          (r) => r.toolCallId === call.toolCallId
         );
 
         if (result?.output?.success) {
@@ -436,10 +587,6 @@ async function waitForFills(trades: Trade[]): Promise<void> {
   }
 }
 
-/**
- * Record the agent's decision and any trades to the database.
- * This replaces the old broadcastSummary function.
- */
 async function recordDecisionAndTrades(
   agentSession: AgentSession,
   input: TradingInput,
@@ -486,7 +633,7 @@ async function recordDecisionAndTrades(
       quantity: trade.quantity,
       price: trade.price,
       notional: trade.notional,
-      txSignature: trade.id, // Use trade ID as tx signature for now
+      txSignature: trade.id,
       pnl: trade.pnl,
     });
   }
