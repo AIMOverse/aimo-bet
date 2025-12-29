@@ -1,68 +1,128 @@
 import type {
-  PortfolioState,
-  PredictionMarket,
-  Trade,
-  Broadcast,
   PositionSide,
+  TradeAction,
+  DecisionType,
+  TriggerType,
 } from "@/lib/supabase/types";
 
 // =============================================================================
-// Agent Configuration Types
+// Agent Configuration
 // =============================================================================
 
 /**
- * Configuration for a prediction market trading agent
+ * Configuration for creating a PredictionMarketAgent instance
  */
-export interface PredictionMarketAgentConfig {
+export interface AgentConfig {
   modelId: string;
-  modelIdentifier: string;
-  walletAddress: string; // Agent's trading wallet (public address)
-  walletPrivateKey?: string; // Private key for signing transactions (server-side only)
-  sessionId: string;
+  walletAddress: string;
+  privateKey?: string;
+  maxSteps?: number;
 }
 
 // =============================================================================
-// Agent Context Types
+// Market Context (Input to Agent)
 // =============================================================================
 
 /**
- * Context provided to agents for decision making
+ * A prediction market available for trading
+ */
+export interface MarketInfo {
+  ticker: string;
+  title: string;
+  yesPrice: number;
+  noPrice: number;
+  volume: number;
+  status: string;
+}
+
+/**
+ * A position held by the agent
+ */
+export interface PositionInfo {
+  marketTicker: string;
+  marketTitle: string;
+  side: PositionSide;
+  quantity: number;
+}
+
+/**
+ * Portfolio state for the agent
+ */
+export interface PortfolioInfo {
+  cashBalance: number;
+  totalValue: number;
+  positions: PositionInfo[];
+}
+
+/**
+ * A recent trade for context
+ */
+export interface TradeInfo {
+  marketTicker: string;
+  side: PositionSide;
+  action: TradeAction;
+  quantity: number;
+  price: number;
+}
+
+/**
+ * Price swing detected in a market
+ */
+export interface PriceSwing {
+  ticker: string;
+  previousPrice: number;
+  currentPrice: number;
+  changePercent: number;
+}
+
+/**
+ * Market signal from PartyKit relay
+ */
+export interface MarketSignal {
+  type: TriggerType;
+  ticker: string;
+  data: Record<string, unknown>;
+  timestamp: number;
+}
+
+/**
+ * Full context provided to the agent for decision making
  */
 export interface MarketContext {
-  availableMarkets: PredictionMarket[];
-  portfolio: PortfolioState;
-  recentTrades: Trade[];
-  recentBroadcasts: Broadcast[];
+  availableMarkets: MarketInfo[];
+  portfolio: PortfolioInfo;
+  recentTrades: TradeInfo[];
+  priceSwings: PriceSwing[];
 }
 
 // =============================================================================
-// Agent Decision Types
+// Agent Result (Output from Agent)
 // =============================================================================
 
-export type DecisionAction = "buy" | "sell" | "hold";
+/**
+ * A trade executed by the agent
+ */
+export interface ExecutedTrade {
+  id: string;
+  marketTicker: string;
+  marketTitle?: string;
+  side: PositionSide;
+  action: TradeAction;
+  quantity: number;
+  price: number;
+  notional: number;
+}
 
 /**
- * Trading decision made by an agent
+ * Result returned from PredictionMarketAgent.run()
  */
-export interface TradingDecision {
-  action: DecisionAction;
-  marketTicker?: string;
-  side?: PositionSide;
-  quantity?: number;
-  limitPrice?: number;
+export interface TradingResult {
   reasoning: string;
-  confidence: number;
-}
-
-// =============================================================================
-// Agent Execution Types
-// =============================================================================
-
-/**
- * Result of an agent execution run
- */
-export interface AgentExecutionResult {
-  decision: TradingDecision;
-  broadcast: string;
-  trade?: Trade;
+  trades: ExecutedTrade[];
+  decision: DecisionType;
+  steps: number;
+  portfolioValue: number;
+  confidence?: number;
+  marketTicker?: string;
+  marketTitle?: string;
 }

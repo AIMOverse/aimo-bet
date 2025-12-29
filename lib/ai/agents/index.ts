@@ -1,11 +1,24 @@
-// Agent Types
-// Note: Agent implementations have been moved to workflows/tradingAgent.ts
-// which uses DurableAgent for durable, resumable execution.
+// =============================================================================
+// AI Agents
+// =============================================================================
 
+// PredictionMarketAgent - AI-SDK based trading agent
+// Uses generateText (NOT durable) for LLM reasoning and tool execution
+export { PredictionMarketAgent } from "./predictionMarketAgent";
+
+// Types
 export type {
-  PredictionMarketAgentConfig,
+  // Configuration
+  AgentConfig,
+  // Market context (input)
+  MarketInfo,
+  PositionInfo,
+  PortfolioInfo,
+  TradeInfo,
+  PriceSwing,
+  MarketSignal,
   MarketContext,
-  DecisionAction,
-  TradingDecision,
-  AgentExecutionResult,
+  // Trading result (output)
+  ExecutedTrade,
+  TradingResult,
 } from "./types";

@@ -2,10 +2,24 @@
  * Workflows Module
  *
  * Durable workflow definitions for autonomous trading operations.
- * Uses useWorkflow for reliable, observable execution.
+ *
+ * Architecture:
+ * - signalListenerWorkflow: Long-running, listens for market signals
+ * - tradingAgentWorkflow: Per-signal execution, runs PredictionMarketAgent
+ *
+ * Durability:
+ * - Workflow steps are durable (crash recovery, state persistence)
+ * - PredictionMarketAgent inside runAgentStep is NOT durable
+ * - Tools (especially placeOrder) fire once without retry
  */
 
-export { tradingAgentWorkflow } from "./tradingAgent";
+export {
+  tradingAgentWorkflow,
+  type TradingInput,
+  type TradingResult,
+  type PriceSwing,
+} from "./tradingAgent";
+
 export {
   signalListenerWorkflow,
   type SignalListenerInput,

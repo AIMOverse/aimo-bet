@@ -9,7 +9,6 @@ AI prediction market trading competition on dflow. LLMs autonomously trade on pr
 │                              Frontend                                        │
 │       / (charts)  |  /chat (feed)  |  /positions  |  /trades                │
 │                                                                              │
-│  useChat + WorkflowChatTransport  ←──  Resumable AI-SDK streams             │
 │  useRealtimeMessages              ←──  Supabase Realtime (agent_decisions)  │
 │  usePerformanceChart              ←──  Supabase Realtime (agent_decisions)  │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -18,22 +17,32 @@ AI prediction market trading competition on dflow. LLMs autonomously trade on pr
                     ▼                               ▼
           ┌─────────────────┐             ┌─────────────────┐
           │   /api/chat     │             │  /api/dflow/*   │
-          │   (Unified)     │             │  (On-chain)     │
-          │                 │             │                 │
+          │                 │             │  (On-chain)     │
           │ POST: trigger   │             │                 │
-          │ GET:  resume    │             │                 │
-          │       history   │             │                 │
+          │ GET:  history   │             │                 │
           └────────┬────────┘             └─────────────────┘
-                   │                                │
-                   ▼                                ▼
+                   │
+                   ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                      Workflow DevKit                             │
+│                    Durable Workflow Layer                        │
+│                   (workflow + "use step")                        │
 │                                                                  │
-│  tradingAgentWorkflow (DurableAgent)                            │
-│  ├── Streams UIMessageChunk (AI-SDK compatible)                 │
-│  ├── Tools execute as durable steps ("use step")                │
-│  ├── Resumable via WorkflowChatTransport                        │
-│  └── Observable in workflow dashboard                           │
+│  signalListenerWorkflow (long-running, per model)               │
+│  └── tradingAgentWorkflow                                        │
+│      ├── getSessionStep ("use step")                            │
+│      ├── getAgentSessionStep ("use step")                       │
+│      ├── fetchContextStep ("use step")                          │
+│      │                                                           │
+│      ├── runAgentStep ("use step")                              │
+│      │   └── PredictionMarketAgent.run()                        │
+│      │       ├── generateText (AI-SDK, NOT durable)             │
+│      │       └── Tools (fire-once, NO retry):                   │
+│      │           ├── getMarkets, getBalance, getLiveData        │
+│      │           ├── placeOrder ⚠️ (no retry - duplicates)      │
+│      │           └── cancelOrder (no retry)                     │
+│      │                                                           │
+│      ├── waitForFillsStep ("use step")                          │
+│      └── recordResultsStep ("use step")                         │
 └─────────────────────────────────────────────────────────────────┘
                    │
                    ▼
@@ -58,7 +67,7 @@ AI prediction market trading competition on dflow. LLMs autonomously trade on pr
 │                      PartyKit Relay                              │
 │                   party/dflow-relay.ts                           │
 │                                                                  │
-│  dflow WebSocket ──► Signal Detection ──► /api/chat (POST)      │
+│  dflow WebSocket ──► Signal Detection ──► resumeHook()          │
 │                      - Price swing                               │
 │                      - Volume spike                              │
 │                      - Orderbook imbalance                       │
@@ -69,244 +78,593 @@ AI prediction market trading competition on dflow. LLMs autonomously trade on pr
 
 ## Core Concepts
 
-### DurableAgent Workflow
+### Hybrid Architecture: Durable Workflows + Regular AI-SDK Agent
 
-The trading system uses a single `DurableAgent` workflow that:
+The system uses a **two-layer architecture** that separates concerns:
 
-1. **Streams AI-SDK format** - `UIMessageChunk` compatible with `useChat`
-2. **Durable tool execution** - Tools marked with `"use step"` are retryable
-3. **Resumable streams** - Clients can reconnect via `WorkflowChatTransport`
-4. **Records decisions** - Writes to `agent_decisions` table (triggers Realtime)
+| Layer | Technology | Purpose | Retry Behavior |
+|-------|------------|---------|----------------|
+| **Durable Workflow** | `workflow` + `"use step"` | Orchestration, crash recovery, long-running processes | Automatic retry |
+| **AI Agent** | AI-SDK `generateText` | LLM reasoning, tool execution, trading decisions | No retry (fire-once) |
 
-### Unified `/api/chat` Endpoint
+### Why This Split?
 
-Single endpoint handles all chat-related operations:
+**Durable steps** are for operations that MUST complete:
+- Session management (crash → resume with same session)
+- Database writes (must persist decisions/trades)
+- Order fill polling (long-running, minutes)
 
-| Method | Query Params | Purpose |
-|--------|--------------|---------|
-| `POST` | - | Trigger trading workflow (from signal) |
-| `GET` | `runId` | Resume workflow stream |
-| `GET` | `runId` + `startIndex` | Resume from specific position |
-| `GET` | `sessionId` | Fetch historical messages |
+**Regular agent** is for LLM reasoning + trade execution:
+- Short-lived (seconds)
+- Retrying `placeOrder` = duplicate orders = catastrophic
+- If agent fails, just restart the whole step
 
-### Data Flow
+### Durability Decision Matrix
 
-```
-Signal (PartyKit) → POST /api/chat → tradingAgentWorkflow
-                                          │
-                    ┌─────────────────────┼─────────────────────┐
-                    ▼                     ▼                     ▼
-              DurableAgent.stream()  recordAgentDecision()  Supabase Realtime
-                    │                     │                     │
-                    ▼                     ▼                     ▼
-              UIMessageChunk         agent_decisions      useRealtimeMessages
-              (live stream)          (persistence)        (chat feed update)
-```
+| Operation | Durable? | Reason |
+|-----------|----------|--------|
+| `getSessionStep` | ✅ Yes | Session state is critical |
+| `getAgentSessionStep` | ✅ Yes | Must have agent context |
+| `fetchContextStep` | ✅ Yes | Safe to retry (read-only) |
+| `runAgentStep` | ✅ Yes | **Wrapper is durable, agent inside is NOT** |
+| `waitForFillsStep` | ✅ Yes | Long-running polling (minutes) |
+| `recordResultsStep` | ✅ Yes | DB writes must complete |
+| LLM reasoning | ❌ No | Just restart if fails |
+| `placeOrder` tool | ❌ No | **Retrying = duplicate orders** |
+| `cancelOrder` tool | ❌ No | Non-idempotent |
 
 ---
 
 ## Database Schema
 
-### Design Principles
-
-1. **On-chain as source of truth** - Blockchain authoritative for balances/positions
-2. **Mirror to DB for analytics** - All decisions and trades persisted for history
-3. **Decision-first architecture** - Every trigger creates a decision; trades are outcomes
-4. **No separate history table** - Chart data from `agent_decisions.portfolio_value_after`
-5. **Decisions ARE chat messages** - `agent_decisions` feeds the chat UI via transforms
-
-### Entity Relationship Diagram
+### Entity Relationship
 
 ```
-┌─────────────────────┐
-│  trading_sessions   │
-│  (arena/competition)│
-├─────────────────────┤
-│  id (PK)            │
-│  name               │
-│  status             │
-│  starting_capital   │
-│  started_at         │
-│  ended_at           │
-│  created_at         │
-└─────────┬───────────┘
-          │ 1:N
-          ▼
-┌─────────────────────────┐
-│     agent_sessions      │
-│    (model in arena)     │
-├─────────────────────────┤
-│  id (PK)                │
-│  session_id (FK)        │
-│  model_id               │
-│  model_name             │
-│  wallet_address         │
-│  starting_capital       │
-│  current_value          │  ◄── Leaderboard
-│  total_pnl              │
-│  status                 │
-│  created_at             │
-│  updated_at             │
-└─────────┬───────────────┘
-          │ 1:N
-          ▼
-┌─────────────────────────┐
-│    agent_decisions      │
-│    (every trigger)      │
-├─────────────────────────┤
-│  id (PK)                │
-│  agent_session_id (FK)  │
-│  trigger_type           │
-│  trigger_details        │
-│  market_ticker          │
-│  market_title           │
-│  decision               │
-│  reasoning              │  ◄── Chat feed content
-│  confidence             │
-│  market_context         │
-│  portfolio_value_after  │  ◄── Chart time-series
-│  created_at             │
-└─────────┬───────────────┘
-          │ 1:N
-          ▼
-┌─────────────────────────┐
-│      agent_trades       │
-│    (executed trades)    │
-├─────────────────────────┤
-│  id (PK)                │
-│  decision_id (FK)       │
-│  agent_session_id (FK)  │
-│  market_ticker          │
-│  side (yes/no)          │
-│  action (buy/sell)      │
-│  quantity               │
-│  price                  │
-│  notional               │
-│  tx_signature           │
-│  pnl                    │
-│  created_at             │
-└─────────────────────────┘
+trading_sessions (arena/competition)
+    │ 1:N
+    ▼
+agent_sessions (model participating in arena)
+    │ 1:N
+    ▼
+agent_decisions (every trigger → reasoning + decision)
+    │ 1:N
+    ▼
+agent_trades (executed trades from decision)
 ```
 
-### Tables Summary
+### Tables
 
-| Table | Purpose | Realtime |
-|-------|---------|----------|
+| Table | Purpose | Realtime? |
+|-------|---------|-----------|
 | `trading_sessions` | Arena/competition container | No |
 | `agent_sessions` | Agent state, leaderboard ranking | UPDATE |
-| `agent_decisions` | Triggers + reasoning (chat + chart source) | INSERT |
+| `agent_decisions` | Triggers + reasoning (→ chat feed, charts) | INSERT |
 | `agent_trades` | Executed trades linked to decisions | INSERT |
 
 ---
 
-## Trading Agent Workflow
+## File Structure
+
+```
+lib/ai/
+├── agents/
+│   ├── index.ts                   # Exports: PredictionMarketAgent
+│   ├── types.ts                   # AgentConfig, MarketContext, TradingResult
+│   └── predictionMarketAgent.ts   # AI-SDK agent class (generateText)
+├── workflows/
+│   ├── index.ts                   # Exports: tradingAgentWorkflow, signalListenerWorkflow
+│   ├── signalListener.ts          # Long-running signal listener (durable)
+│   └── tradingAgent.ts            # Trading orchestrator (durable steps)
+├── tools/
+│   ├── index.ts                   # createAgentTools(wallet, privateKey)
+│   ├── market-discovery/          # getMarkets, getMarketDetails, getLiveData
+│   ├── trade-execution/           # placeOrder, getOrderStatus, cancelOrder
+│   └── portfolio-management/      # getBalance, getPositions, getTradeHistory
+├── prompts/
+│   └── trading/
+│       ├── systemPrompt.ts        # TRADING_SYSTEM_PROMPT
+│       └── contextBuilder.ts      # buildContextPrompt()
+├── models/
+│   ├── index.ts                   # getModel()
+│   └── catalog.ts                 # Model configs, wallet mappings
+└── guardrails/
+    ├── index.ts                   # Exports
+    ├── riskLimits.ts              # Pre-trade validation
+    └── middleware.ts              # LLM-level limits
+
+lib/supabase/
+├── agents.ts                      # recordAgentDecision, recordAgentTrade
+├── transforms.ts                  # decisionToChatMessage
+├── types.ts                       # AgentDecision, AgentTrade, etc.
+└── db.ts                          # getGlobalSession, etc.
+
+app/api/
+├── chat/route.ts                  # POST: trigger workflow, GET: history
+└── dflow/                         # On-chain operations
+    ├── markets/
+    ├── order/
+    └── positions/
+
+party/
+└── dflow-relay.ts                 # PartyKit → resumeHook(signal)
+```
+
+---
+
+## PredictionMarketAgent
+
+### File: `lib/ai/agents/predictionMarketAgent.ts`
+
+Encapsulates LLM reasoning and tool execution. Uses AI-SDK `generateText` - **NOT durable**, tools fire once without retry.
+
+```typescript
+import { generateText } from "ai";
+import { getModel } from "@/lib/ai/models";
+import { createAgentTools } from "@/lib/ai/tools";
+import { TRADING_SYSTEM_PROMPT } from "@/lib/ai/prompts/trading/systemPrompt";
+import { buildContextPrompt } from "@/lib/ai/prompts/trading/contextBuilder";
+import type { AgentConfig, MarketContext, TradingResult, MarketSignal } from "./types";
+
+export class PredictionMarketAgent {
+  private config: AgentConfig;
+  private tools: ReturnType<typeof createAgentTools>;
+
+  constructor(config: AgentConfig) {
+    this.config = config;
+    this.tools = createAgentTools(config.walletAddress, config.privateKey);
+  }
+
+  /**
+   * Run the agent to analyze market and potentially execute trades.
+   * Tools execute once without retry - placeOrder is fire-once.
+   */
+  async run(context: MarketContext, signal?: MarketSignal): Promise<TradingResult> {
+    const model = getModel(this.config.modelId);
+    const prompt = buildContextPrompt({
+      availableMarkets: context.availableMarkets,
+      portfolio: context.portfolio,
+      recentTrades: context.recentTrades,
+      priceSwings: context.priceSwings,
+      signal,
+    });
+
+    const result = await generateText({
+      model,
+      system: TRADING_SYSTEM_PROMPT,
+      prompt,
+      tools: this.tools,
+      maxSteps: this.config.maxSteps ?? 10,
+    });
+
+    const trades = this.extractTrades(result.steps);
+    const decision = this.determineDecision(result, trades);
+
+    return {
+      reasoning: result.text || "No reasoning provided.",
+      trades,
+      decision,
+      steps: result.steps.length,
+      portfolioValue: context.portfolio.totalValue,
+    };
+  }
+
+  private extractTrades(steps: GenerateTextStep[]): Trade[] {
+    const trades: Trade[] = [];
+
+    for (const step of steps) {
+      if (!step.toolCalls || !step.toolResults) continue;
+
+      for (const call of step.toolCalls) {
+        if (call.toolName === "placeOrder") {
+          const result = step.toolResults.find(r => r.toolCallId === call.toolCallId);
+          if (result?.output?.success) {
+            trades.push({
+              id: result.output.order?.id || nanoid(),
+              marketTicker: call.args.market_ticker,
+              side: call.args.side,
+              action: call.args.action,
+              quantity: call.args.quantity,
+              price: result.output.order?.price || call.args.limit_price || 0,
+              // ...
+            });
+          }
+        }
+      }
+    }
+
+    return trades;
+  }
+
+  private determineDecision(result: GenerateTextResult, trades: Trade[]): DecisionType {
+    if (trades.length > 0) {
+      return trades[0].action === "buy" ? "buy" : "sell";
+    }
+    if (result.text?.toLowerCase().includes("skip")) {
+      return "skip";
+    }
+    return "hold";
+  }
+}
+```
+
+### Types
+
+```typescript
+// lib/ai/agents/types.ts
+
+export interface AgentConfig {
+  modelId: string;
+  walletAddress: string;
+  privateKey?: string;
+  maxSteps?: number;
+}
+
+export interface MarketContext {
+  availableMarkets: PredictionMarket[];
+  portfolio: {
+    cashBalance: number;
+    totalValue: number;
+    positions: Position[];
+  };
+  recentTrades: Trade[];
+  priceSwings: PriceSwing[];
+}
+
+export interface TradingResult {
+  reasoning: string;
+  trades: Trade[];
+  decision: DecisionType;
+  steps: number;
+  portfolioValue: number;
+  confidence?: number;
+  marketTicker?: string;
+}
+
+export type DecisionType = "buy" | "sell" | "hold" | "skip";
+```
+
+---
+
+## Trading Workflow (Durable)
 
 ### File: `lib/ai/workflows/tradingAgent.ts`
 
-Single DurableAgent workflow that replaces:
-- `lib/ai/agents/chatAgent.ts` (deleted)
-- `lib/ai/agents/predictionMarketAgent.ts` (deleted)
+Orchestrates the trading process with durable steps for crash recovery.
 
 ```typescript
 "use workflow";
 
-import { DurableAgent } from "@workflow/ai";
-import { getWritable, sleep } from "workflow";
-import type { UIMessageChunk } from "ai";
+import { sleep } from "workflow";
+import { PredictionMarketAgent } from "@/lib/ai/agents";
+import { getGlobalSession } from "@/lib/supabase/db";
+import {
+  getOrCreateAgentSession,
+  recordAgentDecision,
+  recordAgentTrade,
+  updateAgentSessionValue,
+} from "@/lib/supabase/agents";
+import { getModelName, getWalletPrivateKey } from "@/lib/ai/models/catalog";
+
+export interface TradingInput {
+  modelId: string;
+  walletAddress: string;
+  priceSwings: PriceSwing[];
+  signal?: MarketSignal;
+}
 
 export async function tradingAgentWorkflow(input: TradingInput): Promise<TradingResult> {
-  const writable = getWritable<UIMessageChunk>();
+  // Step 1: Get session (durable)
+  const session = await getSessionStep();
 
-  // Step 1: Get/create sessions
-  const session = await getSession();
-  const agentSession = await getAgentSessionStep(...);
+  // Step 2: Get/create agent session (durable)
+  const agentSession = await getAgentSessionStep(
+    session.id,
+    input.modelId,
+    input.walletAddress
+  );
 
-  // Step 2: Fetch market context
-  const context = await fetchContext(input.walletAddress);
+  // Step 3: Fetch market context (durable)
+  const context = await fetchContextStep(input.walletAddress, input.priceSwings);
 
-  // Step 3: Build context prompt
-  const contextPrompt = buildContextPrompt({ ... });
+  // Step 4: Run AI agent (durable wrapper, agent inside is NOT)
+  const result = await runAgentStep(input, context);
 
-  // Step 4: Create and run DurableAgent
-  const agent = new DurableAgent({
-    model: getModel(input.modelId),
-    system: TRADING_SYSTEM_PROMPT,
-    tools: createDurableTools(input.walletAddress, privateKey),
-  });
-
-  const result = await agent.stream({
-    messages: [{ role: "user", content: contextPrompt }],
-    writable,
-    maxSteps: TRADING_CONFIG.maxStepsPerAgent,
-  });
-
-  // Step 5: Extract and record results
-  const tradingResult = extractResultFromAgent(result, input, context);
-  
-  if (tradingResult.trades.length > 0) {
-    await waitForFills(tradingResult.trades);
+  // Step 5: Wait for order fills (durable, long-running)
+  if (result.trades.length > 0) {
+    await waitForFillsStep(result.trades);
   }
 
-  // Step 6: Record to database (triggers Supabase Realtime → chat feed)
-  await recordDecisionAndTrades(agentSession, input, tradingResult);
+  // Step 6: Record to database (durable)
+  await recordResultsStep(agentSession, input, result);
 
-  return tradingResult;
+  return result;
+}
+
+// ============================================================================
+// Durable Steps
+// ============================================================================
+
+async function getSessionStep() {
+  "use step";
+  return await getGlobalSession();
+}
+
+async function getAgentSessionStep(
+  sessionId: string,
+  modelId: string,
+  walletAddress: string
+) {
+  "use step";
+  const modelName = getModelName(modelId) || modelId;
+  return await getOrCreateAgentSession(sessionId, modelId, modelName, walletAddress);
+}
+
+async function fetchContextStep(
+  walletAddress: string,
+  priceSwings: PriceSwing[]
+): Promise<MarketContext> {
+  "use step";
+
+  const [balance, markets, positions] = await Promise.all([
+    fetchBalance(walletAddress),
+    fetchMarkets(),
+    fetchPositions(walletAddress),
+  ]);
+
+  return {
+    availableMarkets: markets,
+    portfolio: {
+      cashBalance: balance,
+      totalValue: balance, // + positions value
+      positions,
+    },
+    recentTrades: [],
+    priceSwings,
+  };
+}
+
+async function runAgentStep(
+  input: TradingInput,
+  context: MarketContext
+): Promise<TradingResult> {
+  "use step";
+  // ⚠️ This step is durable, but PredictionMarketAgent inside is NOT
+  // If agent fails mid-execution, this entire step restarts (not individual tools)
+
+  const agent = new PredictionMarketAgent({
+    modelId: input.modelId,
+    walletAddress: input.walletAddress,
+    privateKey: getWalletPrivateKey(input.modelId),
+    maxSteps: 10,
+  });
+
+  return await agent.run(context, input.signal);
+}
+
+async function waitForFillsStep(trades: Trade[]): Promise<void> {
+  "use step";
+
+  for (const trade of trades) {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const status = await fetchOrderStatus(trade.id);
+      if (status === "filled" || status === "cancelled") break;
+
+      // Exponential backoff: 5s, 10s, 20s, 40s, 60s (capped)
+      const delay = Math.min(5 * Math.pow(2, attempt), 60);
+      await sleep(`${delay}s`);
+    }
+  }
+}
+
+async function recordResultsStep(
+  agentSession: AgentSession,
+  input: TradingInput,
+  result: TradingResult
+): Promise<void> {
+  "use step";
+
+  // Record decision
+  const decision = await recordAgentDecision({
+    agentSessionId: agentSession.id,
+    triggerType: input.signal?.type || "price_swing",
+    triggerDetails: input.signal?.data || { priceSwings: input.priceSwings },
+    marketTicker: result.marketTicker,
+    decision: result.decision,
+    reasoning: result.reasoning,
+    confidence: result.confidence,
+    portfolioValueAfter: result.portfolioValue,
+  });
+
+  // Record trades
+  for (const trade of result.trades) {
+    await recordAgentTrade({
+      decisionId: decision.id,
+      agentSessionId: agentSession.id,
+      marketTicker: trade.marketTicker,
+      side: trade.side,
+      action: trade.action,
+      quantity: trade.quantity,
+      price: trade.price,
+      notional: trade.notional,
+      txSignature: trade.id,
+    });
+  }
+
+  // Update leaderboard
+  await updateAgentSessionValue(
+    agentSession.id,
+    result.portfolioValue,
+    result.portfolioValue - agentSession.startingCapital
+  );
 }
 ```
 
-### Tool Definitions
+---
 
-Tools are defined inline with `"use step"` for durability:
+## Signal Listener (Durable)
+
+### File: `lib/ai/workflows/signalListener.ts`
+
+Long-running workflow that listens for market signals and dispatches trading agents.
 
 ```typescript
-function createDurableTools(walletAddress: string, privateKey?: string) {
+"use workflow";
+
+import { createHook, sleep } from "workflow";
+import { tradingAgentWorkflow } from "./tradingAgent";
+
+export interface SignalListenerInput {
+  modelId: string;
+  walletAddress: string;
+}
+
+export interface MarketSignal {
+  type: "price_swing" | "volume_spike" | "orderbook_imbalance";
+  ticker: string;
+  data: Record<string, unknown>;
+  timestamp: number;
+}
+
+export async function signalListenerWorkflow(input: SignalListenerInput): Promise<void> {
+  const { modelId, walletAddress } = input;
+
+  // Hook with deterministic token - PartyKit calls resumeHook(`signals:${modelId}`, signal)
+  const signalHook = createHook<MarketSignal>({
+    token: `signals:${modelId}`,
+  });
+
+  // Long-running loop
+  for await (const signal of signalHook) {
+    console.log(`[signalListener:${modelId}] Received: ${signal.type} for ${signal.ticker}`);
+
+    try {
+      const priceSwing = signalToPriceSwing(signal);
+
+      const result = await tradingAgentWorkflow({
+        modelId,
+        walletAddress,
+        priceSwings: [priceSwing],
+        signal,
+      });
+
+      console.log(`[signalListener:${modelId}] Result: ${result.decision}, ${result.trades.length} trades`);
+    } catch (error) {
+      console.error(`[signalListener:${modelId}] Error:`, error);
+      // Continue listening even if one signal fails
+    }
+
+    await sleep("1s");
+  }
+}
+
+function signalToPriceSwing(signal: MarketSignal): PriceSwing {
+  if (signal.type === "price_swing") {
+    return {
+      ticker: signal.ticker,
+      previousPrice: signal.data.previousPrice as number,
+      currentPrice: signal.data.currentPrice as number,
+      changePercent: signal.data.changePercent as number,
+    };
+  }
+  // Volume spike / orderbook imbalance - agent will fetch current prices
   return {
-    getMarkets: {
-      description: "Get list of prediction markets.",
-      inputSchema: z.object({ ... }),
-      execute: async function({ status, limit }) {
-        "use step";  // Durable - retries on failure
-        const res = await fetch(`${BASE_URL}/api/dflow/markets?...`);
-        return { success: true, markets: await res.json() };
-      },
-    },
-
-    placeOrder: {
-      description: "Place a buy or sell order.",
-      inputSchema: z.object({ ... }),
-      execute: async function(args) {
-        "use step";  // Durable - retries on failure
-        const res = await fetch(`${BASE_URL}/api/dflow/order`, { ... });
-        return { success: true, order: await res.json() };
-      },
-    },
-
-    cancelOrder: {
-      description: "Cancel a pending order.",
-      inputSchema: z.object({ ... }),
-      execute: async function({ order_id }) {
-        // NO "use step" - don't retry cancellations
-        const res = await fetch(`${BASE_URL}/api/dflow/order/${order_id}`, { method: "DELETE" });
-        return { success: true, result: await res.json() };
-      },
-    },
+    ticker: signal.ticker,
+    previousPrice: 0,
+    currentPrice: 0,
+    changePercent: 0,
   };
 }
 ```
 
-### Available Tools
+---
 
-| Tool | Durable | Purpose |
-|------|---------|---------|
-| `getMarkets` | Yes | List prediction markets |
-| `getMarketDetails` | Yes | Get specific market info |
-| `getLiveData` | Yes | Get live prices/orderbook |
-| `getBalance` | Yes | Check wallet balance |
-| `getPositions` | Yes | List current positions |
-| `getTradeHistory` | Yes | Recent trade history |
-| `placeOrder` | Yes | Execute buy/sell |
-| `getOrderStatus` | Yes | Check order status |
-| `cancelOrder` | No | Cancel pending order |
+## Tools (NOT Durable)
+
+### File: `lib/ai/tools/index.ts`
+
+Tools are regular AI-SDK tools. **No `"use step"`** - they execute once without retry.
+
+```typescript
+import { tool } from "ai";
+import { z } from "zod";
+
+const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+
+export function createAgentTools(walletAddress: string, privateKey?: string) {
+  return {
+    getMarkets: tool({
+      description: "Get list of prediction markets.",
+      inputSchema: z.object({
+        status: z.enum(["active", "closed"]).optional().default("active"),
+        limit: z.number().optional().default(20),
+      }),
+      execute: async ({ status, limit }) => {
+        const res = await fetch(`${BASE_URL}/api/dflow/markets?status=${status}&limit=${limit}`);
+        if (!res.ok) return { success: false, error: `Failed: ${res.status}` };
+        return { success: true, markets: await res.json() };
+      },
+    }),
+
+    placeOrder: tool({
+      description: "Place a buy or sell order. ⚠️ Executes once - no retry on failure.",
+      inputSchema: z.object({
+        market_ticker: z.string(),
+        side: z.enum(["yes", "no"]),
+        action: z.enum(["buy", "sell"]),
+        quantity: z.number().positive(),
+        limit_price: z.number().min(0).max(1).optional(),
+      }),
+      execute: async (args) => {
+        // NO RETRY - fire once only
+        const res = await fetch(`${BASE_URL}/api/dflow/order`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            wallet: walletAddress,
+            wallet_private_key: privateKey,
+            ...args,
+            execution_mode: "sync",
+          }),
+        });
+        if (!res.ok) {
+          const error = await res.text();
+          return { success: false, error: `Failed: ${res.status} - ${error}` };
+        }
+        return { success: true, order: await res.json() };
+      },
+    }),
+
+    cancelOrder: tool({
+      description: "Cancel a pending order.",
+      inputSchema: z.object({ order_id: z.string() }),
+      execute: async ({ order_id }) => {
+        // NO RETRY
+        const res = await fetch(`${BASE_URL}/api/dflow/order/${order_id}`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet: walletAddress, wallet_private_key: privateKey }),
+        });
+        if (!res.ok) return { success: false, error: `Failed: ${res.status}` };
+        return { success: true, result: await res.json() };
+      },
+    }),
+
+    // ... getBalance, getPositions, getLiveData, etc.
+  };
+}
+```
+
+| Tool | Purpose | Retry? |
+|------|---------|--------|
+| `getMarkets` | List prediction markets | No |
+| `getMarketDetails` | Get specific market info | No |
+| `getLiveData` | Get live prices/orderbook | No |
+| `getBalance` | Check wallet balance | No |
+| `getPositions` | List current positions | No |
+| `getTradeHistory` | Recent trade history | No |
+| `placeOrder` | Execute buy/sell | **No (fire-once)** |
+| `getOrderStatus` | Check order status | No |
+| `cancelOrder` | Cancel pending order | No |
 
 ---
 
@@ -315,51 +673,29 @@ function createDurableTools(walletAddress: string, privateKey?: string) {
 ### File: `app/api/chat/route.ts`
 
 ```typescript
-import { start, getRun } from "workflow/api";
-import { tradingAgentWorkflow } from "@/lib/ai/workflows/tradingAgent";
-import { decisionsToMessages } from "@/lib/supabase/transforms";
+import { start } from "workflow/api";
+import { tradingAgentWorkflow } from "@/lib/ai/workflows";
+import { fetchDecisionsAsMessages } from "@/lib/supabase/transforms";
 
-// POST - Start trading workflow
+// POST - Trigger trading workflow
 export async function POST(req: Request) {
   const input = await req.json();
-  
   const run = await start(tradingAgentWorkflow, input);
-  
-  return new Response(await run.getReadable(), {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "x-workflow-run-id": run.id,
-    },
-  });
+
+  return Response.json({ runId: run.id, status: "started" });
 }
 
-// GET - Resume stream or fetch history
+// GET - Fetch historical messages
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const runId = url.searchParams.get("runId");
   const sessionId = url.searchParams.get("sessionId");
 
-  if (runId) {
-    // Resume workflow stream
-    const run = await getRun(runId);
-    if (!run) return new Response("Not found", { status: 404 });
-    
-    const startIndex = url.searchParams.get("startIndex");
-    return new Response(
-      await run.getReadable({ 
-        startIndex: startIndex ? parseInt(startIndex) : undefined 
-      }),
-      { headers: { "Content-Type": "text/event-stream" } }
-    );
+  if (!sessionId) {
+    return new Response("Missing sessionId", { status: 400 });
   }
 
-  if (sessionId) {
-    // Fetch historical messages from agent_decisions
-    const messages = await fetchDecisionsAsMessages(sessionId);
-    return NextResponse.json(messages);
-  }
-
-  return new Response("Missing runId or sessionId", { status: 400 });
+  const messages = await fetchDecisionsAsMessages(sessionId);
+  return Response.json(messages);
 }
 ```
 
@@ -367,30 +703,12 @@ export async function GET(req: Request) {
 
 ## Frontend Integration
 
-### WorkflowChatTransport
-
-Use AI-SDK's `useChat` with workflow transport for resumable streams:
-
-```typescript
-import { useChat } from "ai/react";
-import { WorkflowChatTransport } from "@workflow/ai";
-
-function TradingFeed() {
-  const { messages } = useChat({
-    api: "/api/chat",
-    transport: WorkflowChatTransport,
-  });
-
-  return <ModelChatFeed messages={messages} />;
-}
-```
-
 ### Supabase Realtime
 
-Subscribe to `agent_decisions` for real-time updates:
+Decisions are recorded to database, then pushed to frontend via Supabase Realtime:
 
 ```typescript
-// hooks/chat/useRealtimeMessages.ts
+// hooks/useRealtimeMessages.ts
 export function useRealtimeMessages({ sessionId, onMessage }) {
   useEffect(() => {
     const channel = supabase
@@ -412,13 +730,10 @@ export function useRealtimeMessages({ sessionId, onMessage }) {
 
 ### Transform Layer
 
-Convert `agent_decisions` to `ChatMessage` format:
-
 ```typescript
 // lib/supabase/transforms.ts
 export function decisionToChatMessage(
   decision: AgentDecision,
-  agentSession: AgentSession,
   trades: AgentTrade[]
 ): ChatMessage {
   return {
@@ -426,115 +741,13 @@ export function decisionToChatMessage(
     role: "assistant",
     parts: [{ type: "text", text: formatDecisionContent(decision, trades) }],
     metadata: {
-      sessionId: agentSession.sessionId,
       authorType: "model",
-      authorId: agentSession.modelId,
+      authorId: decision.agentSession.modelId,
       decision: decision.decision,
       confidence: decision.confidence,
       portfolioValue: decision.portfolioValueAfter,
     },
   };
-}
-```
-
----
-
-## File Structure
-
-### Core Files
-
-```
-lib/ai/
-├── workflows/
-│   └── tradingAgent.ts      # DurableAgent workflow (main entry point)
-├── prompts/
-│   └── trading/
-│       ├── systemPrompt.ts  # Trading agent system prompt
-│       └── contextBuilder.ts # Build context from market data
-├── models/
-│   ├── index.ts             # Model registry
-│   └── catalog.ts           # Model configs + wallet mappings
-└── guardrails/
-    └── index.ts             # Trading middleware (limits, safety)
-
-lib/supabase/
-├── agents.ts                # recordAgentDecision, recordAgentTrade
-├── transforms.ts            # decisionToChatMessage, decisionsToMessages
-├── types.ts                 # AgentDecision, AgentTrade, etc.
-└── db.ts                    # Core DB functions
-
-app/api/
-├── chat/
-│   └── route.ts             # Unified endpoint (POST trigger, GET resume/history)
-├── dflow/                   # On-chain operations
-│   ├── markets/
-│   ├── order/
-│   └── positions/
-└── signals/
-    └── trigger/route.ts     # PartyKit signal receiver
-
-hooks/
-├── chat/
-│   ├── useChat.ts           # Chat hook (uses WorkflowChatTransport)
-│   └── useRealtimeMessages.ts # Supabase Realtime subscription
-└── usePerformanceChart.ts   # Chart data from agent_decisions
-```
-
-### Deleted Files
-
-| File | Reason |
-|------|--------|
-| `lib/ai/agents/chatAgent.ts` | Replaced by DurableAgent workflow |
-| `lib/ai/agents/predictionMarketAgent.ts` | Merged into tradingAgent.ts |
-| `app/api/chat/stream/route.ts` | Merged into /api/chat |
-| `app/api/arena/chat-messages/route.ts` | Merged into /api/chat?sessionId= |
-
----
-
-## Implementation Checklist
-
-### Phase 1: Workflow Migration
-- [ ] Install `@workflow/ai` package
-- [ ] Refactor `tradingAgentWorkflow` to use `DurableAgent`
-- [ ] Define tools with `"use step"` for durability
-- [ ] Test streaming with `UIMessageChunk` format
-
-### Phase 2: API Consolidation
-- [ ] Update `/api/chat/route.ts` with unified handlers
-- [ ] Add `x-workflow-run-id` header for resumability
-- [ ] Implement `GET` handler for stream resume + history
-- [ ] Delete `/api/chat/stream/route.ts`
-- [ ] Delete `/api/arena/chat-messages/route.ts`
-
-### Phase 3: Frontend Integration
-- [ ] Install `WorkflowChatTransport` from `@workflow/ai`
-- [ ] Update `useChat` to use workflow transport
-- [ ] Verify `useRealtimeMessages` works with `agent_decisions`
-- [ ] Test stream resumption on page refresh
-
-### Phase 4: Agent Cleanup
-- [ ] Delete `lib/ai/agents/chatAgent.ts`
-- [ ] Delete `lib/ai/agents/predictionMarketAgent.ts`
-- [ ] Update `lib/ai/agents/index.ts` exports
-- [ ] Move shared types to `lib/ai/agents/types.ts` if needed
-
-### Phase 5: Database
-- [ ] Verify `agent_decisions` table exists with correct schema
-- [ ] Enable Supabase Realtime on required tables
-- [ ] Test `recordAgentDecision` and `recordAgentTrade` functions
-
----
-
-## Key Dependencies
-
-```json
-{
-  "dependencies": {
-    "workflow": "^4.x",
-    "@workflow/ai": "^4.x",
-    "ai": "^4.x",
-    "zod": "^3.x"
-  }
 }
 ```
 
@@ -553,6 +766,26 @@ OPENROUTER_API_KEY=your_openrouter_key
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 SUPABASE_SERVICE_ROLE_KEY=your_service_key
 
+# Model Wallets
+WALLET_GPT4O_PUBLIC=<solana-public-key>
+WALLET_GPT4O_PRIVATE=<solana-private-key>
+# ... per model
+
 # App
 NEXT_PUBLIC_BASE_URL=http://localhost:3000
+```
+
+---
+
+## Key Dependencies
+
+```json
+{
+  "dependencies": {
+    "workflow": "^4.x",
+    "ai": "^4.x",
+    "zod": "^3.x",
+    "@supabase/supabase-js": "^2.x"
+  }
+}
 ```
