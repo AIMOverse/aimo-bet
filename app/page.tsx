@@ -1,37 +1,16 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { AppTabs } from "@/components/layout/AppTabs";
 import { PerformanceChart } from "@/components/index/PerformanceChart";
 import { TradesFeed } from "@/components/trades/TradesFeed";
 import { ModelChatFeed } from "@/components/chat/ModelChatFeed";
 import { PositionsTable } from "@/components/positions/PositionsTable";
-import { usePerformance } from "@/hooks/index/usePerformance";
+import { usePerformanceChart } from "@/hooks/index/usePerformanceChart";
 import { useSessionTrades } from "@/hooks/trades/useTrades";
 import { useSessionPositions } from "@/hooks/positions/usePositions";
-import type { ArenaTab, ChartDataPoint } from "@/lib/supabase/types";
-
-/**
- * Get latest values for each model from chart data (for legend display).
- */
-function getLatestModelValues(
-  chartData: ChartDataPoint[],
-): Map<string, number> {
-  const latestValues = new Map<string, number>();
-
-  if (chartData.length === 0) return latestValues;
-
-  const latestPoint = chartData[chartData.length - 1];
-
-  Object.entries(latestPoint).forEach(([key, value]) => {
-    if (key !== "timestamp" && typeof value === "number") {
-      latestValues.set(key, value);
-    }
-  });
-
-  return latestValues;
-}
+import type { ArenaTab } from "@/lib/supabase/types";
 
 // Session ID for the arena (in production, this would come from routing/state)
 const SESSION_ID = "00000000-0000-0000-0000-000000000001";
@@ -44,17 +23,14 @@ export default function Home() {
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
 
   // Fetch real data from hooks
-  const { chartData, isLoading: performanceLoading } =
-    usePerformance(SESSION_ID);
+  const {
+    chartData,
+    latestValues,
+    loading: performanceLoading,
+  } = usePerformanceChart({ sessionId: SESSION_ID });
   const { trades, isLoading: tradesLoading } = useSessionTrades(SESSION_ID);
   const { positions, isLoading: positionsLoading } =
     useSessionPositions(SESSION_ID);
-
-  // Calculate latest values for legend
-  const latestValues = useMemo(
-    () => getLatestModelValues(chartData),
-    [chartData],
-  );
 
   // Render the right panel content based on active tab
   const renderTabContent = () => {

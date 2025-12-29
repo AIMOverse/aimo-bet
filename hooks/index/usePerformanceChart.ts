@@ -27,7 +27,7 @@ export function usePerformanceChart({
 }: UsePerformanceChartOptions): UsePerformanceChartReturn {
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [latestValues, setLatestValues] = useState<Map<string, number>>(
-    new Map()
+    new Map(),
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -39,7 +39,7 @@ export function usePerformanceChart({
         created_at: string;
         portfolio_value_after: number;
         model_name: string;
-      }>
+      }>,
     ): ChartDataPoint[] => {
       // Group by timestamp
       const grouped = new Map<string, Record<string, number>>();
@@ -87,7 +87,7 @@ export function usePerformanceChart({
 
       return result;
     },
-    []
+    [],
   );
 
   useEffect(() => {
@@ -98,7 +98,7 @@ export function usePerformanceChart({
     }
 
     const since = new Date(
-      Date.now() - hoursBack * 60 * 60 * 1000
+      Date.now() - hoursBack * 60 * 60 * 1000,
     ).toISOString();
 
     const fetchChartData = async () => {
@@ -113,7 +113,7 @@ export function usePerformanceChart({
             created_at,
             portfolio_value_after,
             agent_sessions!inner(session_id, model_name)
-          `
+          `,
           )
           .eq("agent_sessions.session_id", sessionId)
           .gte("created_at", since)
@@ -145,7 +145,9 @@ export function usePerformanceChart({
         }
       } catch (err) {
         console.error("[usePerformanceChart] Error fetching chart data:", err);
-        setError(err instanceof Error ? err : new Error("Failed to fetch chart data"));
+        setError(
+          err instanceof Error ? err : new Error("Failed to fetch chart data"),
+        );
       } finally {
         setLoading(false);
       }
@@ -163,7 +165,9 @@ export function usePerformanceChart({
           schema: "public",
           table: "agent_decisions",
         },
-        async (payload: RealtimePostgresInsertPayload<Record<string, unknown>>) => {
+        async (
+          payload: RealtimePostgresInsertPayload<Record<string, unknown>>,
+        ) => {
           try {
             // Fetch the agent session to get model name
             const { data: agentSession } = await client
@@ -172,18 +176,24 @@ export function usePerformanceChart({
               .eq("id", payload.new.agent_session_id as string)
               .single();
 
-            if (agentSession && agentSession.session_id === sessionId) {
+            const session = agentSession as {
+              model_name: string;
+              session_id: string;
+            } | null;
+
+            if (session && session.session_id === sessionId) {
               const newPoint = {
                 created_at: payload.new.created_at as string,
-                portfolio_value_after: payload.new.portfolio_value_after as number,
-                model_name: agentSession.model_name as string,
+                portfolio_value_after: payload.new
+                  .portfolio_value_after as number,
+                model_name: session.model_name,
               };
 
               // Update chart data
               setChartData((prev: ChartDataPoint[]) => {
                 const updated = [...prev];
                 const existingPointIndex = updated.findIndex(
-                  (p) => p.timestamp === newPoint.created_at
+                  (p) => p.timestamp === newPoint.created_at,
                 );
 
                 if (existingPointIndex >= 0) {
@@ -208,14 +218,20 @@ export function usePerformanceChart({
               // Update latest values
               setLatestValues((prev: Map<string, number>) => {
                 const updated = new Map(prev);
-                updated.set(newPoint.model_name, newPoint.portfolio_value_after);
+                updated.set(
+                  newPoint.model_name,
+                  newPoint.portfolio_value_after,
+                );
                 return updated;
               });
             }
           } catch (err) {
-            console.error("[usePerformanceChart] Error processing realtime update:", err);
+            console.error(
+              "[usePerformanceChart] Error processing realtime update:",
+              err,
+            );
           }
-        }
+        },
       )
       .subscribe((status: string) => {
         console.log(`[usePerformanceChart] Subscription status: ${status}`);

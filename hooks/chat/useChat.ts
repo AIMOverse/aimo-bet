@@ -1,7 +1,7 @@
 "use client";
 
 import { useChat as useAIChat } from "@ai-sdk/react";
-import { WorkflowChatTransport } from "@workflow/ai";
+import { WorkflowChatTransport } from "@/lib/chat/workflowTransport";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { UIMessage } from "ai";
 import type { ChatMessage } from "@/lib/supabase/types";
@@ -48,7 +48,7 @@ export function useChat({ sessionId }: UseChatOptions): UseChatReturn {
   // Stable internal ID for useAIChat
   const internalChatId = useMemo(
     () => `chat-${sessionId ?? "none"}`,
-    [sessionId]
+    [sessionId],
   );
 
   // WorkflowChatTransport for resumable streams
@@ -78,7 +78,7 @@ export function useChat({ sessionId }: UseChatOptions): UseChatReturn {
           };
         },
       }),
-    []
+    [],
   );
 
   // Load messages when session changes
@@ -105,7 +105,7 @@ export function useChat({ sessionId }: UseChatOptions): UseChatReturn {
       } catch (err) {
         console.error("Failed to load messages:", err);
         setLocalError(
-          err instanceof Error ? err : new Error("Failed to load messages")
+          err instanceof Error ? err : new Error("Failed to load messages"),
         );
         setInitialMessages([]);
       } finally {
@@ -157,7 +157,7 @@ export function useChat({ sessionId }: UseChatOptions): UseChatReturn {
       const parts: UIMessage["parts"] = [{ type: "text", text: content }];
       aiSendMessage({ parts });
     },
-    [aiSendMessage, sessionId]
+    [aiSendMessage, sessionId],
   );
 
   // Append message locally (for model broadcasts via realtime)
@@ -165,7 +165,7 @@ export function useChat({ sessionId }: UseChatOptions): UseChatReturn {
     (message: ChatMessage) => {
       setMessages((prev) => [...prev, message]);
     },
-    [setMessages]
+    [setMessages],
   );
 
   // Realtime: receive agent trade broadcasts instantly
@@ -182,7 +182,7 @@ export function useChat({ sessionId }: UseChatOptions): UseChatReturn {
         });
       }
     },
-    [setMessages]
+    [setMessages],
   );
 
   useRealtimeMessages({
