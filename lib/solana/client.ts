@@ -17,7 +17,7 @@ const SOLANA_RPC_URL =
  * Create a Solana RPC client
  * Note: Creating per-request to support edge runtime (no global state)
  */
-function getRpc() {
+export function getRpc() {
   return createSolanaRpc(SOLANA_RPC_URL);
 }
 
