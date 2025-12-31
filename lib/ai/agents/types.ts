@@ -20,60 +20,8 @@ export interface AgentConfig {
 }
 
 // =============================================================================
-// Market Context (Input to Agent)
+// Agent Input (Lean Context)
 // =============================================================================
-
-/**
- * A prediction market available for trading
- */
-export interface MarketInfo {
-  ticker: string;
-  title: string;
-  yesPrice: number;
-  noPrice: number;
-  volume: number;
-  status: string;
-}
-
-/**
- * A position held by the agent
- */
-export interface PositionInfo {
-  marketTicker: string;
-  marketTitle: string;
-  side: PositionSide;
-  quantity: number;
-}
-
-/**
- * Portfolio state for the agent
- */
-export interface PortfolioInfo {
-  cashBalance: number;
-  totalValue: number;
-  positions: PositionInfo[];
-}
-
-/**
- * A recent trade for context
- */
-export interface TradeInfo {
-  marketTicker: string;
-  side: PositionSide;
-  action: TradeAction;
-  quantity: number;
-  price: number;
-}
-
-/**
- * Price swing detected in a market
- */
-export interface PriceSwing {
-  ticker: string;
-  previousPrice: number;
-  currentPrice: number;
-  changePercent: number;
-}
 
 /**
  * Market signal from PartyKit relay
@@ -86,13 +34,12 @@ export interface MarketSignal {
 }
 
 /**
- * Full context provided to the agent for decision making
+ * Lean input for agent run - only signal + balance
+ * Agent discovers market details via tools for fresher data
  */
-export interface MarketContext {
-  availableMarkets: MarketInfo[];
-  portfolio: PortfolioInfo;
-  recentTrades: TradeInfo[];
-  priceSwings: PriceSwing[];
+export interface AgentRunInput {
+  signal?: MarketSignal;
+  usdcBalance: number;
 }
 
 // =============================================================================

@@ -17,11 +17,10 @@ export {
   tradingAgentWorkflow,
   type TradingInput,
   type TradingResult,
-  type PriceSwing,
+  type MarketSignal,
 } from "./tradingAgent";
 
 export {
   signalListenerWorkflow,
   type SignalListenerInput,
-  type MarketSignal,
 } from "./signalListener";

@@ -9,14 +9,14 @@ import { dflowQuoteFetch } from "@/lib/dflow/client";
 import {
   createSignerFromBase58SecretKey,
   createSignerFromBase58PrivateKey,
-} from "@/lib/solana/signer";
+} from "@/lib/solana/wallets";
 import {
   signAndSubmitTransaction,
   monitorTransactionConfirmation,
   getTransactionStatus as getSolanaTransactionStatus,
   type MonitorOptions as SolanaMonitorOptions,
   type ConfirmationResult,
-} from "@/lib/solana/transaction";
+} from "@/lib/solana/transactions";
 
 // ============================================================================
 // Types
@@ -433,6 +433,6 @@ export async function getTransactionStatus(
 export {
   createSignerFromBase58SecretKey,
   createSignerFromBase58PrivateKey,
-} from "@/lib/solana/signer";
+} from "@/lib/solana/wallets";
 
-export type { ConfirmationResult } from "@/lib/solana/transaction";
+export type { ConfirmationResult } from "@/lib/solana/transactions";

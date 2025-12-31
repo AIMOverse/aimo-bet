@@ -10,8 +10,8 @@ import { sleep } from "@/lib/dflow/utils";
 import {
   createSignerFromBase58SecretKey,
   createSignerFromBase58PrivateKey,
-} from "@/lib/solana/signer";
-import { signTransactionToBase64 } from "@/lib/solana/transaction";
+} from "@/lib/solana/wallets";
+import { signTransactionToBase64 } from "@/lib/solana/transactions";
 
 // ============================================================================
 // Types
@@ -590,4 +590,4 @@ export async function getIntentOrderStatus(
 export {
   createSignerFromBase58SecretKey,
   createSignerFromBase58PrivateKey,
-} from "@/lib/solana/signer";
+} from "@/lib/solana/wallets";

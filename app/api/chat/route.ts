@@ -24,13 +24,8 @@ export async function POST(req: Request) {
     if (!input.modelId || !input.walletAddress) {
       return NextResponse.json(
         { error: "modelId and walletAddress are required" },
-        { status: 400 }
+        { status: 400 },
       );
-    }
-
-    // Ensure priceSwings is an array
-    if (!input.priceSwings) {
-      input.priceSwings = [];
     }
 
     console.log(`[/api/chat] Starting trading workflow for ${input.modelId}`);
@@ -58,7 +53,7 @@ export async function POST(req: Request) {
         error: "Failed to start trading workflow",
         details: error instanceof Error ? error.message : "Unknown error",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -89,13 +84,13 @@ export async function GET(req: Request) {
 
       // Get readable stream with optional start index for resumption
       const readable = await run.getReadable(
-        startIndex ? { startIndex: parseInt(startIndex, 10) } : undefined
+        startIndex ? { startIndex: parseInt(startIndex, 10) } : undefined,
       );
 
       if (!readable) {
         return NextResponse.json(
           { error: "Stream not available for this run" },
-          { status: 404 }
+          { status: 404 },
         );
       }
 
@@ -114,7 +109,7 @@ export async function GET(req: Request) {
           error: "Failed to resume stream",
           details: error instanceof Error ? error.message : "Unknown error",
         },
-        { status: 500 }
+        { status: 500 },
       );
     }
   }
@@ -132,7 +127,7 @@ export async function GET(req: Request) {
 
   return NextResponse.json(
     { error: "Missing runId or sessionId parameter" },
-    { status: 400 }
+    { status: 400 },
   );
 }
 
@@ -156,7 +151,7 @@ async function fetchDecisionsAsMessages(sessionId: string) {
       *,
       agent_sessions!inner(session_id, model_id, model_name),
       agent_trades(id, side, action, quantity, price, notional)
-    `
+    `,
     )
     .eq("agent_sessions.session_id", sessionId)
     .order("created_at", { ascending: true })
@@ -196,6 +191,6 @@ async function fetchDecisionsAsMessages(sessionId: string) {
           price: number;
           notional: number;
         }>) || [],
-    }))
+    })),
   );
 }

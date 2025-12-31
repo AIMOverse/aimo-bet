@@ -3,11 +3,9 @@
 import { sleep } from "workflow";
 import {
   PredictionMarketAgent,
-  type MarketContext,
   type TradingResult,
   type ExecutedTrade,
   type MarketSignal,
-  type PriceSwing,
 } from "@/lib/ai/agents";
 import { getWalletPrivateKey, getModelName } from "@/lib/ai/models/catalog";
 import { getGlobalSession } from "@/lib/supabase/db";
@@ -17,11 +15,7 @@ import {
   recordAgentTrade,
   updateAgentSessionValue,
 } from "@/lib/supabase/agents";
-import type {
-  AgentSession,
-  TriggerType,
-  PredictionMarket,
-} from "@/lib/supabase/types";
+import type { AgentSession, TriggerType } from "@/lib/supabase/types";
 
 // ============================================================================
 // Types
@@ -30,12 +24,11 @@ import type {
 export interface TradingInput {
   modelId: string;
   walletAddress: string;
-  priceSwings: PriceSwing[];
   signal?: MarketSignal;
 }
 
 // Re-export TradingResult for consumers
-export type { TradingResult, PriceSwing, MarketSignal };
+export type { TradingResult, MarketSignal };
 
 // ============================================================================
 // Configuration
@@ -72,14 +65,11 @@ export async function tradingAgentWorkflow(
       input.walletAddress,
     );
 
-    // Step 3: Fetch market context (durable - safe to retry, read-only)
-    const context = await fetchContextStep(
-      input.walletAddress,
-      input.priceSwings,
-    );
+    // Step 3: Fetch USDC balance (durable - safe to retry, read-only)
+    const usdcBalance = await fetchBalanceStep(input.walletAddress);
 
     // Step 4: Run AI agent (durable wrapper, agent inside is NOT durable)
-    const result = await runAgentStep(input, context);
+    const result = await runAgentStep(input, usdcBalance);
 
     // Step 5: Wait for order fills (durable - long-running polling)
     if (result.trades.length > 0) {
@@ -133,69 +123,24 @@ async function getAgentSessionStep(
 }
 
 /**
- * Fetch market context for the agent.
- * Durable: Safe to retry (read-only operations).
+ * Fetch USDC balance for the agent.
+ * Durable: Safe to retry (read-only operation).
  */
-async function fetchContextStep(
-  walletAddress: string,
-  priceSwings: PriceSwing[],
-): Promise<MarketContext> {
+async function fetchBalanceStep(walletAddress: string): Promise<number> {
   "use step";
 
-  // Fetch balance
-  let cashBalance = 0;
   try {
-    const balanceRes = await fetch(
+    const res = await fetch(
       `${BASE_URL}/api/solana/balance?wallet=${walletAddress}`,
     );
-    if (balanceRes.ok) {
-      const balanceData = await balanceRes.json();
-      cashBalance = parseFloat(balanceData.formatted) || 0;
+    if (res.ok) {
+      const data = await res.json();
+      return parseFloat(data.formatted) || 0;
     }
   } catch (error) {
     console.error("[tradingAgent] Failed to fetch balance:", error);
   }
-
-  // Fetch markets
-  let markets: PredictionMarket[] = [];
-  try {
-    const marketsRes = await fetch(`${BASE_URL}/api/dflow/markets`);
-    if (marketsRes.ok) {
-      const marketsData = await marketsRes.json();
-      if (Array.isArray(marketsData)) {
-        markets = marketsData.map((m: Record<string, unknown>) => ({
-          ticker: m.ticker as string,
-          title: (m.title as string) || (m.ticker as string),
-          category: (m.category as string) || "Unknown",
-          yesPrice: parseFloat(m.yes_price as string) || 0.5,
-          noPrice: parseFloat(m.no_price as string) || 0.5,
-          volume: parseFloat(m.volume as string) || 0,
-          expirationDate: new Date(),
-          status: (m.status as "open" | "closed" | "settled") || "open",
-        }));
-      }
-    }
-  } catch (error) {
-    console.error("[tradingAgent] Failed to fetch markets:", error);
-  }
-
-  return {
-    availableMarkets: markets.map((m) => ({
-      ticker: m.ticker,
-      title: m.title,
-      yesPrice: m.yesPrice,
-      noPrice: m.noPrice,
-      volume: m.volume,
-      status: m.status,
-    })),
-    portfolio: {
-      cashBalance,
-      totalValue: cashBalance,
-      positions: [],
-    },
-    recentTrades: [],
-    priceSwings,
-  };
+  return 0;
 }
 
 /**
@@ -208,7 +153,7 @@ async function fetchContextStep(
  */
 async function runAgentStep(
   input: TradingInput,
-  context: MarketContext,
+  usdcBalance: number,
 ): Promise<TradingResult> {
   "use step";
 
@@ -220,8 +165,11 @@ async function runAgentStep(
     maxSteps: 10,
   });
 
-  // Run the agent (NOT durable - tools fire once)
-  return await agent.run(context, input.signal);
+  // Run the agent with lean context (signal + balance)
+  return await agent.run({
+    signal: input.signal,
+    usdcBalance,
+  });
 }
 
 /**
@@ -271,15 +219,13 @@ async function recordResultsStep(
   let triggerType: TriggerType = "periodic";
   if (input.signal) {
     triggerType = input.signal.type;
-  } else if (input.priceSwings.length > 0) {
-    triggerType = "price_swing";
   }
 
   // Record the decision
   const decision = await recordAgentDecision({
     agentSessionId: agentSession.id,
     triggerType,
-    triggerDetails: input.signal?.data || { priceSwings: input.priceSwings },
+    triggerDetails: input.signal?.data || {},
     marketTicker: result.marketTicker,
     marketTitle: result.marketTitle,
     decision: result.decision,

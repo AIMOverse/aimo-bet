@@ -11,12 +11,12 @@ import { getRpc } from "@/lib/solana/client";
 import {
   createSignerFromBase58SecretKey,
   createSignerFromBase58PrivateKey,
-} from "@/lib/solana/signer";
+} from "@/lib/solana/wallets";
 import {
   signAndSubmitTransaction,
   monitorTransactionConfirmation,
   type MonitorOptions as SolanaMonitorOptions,
-} from "@/lib/solana/transaction";
+} from "@/lib/solana/transactions";
 
 // ============================================================================
 // Types
@@ -448,9 +448,9 @@ export async function getOrderStatus(signature: string): Promise<OrderStatus> {
 export {
   createSignerFromBase58SecretKey,
   createSignerFromBase58PrivateKey,
-} from "@/lib/solana/signer";
+} from "@/lib/solana/wallets";
 
 export {
   createSignerFromSecretKeyBytes,
   createSignerFromPrivateKeyBytes,
-} from "@/lib/solana/signer";
+} from "@/lib/solana/wallets";

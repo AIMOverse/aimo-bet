@@ -1,32 +1,36 @@
-# discoverEvent Tool Implementation Plan
+# AI Agent Refactor: Lean Context & Direct Tool Imports
 
-Event-centric market discovery tool using dflow Prediction Market Metadata API.
+Simplify the AI agent architecture by removing the tool factory pattern and adopting lean context prompts.
 
 ---
 
 ## Overview
 
-Replace mock market-discovery tools with a single unified `discoverEvent` tool that returns events with nested markets.
-
-### Current State (Mock Tools - To Remove)
+### Current State (To Refactor)
 ```
-lib/ai/tools/market-discovery/
-├── getMarkets.ts       # List markets via API route (mock)
-├── getMarketDetails.ts # Get market details via API route (mock)
-├── getLiveData.ts      # Get live prices via API route (mock)
-└── index.ts
+lib/ai/
+├── tools/
+│   └── index.ts              # createAgentTools factory (remove)
+├── agents/
+│   └── predictionMarketAgent.ts  # Uses factory, complex context
+├── prompts/trading/
+│   └── contextBuilder.ts     # Complex context building (remove)
+└── workflows/
+    └── tradingAgent.ts       # Fetches markets via HTTP (simplify)
 ```
 
 ### Target State
 ```
-lib/ai/tools/
-├── discoverEvent.ts    # Event-centric discovery (new)
-├── increasePosition.ts # (already implemented)
-├── decreasePosition.ts # (already implemented)
-├── retrievePosition.ts # (already implemented)
-├── redeemPosition.ts   # (already implemented)
-└── utils/
-    └── resolveMints.ts # (already implemented)
+lib/ai/
+├── tools/
+│   └── index.ts              # Simple exports only
+├── agents/
+│   └── predictionMarketAgent.ts  # Direct imports, lean prompt
+├── prompts/trading/
+│   └── systemPrompt.ts       # Keep system prompt
+│   └── (contextBuilder.ts removed)
+└── workflows/
+    └── tradingAgent.ts       # Signal + balance only
 ```
 
 ---
@@ -35,261 +39,285 @@ lib/ai/tools/
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Return unit | Event (with nested markets) | Provides context; LLM understands what it's betting on |
-| Price inclusion | Indicative prices with caveats | Agent needs prices to reason, but must know they're stale |
-| Filter approach | Single tool with flexible params | LLM-native; minimizes tool calls |
-| Error handling | Return suggestions on failure | Agent can self-correct without user intervention |
+| Tool creation | Direct imports in agent | Clearer dependencies, simpler code |
+| Context injection | Signer passed at agent level | Only signer needed for trading tools |
+| Prompt strategy | Lean context (signal + balance) | Agent discovers via tools, fresher data |
+| Market fetching | Agent uses discoverEvent | No stale pre-fetched data |
 
 ---
 
-## Tool Specification
+## Changes
 
-### `discoverEvent`
+### 1. `lib/ai/tools/index.ts` - Simplify to Exports Only
 
-**Purpose:** Discover prediction market events with nested markets. Primary discovery tool for the agent.
+**Remove:** `createAgentTools` factory function, `getBalance`, `getTradeHistory`
 
-**File:** `lib/ai/tools/discoverEvent.ts`
+**Keep:** Direct exports of tool creators
 
-**Input Schema:**
 ```typescript
-z.object({
-  // Search/filter options (all optional)
-  query: z.string().optional()
-    .describe("Search terms to match against event/market titles"),
-  
-  category: z.string().optional()
-    .describe("Filter by category: crypto, sports, politics, entertainment"),
-  
-  tags: z.array(z.string()).optional()
-    .describe("Filter by tags (e.g., ['bitcoin', 'price'])"),
-  
-  series_ticker: z.string().optional()
-    .describe("Filter to specific series (e.g., 'BTCD-DAILY')"),
-  
-  event_ticker: z.string().optional()
-    .describe("Get details for a specific event by ticker"),
-  
-  status: z.enum(["active", "initialized", "determined", "finalized"]).optional()
-    .default("active")
-    .describe("Filter by market status (default: active)"),
-  
-  // Pagination
-  limit: z.number().min(1).max(50).optional().default(10)
-    .describe("Maximum events to return (default: 10, max: 50)"),
-  
-  cursor: z.string().optional()
-    .describe("Pagination cursor from previous response"),
-})
+// lib/ai/tools/index.ts
+
+// Market Discovery
+export { discoverEventTool } from "./discoverEvent";
+
+// Position Management - creators that accept signer
+export { createIncreasePositionTool } from "./increasePosition";
+export { createDecreasePositionTool } from "./decreasePosition";
+export { createRetrievePositionTool } from "./retrievePosition";
+export { createRedeemPositionTool } from "./redeemPosition";
+
+// Utilities
+export {
+  resolveMints,
+  getTradeMintsForBuy,
+  getTradeMintsForSell,
+  getOutcomeMint,
+  clearMarketCache,
+} from "./utils/resolveMints";
 ```
 
-**Output Schema:**
+---
+
+### 2. `lib/ai/agents/predictionMarketAgent.ts` - Direct Imports
+
+**Remove:** 
+- Import of `createAgentTools`
+- Complex `ContextPromptInput` building
+- `buildContextPrompt` usage
+
+**Add:**
+- Direct tool imports
+- Tool creation inline with signer
+- Simple `buildTradingPrompt` function
+
 ```typescript
-interface DiscoverEventResult {
-  success: boolean;
-  
-  events: Array<{
-    // Event identification
-    event_ticker: string;
-    event_title: string;
-    event_subtitle?: string;
-    
-    // Series context
-    series_ticker: string;
-    series_title?: string;
-    category?: string;
-    tags?: string[];
-    
-    // Nested markets
-    markets: Array<{
-      market_ticker: string;
-      title: string;
-      status: "active" | "initialized" | "determined" | "finalized";
-      
-      // Token addresses (for trading tools)
-      yes_mint: string;
-      no_mint: string;
-      
-      // Indicative prices (point-in-time snapshot)
-      indicative_prices?: {
-        yes: number;        // 0-1
-        no: number;         // 0-1
-        timestamp: string;  // ISO timestamp
-      };
-      
-      // Market metrics
-      volume_24h?: number;
-      open_interest?: number;
-      
-      // Resolution info (if determined/finalized)
-      result?: "yes" | "no";
-    }>;
-    
-    // Event-level summary
-    market_count: number;
-    total_volume?: number;
-  }>;
-  
-  // Response metadata
-  total_events: number;
-  total_markets: number;
-  filters_applied: Record<string, unknown>;
-  
-  // Pagination
-  cursor?: string;
-  has_more: boolean;
-  
-  // Price caveat (always included when prices present)
-  price_note: "Prices are indicative snapshots. Actual execution prices may differ.";
-  prices_as_of?: string;  // ISO timestamp
-  
-  // Discovery helpers (for follow-up queries)
-  available_categories?: string[];
-  available_series?: Array<{ ticker: string; title: string }>;
-  
-  // Error handling
-  error?: string;
-  suggestion?: string;  // e.g., "Did you mean 'crypto'?"
+// Direct tool imports
+import { discoverEventTool } from "@/lib/ai/tools/discoverEvent";
+import { createIncreasePositionTool } from "@/lib/ai/tools/increasePosition";
+import { createDecreasePositionTool } from "@/lib/ai/tools/decreasePosition";
+import { createRetrievePositionTool } from "@/lib/ai/tools/retrievePosition";
+import { createRedeemPositionTool } from "@/lib/ai/tools/redeemPosition";
+
+// In run() method:
+async run(input: TradingInput): Promise<TradingResult> {
+  // Create signer
+  const signer = this.config.privateKey 
+    ? await createSignerFromBase58PrivateKey(this.config.privateKey)
+    : undefined;
+
+  // Create tools directly
+  const tools = {
+    discoverEvent: discoverEventTool,
+    increasePosition: createIncreasePositionTool(this.config.walletAddress, signer),
+    decreasePosition: createDecreasePositionTool(this.config.walletAddress, signer),
+    retrievePosition: createRetrievePositionTool(this.config.walletAddress),
+    redeemPosition: createRedeemPositionTool(this.config.walletAddress, signer),
+  };
+
+  // Build lean prompt
+  const prompt = buildTradingPrompt({
+    signal: input.signal,
+    usdcBalance: input.usdcBalance,
+  });
+
+  // Run agent...
 }
 ```
 
 ---
 
-## Implementation Flow
+### 3. New Lean Prompt Builder
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    discoverEvent Tool                        │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  1. Parse & validate input                                   │
-│     └─ Apply defaults (status: "active", limit: 10)          │
-│                                                              │
-│  2. Route by filter type:                                    │
-│     ├─ event_ticker provided?                                │
-│     │   └─ Fetch single event directly                       │
-│     │                                                        │
-│     ├─ category or tags provided?                            │
-│     │   └─ fetchSeriesByCategory() / fetchSeriesByTags()     │
-│     │   └─ Extract series tickers                            │
-│     │   └─ fetchEventsBySeries(tickers)                      │
-│     │                                                        │
-│     ├─ series_ticker provided?                               │
-│     │   └─ fetchEventsBySeries(series_ticker)                │
-│     │                                                        │
-│     └─ No filters (browse mode)?                             │
-│         └─ fetchActiveEvents(limit)                          │
-│                                                              │
-│  3. Client-side query filtering (if query provided)          │
-│     └─ Filter events/markets by title match                  │
-│                                                              │
-│  4. Fetch indicative prices (optional, if time permits)      │
-│     └─ Batch fetch from live data endpoint                   │
-│     └─ Attach to markets with timestamp                      │
-│                                                              │
-│  5. Transform to output schema                               │
-│     └─ Event-centric with nested markets                     │
-│     └─ Include token addresses (yes_mint, no_mint)           │
-│                                                              │
-│  6. Add discovery helpers                                    │
-│     └─ available_categories (from fetchTagsByCategories)     │
-│     └─ available_series (from response)                      │
-│                                                              │
-│  7. Return with pagination info                              │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
+**File:** `lib/ai/prompts/trading/promptBuilder.ts` (new file, replaces contextBuilder.ts)
+
+```typescript
+export interface TradingPromptInput {
+  signal?: {
+    type: "price_swing" | "volume_spike" | "orderbook_imbalance";
+    ticker: string;
+    data: Record<string, unknown>;
+    timestamp: number;
+  };
+  usdcBalance: number;
+}
+
+export function buildTradingPrompt(input: TradingPromptInput): string {
+  const { signal, usdcBalance } = input;
+
+  if (signal) {
+    return buildSignalPrompt(signal, usdcBalance);
+  }
+  return buildPeriodicPrompt(usdcBalance);
+}
+
+function buildSignalPrompt(
+  signal: TradingPromptInput["signal"],
+  usdcBalance: number,
+): string {
+  const signalType = signal!.type.replace(/_/g, " ").toUpperCase();
+  
+  let signalDetails = "";
+  switch (signal!.type) {
+    case "price_swing":
+      const { previousPrice, currentPrice, changePercent } = signal!.data as {
+        previousPrice: number;
+        currentPrice: number;
+        changePercent: number;
+      };
+      signalDetails = `
+- Previous price: ${previousPrice.toFixed(4)}
+- Current price: ${currentPrice.toFixed(4)}  
+- Change: ${(changePercent * 100).toFixed(2)}%`;
+      break;
+      
+    case "volume_spike":
+      const { volume, averageVolume, multiplier, takerSide } = signal!.data as {
+        volume: number;
+        averageVolume: number;
+        multiplier: number;
+        takerSide: string;
+      };
+      signalDetails = `
+- Trade volume: ${volume}
+- Average volume: ${averageVolume.toFixed(0)}
+- Spike: ${multiplier.toFixed(1)}x normal
+- Taker side: ${takerSide}`;
+      break;
+      
+    case "orderbook_imbalance":
+      const { ratio, direction } = signal!.data as {
+        ratio: number;
+        direction: string;
+      };
+      signalDetails = `
+- Imbalance ratio: ${ratio.toFixed(2)}
+- Direction: ${direction}`;
+      break;
+  }
+
+  return `## Trading Signal Detected
+
+**Type:** ${signalType}
+**Market:** ${signal!.ticker}
+**Time:** ${new Date(signal!.timestamp).toISOString()}
+${signalDetails}
+
+## Your Resources
+
+Available USDC: $${usdcBalance.toFixed(2)}
+
+## Instructions
+
+1. Use \`discoverEvent\` to get current details for market "${signal!.ticker}"
+2. Use \`retrievePosition\` to check if you have existing positions
+3. Analyze whether this ${signalType.toLowerCase()} presents a trading opportunity
+4. If confident (>70%), execute a trade using \`increasePosition\` or \`decreasePosition\`
+5. Explain your reasoning clearly`;
+}
+
+function buildPeriodicPrompt(usdcBalance: number): string {
+  return `## Periodic Market Scan
+
+## Your Resources
+
+Available USDC: $${usdcBalance.toFixed(2)}
+
+## Instructions
+
+1. Use \`discoverEvent\` to browse active prediction markets
+2. Use \`retrievePosition\` to review your current positions
+3. Look for mispriced markets or opportunities based on your analysis
+4. If you find a high-conviction opportunity (>70%), execute a trade
+5. If no compelling opportunities, explain why you're holding`;
+}
 ```
 
 ---
 
-## dflow Functions Used
+### 4. `lib/ai/workflows/tradingAgent.ts` - Simplify Context Fetching
 
-From `lib/dflow/prediction-markets/discover.ts`:
+**Remove:** 
+- `fetchContextStep` fetching markets via HTTP
+- Complex `MarketContext` building
 
-| Function | Usage |
-|----------|-------|
-| `fetchEvents()` | Core event fetching with `withNestedMarkets: true` |
-| `fetchActiveEvents()` | Browse active markets |
-| `fetchEventsBySeries()` | Filter by series tickers |
-| `fetchSeriesByCategory()` | Category → series resolution |
-| `fetchSeriesByTags()` | Tags → series resolution |
-| `fetchTagsByCategories()` | Get available categories (for suggestions) |
-| `filterActiveMarkets()` | Helper for status filtering |
-| `extractMarketTokens()` | Extract mint addresses |
+**Simplify to:**
+
+```typescript
+interface TradingInput {
+  modelId: string;
+  walletAddress: string;
+  signal?: MarketSignal;  // From PartyKit relay
+}
+
+// Simplified context - just balance
+async function fetchBalanceStep(walletAddress: string): Promise<number> {
+  "use step";
+  
+  try {
+    const res = await fetch(
+      `${BASE_URL}/api/solana/balance?wallet=${walletAddress}`
+    );
+    if (res.ok) {
+      const data = await res.json();
+      return parseFloat(data.formatted) || 0;
+    }
+  } catch (error) {
+    console.error("[tradingAgent] Failed to fetch balance:", error);
+  }
+  return 0;
+}
+
+// In workflow:
+const usdcBalance = await fetchBalanceStep(input.walletAddress);
+
+const result = await runAgentStep({
+  ...input,
+  usdcBalance,
+});
+```
 
 ---
 
-## Error Handling
+### 5. Update Agent Input Type
 
-| Scenario | Response |
-|----------|----------|
-| Invalid category | `{ success: false, error: "No markets found for category 'cryptoo'", suggestion: "Did you mean 'crypto'?", available_categories: [...] }` |
-| No results | `{ success: true, events: [], suggestion: "Try broadening your search", available_categories: [...] }` |
-| API error | `{ success: false, error: "dflow API error: ..." }` |
-| Rate limited | `{ success: false, error: "Rate limited. Try again in a few seconds." }` |
-
----
-
-## Example Usage
-
-### Browse active markets
 ```typescript
-discoverEvent({})
-// Returns: 10 active events with markets
-```
+// lib/ai/agents/types.ts
 
-### Filter by category
-```typescript
-discoverEvent({ category: "crypto" })
-// Returns: Crypto events with BTC, ETH, etc. markets
-```
+export interface AgentConfig {
+  modelId: string;
+  walletAddress: string;
+  privateKey?: string;
+  maxSteps?: number;
+}
 
-### Search by query
-```typescript
-discoverEvent({ query: "bitcoin price" })
-// Returns: Events matching "bitcoin price" in title
-```
-
-### Get specific event
-```typescript
-discoverEvent({ event_ticker: "BTCD-25DEC0313" })
-// Returns: Single event with all its markets
-```
-
-### Drill down by series
-```typescript
-discoverEvent({ series_ticker: "BTCD-DAILY", limit: 5 })
-// Returns: 5 most recent Bitcoin daily events
+export interface AgentRunInput {
+  signal?: MarketSignal;
+  usdcBalance: number;
+}
 ```
 
 ---
 
 ## Files to Modify
 
-### Create
-- `lib/ai/tools/discoverEvent.ts` - Main tool implementation
-
-### Update
-- `lib/ai/tools/index.ts` - Export `discoverEventTool`, remove old exports
-
-### Remove
-- `lib/ai/tools/market-discovery/getMarkets.ts`
-- `lib/ai/tools/market-discovery/getMarketDetails.ts`
-- `lib/ai/tools/market-discovery/getLiveData.ts`
-- `lib/ai/tools/market-discovery/index.ts`
-- `lib/ai/tools/market-discovery/` (directory)
+| File | Action |
+|------|--------|
+| `lib/ai/tools/index.ts` | Remove `createAgentTools`, keep exports |
+| `lib/ai/agents/predictionMarketAgent.ts` | Direct imports, lean prompt |
+| `lib/ai/prompts/trading/promptBuilder.ts` | Create (new lean builder) |
+| `lib/ai/prompts/trading/contextBuilder.ts` | Delete |
+| `lib/ai/workflows/tradingAgent.ts` | Simplify to signal + balance |
+| `lib/ai/agents/types.ts` | Simplify `AgentRunInput` |
 
 ---
 
 ## Implementation Checklist
 
-- [ ] Create `discoverEvent.ts` with input schema
-- [ ] Implement routing logic for different filter types
-- [ ] Add client-side query filtering
-- [ ] Transform dflow response to event-centric output
-- [ ] Add indicative prices with timestamps
-- [ ] Include discovery helpers (available_categories, available_series)
-- [ ] Add pagination support (cursor, has_more)
-- [ ] Implement error handling with suggestions
-- [ ] Update `lib/ai/tools/index.ts`
-- [ ] Remove old `market-discovery/` directory
-- [ ] Test with various filter combinations
+- [ ] Create `lib/ai/prompts/trading/promptBuilder.ts`
+- [ ] Update `lib/ai/agents/predictionMarketAgent.ts` with direct imports
+- [ ] Simplify `lib/ai/tools/index.ts` (remove factory)
+- [ ] Simplify `lib/ai/workflows/tradingAgent.ts` (balance only)
+- [ ] Update `lib/ai/agents/types.ts`
+- [ ] Delete `lib/ai/prompts/trading/contextBuilder.ts`
+- [ ] Test signal-triggered agent runs
+- [ ] Test periodic agent runs (no signal)

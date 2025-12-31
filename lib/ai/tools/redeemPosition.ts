@@ -13,7 +13,7 @@ import {
 } from "@/lib/dflow/prediction-markets/redeem";
 import { getUserPositions } from "@/lib/dflow/prediction-markets/retrieve";
 import { resolveMints, getOutcomeMint } from "./utils/resolveMints";
-import { signAndSubmitTransaction } from "@/lib/solana/transaction";
+import { signAndSubmitTransaction } from "@/lib/solana/transactions";
 
 // ============================================================================
 // Types

@@ -12,17 +12,23 @@ import { ToolLoopAgent, stepCountIs } from "ai";
 import { nanoid } from "nanoid";
 import { type KeyPairSigner } from "@solana/kit";
 import { getModel } from "@/lib/ai/models";
-import { createAgentTools } from "@/lib/ai/tools";
-import { createSignerFromBase58PrivateKey } from "@/lib/solana/signer";
+import { createSignerFromBase58PrivateKey } from "@/lib/solana/wallets";
 import { TRADING_SYSTEM_PROMPT } from "@/lib/ai/prompts/trading/systemPrompt";
 import {
-  buildContextPrompt,
-  type ContextPromptInput,
-} from "@/lib/ai/prompts/trading/contextBuilder";
+  buildTradingPrompt,
+  type TradingPromptInput,
+} from "@/lib/ai/prompts/trading/promptBuilder";
+
+// Direct tool imports
+import { discoverEventTool } from "@/lib/ai/tools/discoverEvent";
+import { createIncreasePositionTool } from "@/lib/ai/tools/increasePosition";
+import { createDecreasePositionTool } from "@/lib/ai/tools/decreasePosition";
+import { createRetrievePositionTool } from "@/lib/ai/tools/retrievePosition";
+import { createRedeemPositionTool } from "@/lib/ai/tools/redeemPosition";
+
 import type {
   AgentConfig,
-  MarketContext,
-  MarketSignal,
+  AgentRunInput,
   TradingResult,
   ExecutedTrade,
 } from "./types";
@@ -47,18 +53,30 @@ export class PredictionMarketAgent {
    * - If agent fails mid-execution, the entire run should be restarted
    *   (handled by the durable workflow wrapper)
    */
-  async run(
-    context: MarketContext,
-    signal?: MarketSignal,
-  ): Promise<TradingResult> {
+  async run(input: AgentRunInput): Promise<TradingResult> {
     // Create signer from private key if available
     let signer: KeyPairSigner | undefined;
     if (this.config.privateKey) {
       signer = await createSignerFromBase58PrivateKey(this.config.privateKey);
     }
 
-    // Create tools with wallet context
-    const tools = await createAgentTools(this.config.walletAddress, signer);
+    // Create tools directly with wallet context
+    const tools = {
+      discoverEvent: discoverEventTool,
+      increasePosition: createIncreasePositionTool(
+        this.config.walletAddress,
+        signer,
+      ),
+      decreasePosition: createDecreasePositionTool(
+        this.config.walletAddress,
+        signer,
+      ),
+      retrievePosition: createRetrievePositionTool(this.config.walletAddress),
+      redeemPosition: createRedeemPositionTool(
+        this.config.walletAddress,
+        signer,
+      ),
+    };
 
     // Create ToolLoopAgent for this run
     const agent = new ToolLoopAgent({
@@ -68,50 +86,23 @@ export class PredictionMarketAgent {
       stopWhen: stepCountIs(this.config.maxSteps ?? 10),
     });
 
-    // Build context prompt from market data
-    const contextSignal = signal
-      ? {
-          type: signal.type as
-            | "price_swing"
-            | "volume_spike"
-            | "orderbook_imbalance",
-          ticker: signal.ticker,
-          data: signal.data,
-          timestamp: signal.timestamp,
-        }
-      : undefined;
-
-    const promptInput: ContextPromptInput = {
-      availableMarkets: context.availableMarkets.map((m) => ({
-        ticker: m.ticker,
-        title: m.title,
-        yesPrice: m.yesPrice,
-        noPrice: m.noPrice,
-        volume: m.volume,
-        status: m.status as "open" | "closed" | "settled",
-      })),
-      portfolio: {
-        cashBalance: context.portfolio.cashBalance,
-        totalValue: context.portfolio.totalValue,
-        positions: context.portfolio.positions.map((p) => ({
-          marketTicker: p.marketTicker,
-          marketTitle: p.marketTitle,
-          side: p.side,
-          quantity: p.quantity,
-        })),
-      },
-      recentTrades: context.recentTrades.map((t) => ({
-        marketTicker: t.marketTicker,
-        side: t.side,
-        action: t.action,
-        quantity: t.quantity,
-        price: t.price,
-      })),
-      priceSwings: context.priceSwings,
-      signal: contextSignal,
+    // Build lean prompt from signal + balance
+    const promptInput: TradingPromptInput = {
+      signal: input.signal
+        ? {
+            type: input.signal.type as
+              | "price_swing"
+              | "volume_spike"
+              | "orderbook_imbalance",
+            ticker: input.signal.ticker,
+            data: input.signal.data,
+            timestamp: input.signal.timestamp,
+          }
+        : undefined,
+      usdcBalance: input.usdcBalance,
     };
 
-    const prompt = buildContextPrompt(promptInput);
+    const prompt = buildTradingPrompt(promptInput);
 
     console.log(
       `[PredictionMarketAgent:${this.config.modelId}] Starting agent run`,
@@ -132,10 +123,7 @@ export class PredictionMarketAgent {
     const decision = this.determineDecision(result.text, trades);
 
     // Get market info from trades or signal
-    const marketTicker =
-      signal?.ticker ||
-      trades[0]?.marketTicker ||
-      context.priceSwings[0]?.ticker;
+    const marketTicker = input.signal?.ticker || trades[0]?.marketTicker;
     const marketTitle = trades[0]?.marketTitle;
 
     return {
@@ -143,7 +131,7 @@ export class PredictionMarketAgent {
       trades,
       decision,
       steps: result.steps.length,
-      portfolioValue: context.portfolio.totalValue,
+      portfolioValue: input.usdcBalance,
       marketTicker,
       marketTitle,
     };
@@ -169,7 +157,7 @@ export class PredictionMarketAgent {
       if (!step.toolCalls || !step.toolResults) continue;
 
       for (const call of step.toolCalls) {
-        // Handle new position tools
+        // Handle increasePosition tool
         if (call.toolName === "increasePosition") {
           const resultEntry = step.toolResults.find(
             (r) => r.toolCallId === call.toolCallId,
@@ -206,6 +194,7 @@ export class PredictionMarketAgent {
           }
         }
 
+        // Handle decreasePosition tool
         if (call.toolName === "decreasePosition") {
           const resultEntry = step.toolResults.find(
             (r) => r.toolCallId === call.toolCallId,
@@ -237,42 +226,6 @@ export class PredictionMarketAgent {
               quantity: typedOutput.sold_quantity || input.quantity,
               price: typedOutput.avg_price || 0,
               notional: typedOutput.total_proceeds || 0,
-            });
-          }
-        }
-
-        // Legacy support for placeOrder (during migration)
-        if (call.toolName === "placeOrder") {
-          const resultEntry = step.toolResults.find(
-            (r) => r.toolCallId === call.toolCallId,
-          );
-
-          const typedOutput = resultEntry?.output as
-            | {
-                success?: boolean;
-                order?: { id?: string; price?: number };
-              }
-            | undefined;
-
-          if (typedOutput?.success) {
-            const input = call.input as {
-              market_ticker: string;
-              side: "yes" | "no";
-              action: "buy" | "sell";
-              quantity: number;
-              limit_price?: number;
-            };
-            const price = typedOutput.order?.price || input.limit_price || 0;
-
-            trades.push({
-              id: typedOutput.order?.id || nanoid(),
-              marketTicker: input.market_ticker,
-              marketTitle: input.market_ticker,
-              side: input.side as PositionSide,
-              action: input.action as TradeAction,
-              quantity: input.quantity,
-              price,
-              notional: input.quantity * price,
             });
           }
         }

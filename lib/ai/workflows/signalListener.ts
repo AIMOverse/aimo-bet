@@ -1,7 +1,11 @@
 "use workflow";
 
 import { createHook, sleep } from "workflow";
-import { tradingAgentWorkflow, type TradingResult } from "./tradingAgent";
+import {
+  tradingAgentWorkflow,
+  type TradingResult,
+  type MarketSignal,
+} from "./tradingAgent";
 
 // ============================================================================
 // Types
@@ -10,21 +14,6 @@ import { tradingAgentWorkflow, type TradingResult } from "./tradingAgent";
 export interface SignalListenerInput {
   modelId: string;
   walletAddress: string;
-}
-
-/** Market signal from PartyKit relay */
-export interface MarketSignal {
-  type: "price_swing" | "volume_spike" | "orderbook_imbalance";
-  ticker: string;
-  data: Record<string, unknown>;
-  timestamp: number;
-}
-
-interface PriceSwing {
-  ticker: string;
-  previousPrice: number;
-  currentPrice: number;
-  changePercent: number;
 }
 
 // ============================================================================
@@ -88,62 +77,17 @@ async function processSignal(
 ): Promise<TradingResult> {
   "use step";
 
-  // Convert signal to price swing format
-  const priceSwing = signalToPriceSwing(signal);
-
   // Delegate to tradingAgentWorkflow - it handles:
   // - Session management (durable)
-  // - Market context fetching (durable)
+  // - Balance fetching (durable)
   // - PredictionMarketAgent execution (durable wrapper, agent is NOT durable)
   // - Order fill waiting (durable)
   // - Database recording (durable, triggers Supabase Realtime)
   const result = await tradingAgentWorkflow({
     modelId,
     walletAddress,
-    priceSwings: [priceSwing],
     signal,
   });
 
   return result;
-}
-
-/**
- * Convert a market signal to the PriceSwing format for the agent prompt.
- */
-function signalToPriceSwing(signal: MarketSignal): PriceSwing {
-  switch (signal.type) {
-    case "price_swing":
-      return {
-        ticker: signal.ticker,
-        previousPrice: signal.data.previousPrice as number,
-        currentPrice: signal.data.currentPrice as number,
-        changePercent: signal.data.changePercent as number,
-      };
-
-    case "volume_spike":
-      // Volume spike - agent will fetch current prices
-      return {
-        ticker: signal.ticker,
-        previousPrice: 0,
-        currentPrice: 0,
-        changePercent: 0,
-      };
-
-    case "orderbook_imbalance":
-      // Orderbook imbalance - agent will analyze current state
-      return {
-        ticker: signal.ticker,
-        previousPrice: 0,
-        currentPrice: 0,
-        changePercent: 0,
-      };
-
-    default:
-      return {
-        ticker: signal.ticker,
-        previousPrice: 0,
-        currentPrice: 0,
-        changePercent: 0,
-      };
-  }
 }

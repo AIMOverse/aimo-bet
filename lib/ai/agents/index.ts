@@ -10,14 +10,9 @@ export { PredictionMarketAgent } from "./predictionMarketAgent";
 export type {
   // Configuration
   AgentConfig,
-  // Market context (input)
-  MarketInfo,
-  PositionInfo,
-  PortfolioInfo,
-  TradeInfo,
-  PriceSwing,
+  // Agent input (lean context)
+  AgentRunInput,
   MarketSignal,
-  MarketContext,
   // Trading result (output)
   ExecutedTrade,
   TradingResult,
