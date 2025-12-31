@@ -33,6 +33,19 @@ export const TOKEN_MINTS = {
 export type SupportedCurrency = keyof typeof TOKEN_MINTS;
 
 // ============================================================================
+// Well-known Program IDs
+// ============================================================================
+
+export const PROGRAM_IDS = {
+  /** Token-2022 Program (used by prediction market tokens) */
+  TOKEN_2022: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+  /** Original SPL Token Program */
+  TOKEN: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+} as const;
+
+export type ProgramId = keyof typeof PROGRAM_IDS;
+
+// ============================================================================
 // getBalance - Get native SOL balance
 // https://solana.com/developers/cookbook/accounts/get-account-balance
 // ============================================================================
@@ -157,6 +170,72 @@ export async function getTokenAccountsByOwner(
   } catch (error) {
     console.error("[solana/client] getTokenAccountsByOwner error:", error);
     return null;
+  }
+}
+
+// ============================================================================
+// getTokenAccountsByProgram - Get all token accounts for a program
+// ============================================================================
+
+/** Token account with balance info (used by getTokenAccountsByProgram) */
+export interface TokenAccountWithBalance {
+  mint: string;
+  rawBalance: string;
+  balance: number;
+  decimals: number;
+}
+
+/**
+ * Get all token accounts for a wallet filtered by token program
+ * Useful for fetching Token-2022 accounts (e.g., prediction market tokens)
+ *
+ * @param owner - Wallet address
+ * @param programId - Token program ID (defaults to TOKEN_2022)
+ * @param nonZeroOnly - If true, only return accounts with non-zero balance (default: true)
+ * @returns Array of token accounts with balances
+ */
+export async function getTokenAccountsByProgram(
+  owner: string,
+  programId: string = PROGRAM_IDS.TOKEN_2022,
+  nonZeroOnly: boolean = true,
+): Promise<TokenAccountWithBalance[]> {
+  try {
+    const rpc = getRpc();
+
+    const { value: accounts } = await rpc
+      .getTokenAccountsByOwner(
+        address(owner),
+        { programId: address(programId) },
+        { encoding: "jsonParsed" },
+      )
+      .send();
+
+    const tokenAccounts: TokenAccountWithBalance[] = [];
+
+    for (const account of accounts) {
+      const parsed = account.account.data.parsed;
+      const info = parsed.info;
+      const balance = info.tokenAmount.uiAmount ?? 0;
+
+      // Filter non-zero balances if requested
+      if (nonZeroOnly && balance <= 0) {
+        continue;
+      }
+
+      tokenAccounts.push({
+        mint: info.mint,
+        rawBalance: info.tokenAmount.amount,
+        balance,
+        decimals: info.tokenAmount.decimals,
+      });
+    }
+
+    return tokenAccounts;
+  } catch (error) {
+    console.error("[solana/client] getTokenAccountsByProgram error:", error);
+    throw new Error(
+      `Failed to fetch token accounts: ${error instanceof Error ? error.message : "Unknown error"}`,
+    );
   }
 }
 

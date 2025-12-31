@@ -14,6 +14,7 @@ import {
   type Signature,
 } from "@solana/kit";
 import { getRpc } from "./client";
+import { sleep } from "@/lib/dflow/utils";
 
 // ============================================================================
 // Types
@@ -247,12 +248,4 @@ export async function getTransactionStatus(
       error: error instanceof Error ? error.message : "Unknown error",
     };
   }
-}
-
-// ============================================================================
-// Internal Utilities
-// ============================================================================
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
