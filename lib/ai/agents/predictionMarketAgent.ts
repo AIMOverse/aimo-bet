@@ -10,8 +10,10 @@
 
 import { ToolLoopAgent, stepCountIs } from "ai";
 import { nanoid } from "nanoid";
+import { type KeyPairSigner } from "@solana/kit";
 import { getModel } from "@/lib/ai/models";
 import { createAgentTools } from "@/lib/ai/tools";
+import { createSignerFromBase58PrivateKey } from "@/lib/solana/signer";
 import { TRADING_SYSTEM_PROMPT } from "@/lib/ai/prompts/trading/systemPrompt";
 import {
   buildContextPrompt,
@@ -49,11 +51,14 @@ export class PredictionMarketAgent {
     context: MarketContext,
     signal?: MarketSignal,
   ): Promise<TradingResult> {
+    // Create signer from private key if available
+    let signer: KeyPairSigner | undefined;
+    if (this.config.privateKey) {
+      signer = await createSignerFromBase58PrivateKey(this.config.privateKey);
+    }
+
     // Create tools with wallet context
-    const tools = createAgentTools(
-      this.config.walletAddress,
-      this.config.privateKey,
-    );
+    const tools = await createAgentTools(this.config.walletAddress, signer);
 
     // Create ToolLoopAgent for this run
     const agent = new ToolLoopAgent({
@@ -146,7 +151,7 @@ export class PredictionMarketAgent {
 
   /**
    * Extract executed trades from agent steps.
-   * Looks for successful placeOrder tool calls and their results.
+   * Looks for successful increasePosition/decreasePosition tool calls and their results.
    */
   private extractTrades(
     steps: Array<{
@@ -164,6 +169,79 @@ export class PredictionMarketAgent {
       if (!step.toolCalls || !step.toolResults) continue;
 
       for (const call of step.toolCalls) {
+        // Handle new position tools
+        if (call.toolName === "increasePosition") {
+          const resultEntry = step.toolResults.find(
+            (r) => r.toolCallId === call.toolCallId,
+          );
+
+          const typedOutput = resultEntry?.output as
+            | {
+                success?: boolean;
+                signature?: string;
+                filled_quantity?: number;
+                avg_price?: number;
+                total_cost?: number;
+              }
+            | undefined;
+
+          if (typedOutput?.success) {
+            const input = call.input as {
+              market_ticker: string;
+              side: "yes" | "no";
+              usdc_amount?: number;
+              quantity?: number;
+            };
+
+            trades.push({
+              id: typedOutput.signature || nanoid(),
+              marketTicker: input.market_ticker,
+              marketTitle: input.market_ticker,
+              side: input.side as PositionSide,
+              action: "buy" as TradeAction,
+              quantity: typedOutput.filled_quantity || input.quantity || 0,
+              price: typedOutput.avg_price || 0,
+              notional: typedOutput.total_cost || 0,
+            });
+          }
+        }
+
+        if (call.toolName === "decreasePosition") {
+          const resultEntry = step.toolResults.find(
+            (r) => r.toolCallId === call.toolCallId,
+          );
+
+          const typedOutput = resultEntry?.output as
+            | {
+                success?: boolean;
+                signature?: string;
+                sold_quantity?: number;
+                avg_price?: number;
+                total_proceeds?: number;
+              }
+            | undefined;
+
+          if (typedOutput?.success) {
+            const input = call.input as {
+              market_ticker: string;
+              side: "yes" | "no";
+              quantity: number;
+            };
+
+            trades.push({
+              id: typedOutput.signature || nanoid(),
+              marketTicker: input.market_ticker,
+              marketTitle: input.market_ticker,
+              side: input.side as PositionSide,
+              action: "sell" as TradeAction,
+              quantity: typedOutput.sold_quantity || input.quantity,
+              price: typedOutput.avg_price || 0,
+              notional: typedOutput.total_proceeds || 0,
+            });
+          }
+        }
+
+        // Legacy support for placeOrder (during migration)
         if (call.toolName === "placeOrder") {
           const resultEntry = step.toolResults.find(
             (r) => r.toolCallId === call.toolCallId,

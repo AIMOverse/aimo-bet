@@ -22,10 +22,15 @@ lib/ai/
 │   ├── riskLimits.ts              # Pre-trade validation
 │   └── middleware.ts              # LLM-level limits (maxTokens, maxToolCalls)
 ├── tools/                     # AI SDK tools for agent capabilities
-│   ├── index.ts                   # Tool factory with wallet injection
-│   ├── market-discovery/          # getMarkets, getMarketDetails, getLiveData
-│   ├── trade-execution/           # placeOrder, getOrderStatus, cancelOrder
-│   └── portfolio-management/      # getBalance, getPositions, getTradeHistory
+│   ├── index.ts                   # Tool factory with wallet/signer injection
+│   ├── discoverEvent.ts           # Event-centric market discovery (dflow-based)
+│   ├── portfolio-management/      # getBalance, getTradeHistory
+│   ├── increasePosition.ts        # Buy YES/NO tokens (dflow-based)
+│   ├── decreasePosition.ts        # Sell YES/NO tokens (dflow-based)
+│   ├── retrievePosition.ts        # Get current positions (dflow-based)
+│   ├── redeemPosition.ts          # Redeem winning positions (dflow-based)
+│   └── utils/
+│       └── resolveMints.ts        # Market ticker → mint address resolution
 ├── models/                    # Model catalog and providers
 │   ├── catalog.ts                 # Model definitions with wallet addresses
 │   ├── providers.ts               # Provider configurations
@@ -66,47 +71,284 @@ const input = {
 // Returns streaming response with x-workflow-run-id header
 ```
 
-### Durable Tools
+## Market Discovery Tool
 
-Tools are defined with `"use step"` directive for durability:
+The `discoverEvent` tool provides event-centric market discovery using the dflow Prediction Market Metadata API.
+
+### discoverEvent
+
+Discover prediction market events with nested markets. Primary discovery tool for finding trading opportunities.
 
 ```typescript
-const tools = {
-  getMarkets: {
-    description: "Get list of prediction markets.",
-    inputSchema: z.object({ ... }),
-    execute: async function({ status, limit }) {
-      "use step";  // Durable - retries on failure
-      const res = await fetch(`${BASE_URL}/api/dflow/markets?...`);
-      return { success: true, markets: await res.json() };
-    },
-  },
+// Browse active markets
+const result = await discoverEvent({});
 
-  cancelOrder: {
-    description: "Cancel a pending order.",
-    inputSchema: z.object({ ... }),
-    execute: async function({ order_id }) {
-      // NO "use step" - don't retry cancellations
-      const res = await fetch(`${BASE_URL}/api/dflow/order/${order_id}`, { method: "DELETE" });
-      return { success: true, result: await res.json() };
-    },
-  },
-};
+// Filter by category
+const result = await discoverEvent({ category: "crypto" });
+
+// Search by query
+const result = await discoverEvent({ query: "bitcoin price" });
+
+// Get specific event
+const result = await discoverEvent({ event_ticker: "BTCD-25DEC0313" });
+
+// Drill down by series
+const result = await discoverEvent({ series_ticker: "BTCD-DAILY", limit: 5 });
+
+// Response
+{
+  success: true,
+  events: [
+    {
+      event_ticker: "BTCD-25DEC0313",
+      event_title: "Bitcoin Daily 2025-03-13",
+      series_ticker: "BTCD-DAILY",
+      category: "crypto",
+      tags: ["bitcoin", "price"],
+      markets: [
+        {
+          market_ticker: "BTC-100K-2024",
+          title: "BTC above $100K?",
+          status: "active",
+          yes_mint: "YES...",
+          no_mint: "NO...",
+          volume_24h: 50000,
+          open_interest: 120000
+        }
+      ],
+      market_count: 1,
+      total_volume: 50000
+    }
+  ],
+  total_events: 1,
+  total_markets: 1,
+  filters_applied: { category: "crypto" },
+  has_more: false,
+  price_note: "Prices are indicative snapshots. Actual execution prices may differ.",
+  available_categories: ["crypto", "sports", "politics"],
+  available_series: [{ ticker: "BTCD-DAILY", title: "Bitcoin Daily" }]
+}
 ```
 
-### Available Tools
+**Input Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `query` | string? | Search terms to match against event/market titles |
+| `category` | string? | Filter by category: crypto, sports, politics, entertainment |
+| `tags` | string[]? | Filter by tags (e.g., ['bitcoin', 'price']) |
+| `series_ticker` | string? | Filter to specific series (e.g., 'BTCD-DAILY') |
+| `event_ticker` | string? | Get details for a specific event by ticker |
+| `status` | enum? | Filter by market status: active, initialized, determined, finalized (default: active) |
+| `limit` | number? | Maximum events to return (default: 10, max: 50) |
+| `cursor` | string? | Pagination cursor from previous response |
+
+## Position Management Tools
+
+The trading tools use direct dflow library calls for real-time position management:
+
+### Tool Overview
+
+| Tool | Purpose | Input | Output |
+|------|---------|-------|--------|
+| `discoverEvent` | Discover events with nested markets | query, category, tags, series_ticker, event_ticker, status, limit, cursor | events[], total_events, total_markets, available_categories, available_series |
+| `increasePosition` | Buy YES/NO tokens | market_ticker, side, usdc_amount OR quantity, slippage_bps | filled_quantity, avg_price, total_cost, signature |
+| `decreasePosition` | Sell YES/NO tokens | market_ticker, side, quantity, slippage_bps | sold_quantity, avg_price, total_proceeds, signature |
+| `retrievePosition` | Get current positions | market_ticker (optional) | positions[], summary |
+| `redeemPosition` | Redeem winning tokens | market_ticker, side, quantity (optional) | payout_amount, signature |
+
+### increasePosition
+
+Buy YES or NO outcome tokens to open or increase a position.
+
+```typescript
+// Buy $10 worth of YES tokens
+const result = await increasePosition({
+  market_ticker: "BTC-100K-2024",
+  side: "yes",
+  usdc_amount: 10,
+  slippage_bps: 200,  // 2%
+});
+
+// Or buy a specific quantity
+const result = await increasePosition({
+  market_ticker: "BTC-100K-2024",
+  side: "no",
+  quantity: 5,  // 5 tokens
+  slippage_bps: 200,
+});
+
+// Response
+{
+  success: true,
+  market_ticker: "BTC-100K-2024",
+  side: "yes",
+  resolved_mints: { input_mint: "EPjF...", output_mint: "YES..." },
+  filled_quantity: 20.5,
+  avg_price: 0.488,
+  total_cost: 10.0,
+  signature: "5KKs...",
+  execution_mode: "sync"
+}
+```
+
+### decreasePosition
+
+Sell YES or NO outcome tokens to reduce or close a position.
+
+```typescript
+const result = await decreasePosition({
+  market_ticker: "BTC-100K-2024",
+  side: "yes",
+  quantity: 10,
+  slippage_bps: 200,
+});
+
+// Response
+{
+  success: true,
+  market_ticker: "BTC-100K-2024",
+  side: "yes",
+  resolved_mints: { input_mint: "YES...", output_mint: "EPjF..." },
+  sold_quantity: 10,
+  avg_price: 0.52,
+  total_proceeds: 5.2,
+  signature: "7JKp...",
+  execution_mode: "sync"
+}
+```
+
+### retrievePosition
+
+Get current prediction market positions for the wallet.
+
+```typescript
+// Get all positions
+const result = await retrievePosition({});
+
+// Or filter by market
+const result = await retrievePosition({
+  market_ticker: "BTC-100K-2024"
+});
+
+// Response
+{
+  success: true,
+  wallet: "5KKs...",
+  positions: [
+    {
+      market_ticker: "BTC-100K-2024",
+      market_title: "BTC above $100K by end of 2024?",
+      side: "yes",
+      quantity: 15.5,
+      market_status: "active"
+    }
+  ],
+  summary: {
+    total_positions: 1,
+    active_positions: 1,
+    resolved_positions: 0
+  }
+}
+```
+
+### redeemPosition
+
+Redeem winning outcome tokens after market resolution.
+
+```typescript
+// Redeem all tokens in position
+const result = await redeemPosition({
+  market_ticker: "BTC-100K-2024",
+  side: "yes"
+});
+
+// Or redeem specific quantity
+const result = await redeemPosition({
+  market_ticker: "BTC-100K-2024",
+  side: "yes",
+  quantity: 10
+});
+
+// Response
+{
+  success: true,
+  market_ticker: "BTC-100K-2024",
+  side: "yes",
+  is_redeemable: true,
+  payout_pct: 1.0,
+  redeemed_quantity: 15.5,
+  payout_amount: 15.5,
+  signature: "9LMn..."
+}
+```
+
+### Market Resolution Helper
+
+The `resolveMints` utility resolves market tickers to mint addresses:
+
+```typescript
+import { resolveMints, getTradeMintsForBuy, getTradeMintsForSell } from "@/lib/ai/tools";
+
+// Resolve market ticker
+const resolved = await resolveMints("BTC-100K-2024");
+// {
+//   market_ticker: "BTC-100K-2024",
+//   event_ticker: "BTC-2024",
+//   title: "BTC above $100K by end of 2024?",
+//   settlement_mint: "EPjF...",  // USDC
+//   yes_mint: "YES...",
+//   no_mint: "NO...",
+//   market_ledger: "LED...",
+//   status: "active"
+// }
+
+// Get mints for buying YES
+const buyMints = getTradeMintsForBuy(resolved, "yes");
+// { inputMint: "EPjF..." (USDC), outputMint: "YES..." }
+
+// Get mints for selling NO
+const sellMints = getTradeMintsForSell(resolved, "no");
+// { inputMint: "NO...", outputMint: "EPjF..." (USDC) }
+```
+
+### Tool Factory
+
+Create tools with wallet and signer injection:
+
+```typescript
+import { createAgentTools } from "@/lib/ai/tools";
+import { createSignerFromBase58PrivateKey } from "@/lib/solana/signer";
+
+// Create signer from private key
+const signer = await createSignerFromBase58PrivateKey(privateKey);
+
+// Create tools bound to wallet (async function)
+const tools = await createAgentTools(walletAddress, signer);
+
+// Discover markets
+const events = await tools.discoverEvent.execute({ category: "crypto" });
+
+// Use tools
+const positions = await tools.retrievePosition.execute({});
+const trade = await tools.increasePosition.execute({
+  market_ticker: "BTC-100K-2024",
+  side: "yes",
+  usdc_amount: 10
+});
+```
+
+## Available Tools Summary
 
 | Tool | Durable | Purpose |
 |------|---------|---------|
-| `getMarkets` | Yes | List prediction markets |
-| `getMarketDetails` | Yes | Get specific market info |
-| `getLiveData` | Yes | Get live prices/orderbook |
+| `discoverEvent` | Yes | Discover events with nested markets (event-centric discovery) |
 | `getBalance` | Yes | Check wallet balance |
-| `getPositions` | Yes | List current positions |
 | `getTradeHistory` | Yes | Recent trade history |
-| `placeOrder` | Yes | Execute buy/sell |
-| `getOrderStatus` | Yes | Check order status |
-| `cancelOrder` | No | Cancel pending order |
+| `increasePosition` | Yes | Buy YES/NO outcome tokens |
+| `decreasePosition` | Yes | Sell YES/NO outcome tokens |
+| `retrievePosition` | Yes | Get current positions |
+| `redeemPosition` | Yes | Redeem winning positions |
 
 ## Unified API Endpoint
 
@@ -286,6 +528,9 @@ import {
 # OpenRouter API (for AI models)
 OPENROUTER_API_KEY=...
 
+# dflow API (for prediction markets)
+DFLOW_API_KEY=...
+
 # Model wallet public keys
 WALLET_GPT4O_PUBLIC=<solana-public-key>
 WALLET_CLAUDE_SONNET_PUBLIC=<solana-public-key>
@@ -313,7 +558,8 @@ NEXT_PUBLIC_PARTYKIT_HOST=your-project.partykit.dev
     "workflow": "^4.x",
     "@workflow/ai": "^4.x",
     "ai": "^6.x",
-    "zod": "^4.x"
+    "zod": "^4.x",
+    "@solana/kit": "^2.x"
   }
 }
 ```
@@ -337,10 +583,21 @@ Signal (PartyKit) → POST /api/chat → tradingAgentWorkflow
 ### Deleted Files
 - `lib/ai/agents/chatAgent.ts` - Replaced by DurableAgent workflow
 - `lib/ai/agents/predictionMarketAgent.ts` - Merged into tradingAgent.ts
+- `lib/ai/tools/trade-execution/` - Replaced by new position management tools
+- `lib/ai/tools/market-discovery/` - Replaced by discoverEvent tool
 - `app/api/chat/stream/route.ts` - Merged into /api/chat GET handler
 - `app/api/arena/chat-messages/route.ts` - Merged into /api/chat?sessionId=
 
+### New Files
+- `lib/ai/tools/discoverEvent.ts` - Event-centric market discovery (replaces market-discovery tools)
+- `lib/ai/tools/increasePosition.ts` - Buy YES/NO tokens (replaces placeOrder buy)
+- `lib/ai/tools/decreasePosition.ts` - Sell YES/NO tokens (replaces placeOrder sell)
+- `lib/ai/tools/retrievePosition.ts` - Get positions (dflow-based)
+- `lib/ai/tools/redeemPosition.ts` - Redeem winning positions
+- `lib/ai/tools/utils/resolveMints.ts` - Market ticker resolution helper
+
 ### Updated Files
+- `lib/ai/tools/index.ts` - Now exports discoverEvent and position management tools
 - `lib/ai/workflows/tradingAgent.ts` - Now uses DurableAgent with durable tools
 - `app/api/chat/route.ts` - Unified POST/GET handlers
 - `hooks/chat/useChat.ts` - Uses WorkflowChatTransport
