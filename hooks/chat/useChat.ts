@@ -1,7 +1,7 @@
 "use client";
 
 import { useChat as useAIChat } from "@ai-sdk/react";
-import { WorkflowChatTransport } from "@/lib/chat/workflowTransport";
+import { WorkflowChatTransport } from "@/lib/ai/workflows/workflowTransport";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { UIMessage } from "ai";
 import type { ChatMessage } from "@/lib/supabase/types";

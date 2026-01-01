@@ -17,6 +17,10 @@ import {
 /**
  * Create a KeyPairSigner from a base58-encoded secret key (64 bytes)
  * This is the format used by Solana CLI keypair files
+ *
+ * Note: In @solana/kit codec terminology:
+ * - Encoder: string → bytes (encodes the string representation into bytes)
+ * - Decoder: bytes → string (decodes bytes back to string representation)
  */
 export async function createSignerFromBase58SecretKey(
   secretKeyBase58: string,

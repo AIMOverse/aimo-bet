@@ -16,6 +16,7 @@ import {
   updateAgentSessionValue,
 } from "@/lib/supabase/agents";
 import type { AgentSession, TriggerType } from "@/lib/supabase/types";
+import { getCurrencyBalance } from "@/lib/solana/client";
 
 // ============================================================================
 // Types
@@ -37,6 +38,9 @@ export type { TradingResult, MarketSignal };
 // ============================================================================
 
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+
+// Default USDC decimals for formatting
+const USDC_DECIMALS = 6;
 
 // ============================================================================
 // Trading Agent Workflow (Durable)
@@ -127,17 +131,15 @@ async function getAgentSessionStep(
 /**
  * Fetch USDC balance for the agent.
  * Durable: Safe to retry (read-only operation).
+ * Now calls lib/solana/client directly instead of API route.
  */
 async function fetchBalanceStep(walletAddress: string): Promise<number> {
   "use step";
 
   try {
-    const res = await fetch(
-      `${BASE_URL}/api/solana/balance?wallet=${walletAddress}`,
-    );
-    if (res.ok) {
-      const data = await res.json();
-      return parseFloat(data.formatted) || 0;
+    const balance = await getCurrencyBalance(walletAddress, "USDC");
+    if (balance) {
+      return parseFloat(balance.formatted) || 0;
     }
   } catch (error) {
     console.error("[tradingAgent] Failed to fetch balance:", error);
