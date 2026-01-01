@@ -22,6 +22,7 @@ import { useMemo, useState } from "react";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { AnimateNumber } from "motion-plus/react";
 
 interface PerformanceChartProps {
   data: ChartDataPoint[];
@@ -108,7 +109,7 @@ function ChangeIndicator({ change }: { change: number }) {
   return <Minus className="h-3 w-3 text-muted-foreground" />;
 }
 
-// Custom label component for line-end logos
+// Custom label component for line-end logos with animated value
 interface LineEndLabelProps {
   x?: number | string;
   y?: number | string;
@@ -119,6 +120,8 @@ interface LineEndLabelProps {
   isHovered: boolean;
   isDimmed: boolean;
   onHover: (name: string | null) => void;
+  latestValue: number;
+  valueDisplay: ValueDisplay;
 }
 
 function LineEndLabel({
@@ -131,6 +134,8 @@ function LineEndLabel({
   isHovered,
   isDimmed,
   onHover,
+  latestValue,
+  valueDisplay,
 }: LineEndLabelProps) {
   // Only render at the last data point
   const xNum = typeof x === "string" ? parseFloat(x) : x;
@@ -142,14 +147,20 @@ function LineEndLabel({
 
   const logoPath = getSeriesLogoPath(modelName);
   const initial = modelName.charAt(0).toUpperCase();
-  const size = 20;
+  const logoSize = 20;
+  const labelWidth = 100; // Width for logo + value
+
+  // Calculate percent change for percent mode
+  const percentChange =
+    ((latestValue - DEFAULT_STARTING_CAPITAL) / DEFAULT_STARTING_CAPITAL) * 100;
+  const isPositive = percentChange >= 0;
 
   return (
     <foreignObject
       x={xNum + 4}
-      y={yNum - size / 2}
-      width={size}
-      height={size}
+      y={yNum - logoSize / 2}
+      width={labelWidth}
+      height={logoSize}
       style={{
         overflow: "visible",
         opacity: isDimmed ? 0.3 : 1,
@@ -157,13 +168,13 @@ function LineEndLabel({
       }}
     >
       <div
-        className="cursor-pointer"
+        className="flex items-center gap-1.5 cursor-pointer"
         onMouseEnter={() => onHover(modelName)}
         onMouseLeave={() => onHover(null)}
       >
         <Avatar
           className={cn(
-            "size-5 ring-[1.5px] ring-offset-0 bg-background",
+            "size-5 ring-[1.5px] ring-offset-0 bg-background shrink-0",
             isHovered && "ring-2",
           )}
           style={{
@@ -184,6 +195,51 @@ function LineEndLabel({
             {initial}
           </AvatarFallback>
         </Avatar>
+        <span
+          className={cn(
+            "text-[11px] font-semibold whitespace-nowrap tabular-nums",
+            valueDisplay === "percent" &&
+              (isPositive ? "text-green-500" : "text-red-500"),
+          )}
+          style={{
+            color: valueDisplay === "dollar" ? color : undefined,
+          }}
+        >
+          {valueDisplay === "dollar" ? (
+            <AnimateNumber
+              format={{
+                style: "currency",
+                currency: "USD",
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              }}
+              locales="en-US"
+              transition={{
+                layout: { duration: 0.3 },
+                y: { type: "spring", visualDuration: 0.4, bounce: 0.2 },
+              }}
+            >
+              {latestValue}
+            </AnimateNumber>
+          ) : (
+            <>
+              {isPositive ? "+" : ""}
+              <AnimateNumber
+                format={{
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                }}
+                suffix="%"
+                transition={{
+                  layout: { duration: 0.3 },
+                  y: { type: "spring", visualDuration: 0.4, bounce: 0.2 },
+                }}
+              >
+                {percentChange}
+              </AnimateNumber>
+            </>
+          )}
+        </span>
       </div>
     </foreignObject>
   );
@@ -400,7 +456,7 @@ export function PerformanceChart({
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
               data={chartData}
-              margin={{ ...CHART_CONFIG.margin, right: 70 }}
+              margin={{ ...CHART_CONFIG.margin, right: 110 }}
             >
               <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
               <XAxis
@@ -460,6 +516,10 @@ export function PerformanceChart({
                           isHovered={isHovered}
                           isDimmed={isDimmed}
                           onHover={setHoveredModel}
+                          latestValue={
+                            latestValues?.get(name) ?? DEFAULT_STARTING_CAPITAL
+                          }
+                          valueDisplay={valueDisplay}
                         />
                       )}
                     />

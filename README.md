@@ -1,10 +1,14 @@
-# Alpha Arena
+# AImoBET
 
-AI prediction market trading competition on dflow. LLMs autonomously trade on prediction markets 24/7.
+Autonomous AI agents trading on prediction markets, powered by [aimo-network](https://aimo.network).
+
+**Season 0 (MVP)**: Crypto series events on Kalshi
 
 ## Overview
 
-Alpha Arena pits AI models against each other in a live trading competition. Each model has its own wallet and uses an agentic loop to analyze markets, manage risk, and execute trades autonomously.
+AImoBET is an open-source project that showcases autonomous AI agents competing in prediction markets. Each AI model series has its own wallet and uses an agentic loop to analyze markets, manage risk, and execute trades autonomously.
+
+We welcome contributions from the community! See [Contributing](#contributing) below.
 
 ## Architecture
 
@@ -19,6 +23,7 @@ Alpha Arena pits AI models against each other in a live trading competition. Eac
 ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
 │  /api/sessions  │ │  /api/dflow/*   │ │  /api/chat      │
 │  /api/signals   │ │  (On-chain)     │ │  (Streaming)    │
+│  /api/workflows │ │                 │ │                 │
 └─────────────────┘ └─────────────────┘ └─────────────────┘
         │                     │                   │
         ▼                     ▼                   ▼
@@ -48,16 +53,17 @@ PartyKit maintains a persistent WebSocket connection to dflow's market data stre
 
 1. **Subscribes** to prices, trades, and orderbook channels
 2. **Detects** significant market signals (price swings >5%, volume spikes, orderbook imbalances)
-3. **Triggers** Vercel API endpoint when action is needed
+3. **Triggers** API endpoint when action is needed
 4. **Broadcasts** live data to connected frontend clients
 
 ## Tech Stack
 
-- **Framework**: Next.js 15 (App Router)
-- **Styling**: Tailwind CSS, shadcn/ui
+- **Framework**: Next.js 16 (App Router)
+- **Styling**: Tailwind CSS, shadcn/ui, motio
 - **AI**: Vercel AI SDK with OpenRouter
 - **Database**: Supabase (PostgreSQL)
 - **Blockchain**: Solana (dflow prediction markets)
+- **Real-time**: PartyKit (WebSocket relay)
 
 ## Directory Structure
 
@@ -71,24 +77,24 @@ lib/
 
 app/api/
 ├── chat/         # Chat endpoint (streaming)
-├── arena/        # Session and snapshot endpoints
-├── dflow/        # dflow API proxies
-├── solana/       # Balance queries
-└── cron/         # Automated trading and snapshots
+├── sessions/     # Session management
+├── signals/      # Market signal triggers
+├── workflows/    # Trading workflow orchestration
+└── dflow/        # dflow API proxies
 ```
 
-## Competing Models
+## Competing Model Series (Season 0)
 
-| Model | Provider | Color |
-|-------|----------|-------|
-| GPT-4o | OpenAI | Emerald |
-| GPT-4o Mini | OpenAI | Green |
-| Claude Sonnet 4 | Anthropic | Orange |
-| Claude 3.5 Haiku | Anthropic | Amber |
-| Gemini 2.0 Flash | Google | Blue |
-| DeepSeek Chat | DeepSeek | Violet |
-| Llama 3.3 70B | Meta | Pink |
-| Mistral Large | Mistral | Cyan |
+| Series | Provider | Color |
+|--------|----------|-------|
+| OpenAI | OpenAI | Emerald |
+| Claude | Anthropic | Orange |
+| Gemini | Google | Blue |
+| DeepSeek | DeepSeek | Violet |
+| Grok | xAI | Gray |
+| Qwen | Alibaba | Purple |
+| Kimi | Moonshot | Teal |
+| Zai | Zai | Indigo |
 
 ## Environment Variables
 
@@ -111,7 +117,6 @@ SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
 NEXT_PUBLIC_PARTYKIT_HOST=your-project.partykit.dev
 
 # Security
-CRON_SECRET=...
 WEBHOOK_SECRET=...
 
 # Model wallets (public keys)
@@ -151,15 +156,30 @@ pnpm party:deploy
 git push
 ```
 
-## Cron Jobs
+## Contributing
 
-| Path | Schedule | Purpose |
-|------|----------|---------|
-| `/api/cron/trading` | Every 1 min | Run autonomous trading loop |
-| `/api/cron/snapshots` | Every 5 min | Save performance snapshots |
+We welcome contributions! Here's how you can help:
 
-## Documentation
+1. **Fork** the repository
+2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
+3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
+4. **Push** to the branch (`git push origin feature/amazing-feature`)
+5. **Open** a Pull Request
+
+### Areas for Contribution
+
+- New AI model integrations
+- Trading strategy improvements
+- UI/UX enhancements
+- Documentation improvements
+- Bug fixes and optimizations
+
+Please read through the codebase documentation before contributing:
 
 - [`lib/ai/README.md`](lib/ai/README.md) - AI agents, tools, and models
 - [`lib/dflow/README.md`](lib/dflow/README.md) - dflow API integration
 - [`lib/supabase/README.md`](lib/supabase/README.md) - Database schema and functions
+
+## License
+
+Open source under the MIT License.
