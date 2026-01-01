@@ -12,10 +12,11 @@ import { ToolLoopAgent, stepCountIs } from "ai";
 import { nanoid } from "nanoid";
 import { type KeyPairSigner } from "@solana/kit";
 import { getModel } from "@/lib/ai/models";
-import { createSignerFromBase58PrivateKey } from "@/lib/solana/wallets";
+import { createSignerFromBase58SecretKey } from "@/lib/solana/wallets";
 import { TRADING_SYSTEM_PROMPT } from "@/lib/ai/prompts/trading/systemPrompt";
 import {
   buildTradingPrompt,
+  buildTestPrompt,
   type TradingPromptInput,
 } from "@/lib/ai/prompts/trading/promptBuilder";
 
@@ -57,7 +58,7 @@ export class PredictionMarketAgent {
     // Create signer from private key if available
     let signer: KeyPairSigner | undefined;
     if (this.config.privateKey) {
-      signer = await createSignerFromBase58PrivateKey(this.config.privateKey);
+      signer = await createSignerFromBase58SecretKey(this.config.privateKey);
     }
 
     // Create tools directly with wallet context
@@ -86,26 +87,34 @@ export class PredictionMarketAgent {
       stopWhen: stepCountIs(this.config.maxSteps ?? 10),
     });
 
-    // Build lean prompt from signal + balance
-    const promptInput: TradingPromptInput = {
-      signal: input.signal
-        ? {
-            type: input.signal.type as
-              | "price_swing"
-              | "volume_spike"
-              | "orderbook_imbalance",
-            ticker: input.signal.ticker,
-            data: input.signal.data,
-            timestamp: input.signal.timestamp,
-          }
-        : undefined,
-      usdcBalance: input.usdcBalance,
-    };
+    // Build prompt based on mode
+    let prompt: string;
 
-    const prompt = buildTradingPrompt(promptInput);
+    if (input.testMode) {
+      // Test mode: force a small trade
+      prompt = buildTestPrompt(input.usdcBalance);
+    } else {
+      // Normal mode: signal-based or periodic
+      const promptInput: TradingPromptInput = {
+        signal: input.signal
+          ? {
+              type: input.signal.type as
+                | "price_swing"
+                | "volume_spike"
+                | "orderbook_imbalance",
+              ticker: input.signal.ticker,
+              data: input.signal.data,
+              timestamp: input.signal.timestamp,
+            }
+          : undefined,
+        usdcBalance: input.usdcBalance,
+      };
+      prompt = buildTradingPrompt(promptInput);
+    }
 
     console.log(
-      `[PredictionMarketAgent:${this.config.modelId}] Starting agent run`,
+      `[PredictionMarketAgent:${this.config.modelId}] Starting agent run with prompt:`,
+      prompt,
     );
 
     // Run the agent with ToolLoopAgent.generate()
@@ -113,7 +122,35 @@ export class PredictionMarketAgent {
     const result = await agent.generate({ prompt });
 
     console.log(
+      `[PredictionMarketAgent:${this.config.modelId}] Raw result keys:`,
+      Object.keys(result),
+    );
+
+    console.log(
       `[PredictionMarketAgent:${this.config.modelId}] Completed with ${result.steps.length} steps`,
+    );
+
+    // Log the full inference response for debugging
+    console.log(
+      `[PredictionMarketAgent:${this.config.modelId}] Agent Response:`,
+      JSON.stringify(
+        {
+          text: result.text,
+          steps: result.steps.map((step, i) => ({
+            step: i + 1,
+            toolCalls: step.toolCalls?.map((tc) => ({
+              tool: tc.toolName,
+              input: tc.input,
+            })),
+            toolResults: step.toolResults?.map((tr) => ({
+              id: tr.toolCallId,
+              output: tr.output,
+            })),
+          })),
+        },
+        null,
+        2,
+      ),
     );
 
     // Extract trades from tool call results

@@ -40,6 +40,8 @@ export interface MarketSignal {
 export interface AgentRunInput {
   signal?: MarketSignal;
   usdcBalance: number;
+  /** When true, uses test prompt that forces a $1-5 trade */
+  testMode?: boolean;
 }
 
 // =============================================================================

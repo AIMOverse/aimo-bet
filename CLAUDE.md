@@ -1,323 +1,162 @@
-# AI Agent Refactor: Lean Context & Direct Tool Imports
+# Test DeepSeek V3.2 Trading Agent
 
-Simplify the AI agent architecture by removing the tool factory pattern and adopting lean context prompts.
+Test the PredictionMarketAgent with DeepSeek V3.2 via OpenRouter using the test wallet.
 
 ---
 
 ## Overview
 
-### Current State (To Refactor)
+### Architecture
+
 ```
-lib/ai/
-├── tools/
-│   └── index.ts              # createAgentTools factory (remove)
-├── agents/
-│   └── predictionMarketAgent.ts  # Uses factory, complex context
-├── prompts/trading/
-│   └── contextBuilder.ts     # Complex context building (remove)
-└── workflows/
-    └── tradingAgent.ts       # Fetches markets via HTTP (simplify)
+POST /api/chat
+    ↓
+tradingAgentWorkflow(input)
+    ↓
+1. getSessionStep()         → Global trading session
+2. getAgentSessionStep()    → Agent session (uses getModelName, getWalletPrivateKey)
+3. fetchBalanceStep()       → USDC balance from test wallet
+4. runAgentStep()           → PredictionMarketAgent
+    ↓
+    Creates signer from private key
+    Passes signer to trading tools
+    ↓
+5. waitForFillsStep()       → Wait for order fills
+6. recordResultsStep()      → Record to database
 ```
 
-### Target State
-```
-lib/ai/
-├── tools/
-│   └── index.ts              # Simple exports only
-├── agents/
-│   └── predictionMarketAgent.ts  # Direct imports, lean prompt
-├── prompts/trading/
-│   └── systemPrompt.ts       # Keep system prompt
-│   └── (contextBuilder.ts removed)
-└── workflows/
-    └── tradingAgent.ts       # Signal + balance only
-```
+### Key Design
+
+- **Signer-based tools**: Trading tools receive `KeyPairSigner` (not raw private key)
+- **Agent creates signer**: `createSignerFromBase58PrivateKey(privateKey)` → signer
+- **Tools use signer**: `createIncreasePositionTool(walletAddress, signer)`
 
 ---
 
-## Design Decisions
+## Changes Required
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Tool creation | Direct imports in agent | Clearer dependencies, simpler code |
-| Context injection | Signer passed at agent level | Only signer needed for trading tools |
-| Prompt strategy | Lean context (signal + balance) | Agent discovers via tools, fresher data |
-| Market fetching | Agent uses discoverEvent | No stale pre-fetched data |
+### 1. Add DeepSeek V3.2 to Model Catalog
 
----
+**File:** `lib/ai/models/catalog.ts`
 
-## Changes
-
-### 1. `lib/ai/tools/index.ts` - Simplify to Exports Only
-
-**Remove:** `createAgentTools` factory function, `getBalance`, `getTradeHistory`
-
-**Keep:** Direct exports of tool creators
+Add to `MODELS` array:
 
 ```typescript
-// lib/ai/tools/index.ts
+// DeepSeek V3.2 (Test)
+{
+  id: "openrouter/deepseek/deepseek-v3.2",
+  name: "DeepSeek V3.2",
+  provider: "openrouter",
+  contextLength: 64000,
+  pricing: { prompt: 0.14, completion: 0.28 },
+  description: "DeepSeek V3.2 - Latest version for testing",
+  supportsVision: false,
+  supportsFunctions: true,
+  series: "deepseek",
+  chartColor: "#a78bfa",
+  walletAddress: process.env.TEST_WALLET_PUBLIC_KEY,
+  enabled: true,
+},
+```
 
-// Market Discovery
-export { discoverEventTool } from "./discoverEvent";
+Add to `WALLET_PRIVATE_KEY_MAP`:
 
-// Position Management - creators that accept signer
-export { createIncreasePositionTool } from "./increasePosition";
-export { createDecreasePositionTool } from "./decreasePosition";
-export { createRetrievePositionTool } from "./retrievePosition";
-export { createRedeemPositionTool } from "./redeemPosition";
+```typescript
+"openrouter/deepseek/deepseek-v3.2": process.env.TEST_WALLET_PRIVATE_KEY,
+```
 
-// Utilities
-export {
-  resolveMints,
-  getTradeMintsForBuy,
-  getTradeMintsForSell,
-  getOutcomeMint,
-  clearMarketCache,
-} from "./utils/resolveMints";
+### 2. Environment Variables
+
+**File:** `.env.local`
+
+Ensure these are set:
+
+```bash
+TEST_WALLET_PUBLIC_KEY=<your-test-wallet-public-key>
+TEST_WALLET_PRIVATE_KEY=<your-test-wallet-private-key-base58>
+OPENROUTER_API_KEY=<your-openrouter-api-key>
 ```
 
 ---
 
-### 2. `lib/ai/agents/predictionMarketAgent.ts` - Direct Imports
+## Test Trigger
 
-**Remove:** 
-- Import of `createAgentTools`
-- Complex `ContextPromptInput` building
-- `buildContextPrompt` usage
+### Via curl (Periodic Mode)
 
-**Add:**
-- Direct tool imports
-- Tool creation inline with signer
-- Simple `buildTradingPrompt` function
-
-```typescript
-// Direct tool imports
-import { discoverEventTool } from "@/lib/ai/tools/discoverEvent";
-import { createIncreasePositionTool } from "@/lib/ai/tools/increasePosition";
-import { createDecreasePositionTool } from "@/lib/ai/tools/decreasePosition";
-import { createRetrievePositionTool } from "@/lib/ai/tools/retrievePosition";
-import { createRedeemPositionTool } from "@/lib/ai/tools/redeemPosition";
-
-// In run() method:
-async run(input: TradingInput): Promise<TradingResult> {
-  // Create signer
-  const signer = this.config.privateKey 
-    ? await createSignerFromBase58PrivateKey(this.config.privateKey)
-    : undefined;
-
-  // Create tools directly
-  const tools = {
-    discoverEvent: discoverEventTool,
-    increasePosition: createIncreasePositionTool(this.config.walletAddress, signer),
-    decreasePosition: createDecreasePositionTool(this.config.walletAddress, signer),
-    retrievePosition: createRetrievePositionTool(this.config.walletAddress),
-    redeemPosition: createRedeemPositionTool(this.config.walletAddress, signer),
-  };
-
-  // Build lean prompt
-  const prompt = buildTradingPrompt({
-    signal: input.signal,
-    usdcBalance: input.usdcBalance,
-  });
-
-  // Run agent...
-}
+```bash
+curl -X POST http://localhost:3000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "modelId": "openrouter/deepseek/deepseek-v3.2",
+    "walletAddress": "<TEST_WALLET_PUBLIC_KEY>"
+  }'
 ```
 
----
+### Via curl (With Signal)
 
-### 3. New Lean Prompt Builder
-
-**File:** `lib/ai/prompts/trading/promptBuilder.ts` (new file, replaces contextBuilder.ts)
-
-```typescript
-export interface TradingPromptInput {
-  signal?: {
-    type: "price_swing" | "volume_spike" | "orderbook_imbalance";
-    ticker: string;
-    data: Record<string, unknown>;
-    timestamp: number;
-  };
-  usdcBalance: number;
-}
-
-export function buildTradingPrompt(input: TradingPromptInput): string {
-  const { signal, usdcBalance } = input;
-
-  if (signal) {
-    return buildSignalPrompt(signal, usdcBalance);
-  }
-  return buildPeriodicPrompt(usdcBalance);
-}
-
-function buildSignalPrompt(
-  signal: TradingPromptInput["signal"],
-  usdcBalance: number,
-): string {
-  const signalType = signal!.type.replace(/_/g, " ").toUpperCase();
-  
-  let signalDetails = "";
-  switch (signal!.type) {
-    case "price_swing":
-      const { previousPrice, currentPrice, changePercent } = signal!.data as {
-        previousPrice: number;
-        currentPrice: number;
-        changePercent: number;
-      };
-      signalDetails = `
-- Previous price: ${previousPrice.toFixed(4)}
-- Current price: ${currentPrice.toFixed(4)}  
-- Change: ${(changePercent * 100).toFixed(2)}%`;
-      break;
-      
-    case "volume_spike":
-      const { volume, averageVolume, multiplier, takerSide } = signal!.data as {
-        volume: number;
-        averageVolume: number;
-        multiplier: number;
-        takerSide: string;
-      };
-      signalDetails = `
-- Trade volume: ${volume}
-- Average volume: ${averageVolume.toFixed(0)}
-- Spike: ${multiplier.toFixed(1)}x normal
-- Taker side: ${takerSide}`;
-      break;
-      
-    case "orderbook_imbalance":
-      const { ratio, direction } = signal!.data as {
-        ratio: number;
-        direction: string;
-      };
-      signalDetails = `
-- Imbalance ratio: ${ratio.toFixed(2)}
-- Direction: ${direction}`;
-      break;
-  }
-
-  return `## Trading Signal Detected
-
-**Type:** ${signalType}
-**Market:** ${signal!.ticker}
-**Time:** ${new Date(signal!.timestamp).toISOString()}
-${signalDetails}
-
-## Your Resources
-
-Available USDC: $${usdcBalance.toFixed(2)}
-
-## Instructions
-
-1. Use \`discoverEvent\` to get current details for market "${signal!.ticker}"
-2. Use \`retrievePosition\` to check if you have existing positions
-3. Analyze whether this ${signalType.toLowerCase()} presents a trading opportunity
-4. If confident (>70%), execute a trade using \`increasePosition\` or \`decreasePosition\`
-5. Explain your reasoning clearly`;
-}
-
-function buildPeriodicPrompt(usdcBalance: number): string {
-  return `## Periodic Market Scan
-
-## Your Resources
-
-Available USDC: $${usdcBalance.toFixed(2)}
-
-## Instructions
-
-1. Use \`discoverEvent\` to browse active prediction markets
-2. Use \`retrievePosition\` to review your current positions
-3. Look for mispriced markets or opportunities based on your analysis
-4. If you find a high-conviction opportunity (>70%), execute a trade
-5. If no compelling opportunities, explain why you're holding`;
-}
-```
-
----
-
-### 4. `lib/ai/workflows/tradingAgent.ts` - Simplify Context Fetching
-
-**Remove:** 
-- `fetchContextStep` fetching markets via HTTP
-- Complex `MarketContext` building
-
-**Simplify to:**
-
-```typescript
-interface TradingInput {
-  modelId: string;
-  walletAddress: string;
-  signal?: MarketSignal;  // From PartyKit relay
-}
-
-// Simplified context - just balance
-async function fetchBalanceStep(walletAddress: string): Promise<number> {
-  "use step";
-  
-  try {
-    const res = await fetch(
-      `${BASE_URL}/api/solana/balance?wallet=${walletAddress}`
-    );
-    if (res.ok) {
-      const data = await res.json();
-      return parseFloat(data.formatted) || 0;
+```bash
+curl -X POST http://localhost:3000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "modelId": "openrouter/deepseek/deepseek-v3.2",
+    "walletAddress": "<TEST_WALLET_PUBLIC_KEY>",
+    "signal": {
+      "type": "price_swing",
+      "ticker": "BTC-50000-2024",
+      "data": {
+        "previousPrice": 0.45,
+        "currentPrice": 0.52,
+        "changePercent": 0.156
+      },
+      "timestamp": 1704067200000
     }
-  } catch (error) {
-    console.error("[tradingAgent] Failed to fetch balance:", error);
-  }
-  return 0;
-}
-
-// In workflow:
-const usdcBalance = await fetchBalanceStep(input.walletAddress);
-
-const result = await runAgentStep({
-  ...input,
-  usdcBalance,
-});
+  }'
 ```
-
----
-
-### 5. Update Agent Input Type
-
-```typescript
-// lib/ai/agents/types.ts
-
-export interface AgentConfig {
-  modelId: string;
-  walletAddress: string;
-  privateKey?: string;
-  maxSteps?: number;
-}
-
-export interface AgentRunInput {
-  signal?: MarketSignal;
-  usdcBalance: number;
-}
-```
-
----
-
-## Files to Modify
-
-| File | Action |
-|------|--------|
-| `lib/ai/tools/index.ts` | Remove `createAgentTools`, keep exports |
-| `lib/ai/agents/predictionMarketAgent.ts` | Direct imports, lean prompt |
-| `lib/ai/prompts/trading/promptBuilder.ts` | Create (new lean builder) |
-| `lib/ai/prompts/trading/contextBuilder.ts` | Delete |
-| `lib/ai/workflows/tradingAgent.ts` | Simplify to signal + balance |
-| `lib/ai/agents/types.ts` | Simplify `AgentRunInput` |
 
 ---
 
 ## Implementation Checklist
 
-- [ ] Create `lib/ai/prompts/trading/promptBuilder.ts`
-- [ ] Update `lib/ai/agents/predictionMarketAgent.ts` with direct imports
-- [ ] Simplify `lib/ai/tools/index.ts` (remove factory)
-- [ ] Simplify `lib/ai/workflows/tradingAgent.ts` (balance only)
-- [ ] Update `lib/ai/agents/types.ts`
-- [ ] Delete `lib/ai/prompts/trading/contextBuilder.ts`
-- [ ] Test signal-triggered agent runs
-- [ ] Test periodic agent runs (no signal)
+- [ ] Add DeepSeek V3.2 to `MODELS` array in `lib/ai/models/catalog.ts`
+- [ ] Add private key mapping to `WALLET_PRIVATE_KEY_MAP` in `lib/ai/models/catalog.ts`
+- [ ] Verify `.env.local` has `TEST_WALLET_PUBLIC_KEY` and `TEST_WALLET_PRIVATE_KEY`
+- [ ] Verify `.env.local` has `OPENROUTER_API_KEY`
+- [ ] Run `npm run dev` to start the server
+- [ ] Trigger test via curl
+- [ ] Monitor logs for agent execution
+- [ ] Verify trade execution on-chain (if agent decides to trade)
+
+---
+
+## Expected Flow
+
+1. **Agent starts** with lean context (USDC balance only)
+2. **Agent discovers markets** via `discoverEvent` tool
+3. **Agent checks positions** via `retrievePosition` tool
+4. **Agent decides** whether to trade based on market analysis
+5. **If confident (>70%)**, agent executes trade via `increasePosition` or `decreasePosition`
+6. **Workflow records** decision and trades to database
+7. **Response streams** back via SSE
+
+---
+
+## Debugging
+
+### Check logs
+
+```bash
+# Terminal running dev server shows:
+[tradingAgent:openrouter/deepseek/deepseek-v3.2] Starting trading workflow
+[PredictionMarketAgent:openrouter/deepseek/deepseek-v3.2] Starting agent run
+[PredictionMarketAgent:openrouter/deepseek/deepseek-v3.2] Completed with X steps
+[tradingAgent:openrouter/deepseek/deepseek-v3.2] Completed: <decision>, X trades
+```
+
+### Common issues
+
+| Issue | Solution |
+|-------|----------|
+| Model not found | Check model ID matches exactly in catalog |
+| Signer undefined | Check `TEST_WALLET_PRIVATE_KEY` is set and valid base58 |
+| Balance is 0 | Verify test wallet has USDC, check balance API |
+| No trades executed | Agent may decide to hold - check reasoning in response |

@@ -138,6 +138,22 @@ export const MODELS: ModelDefinition[] = [
     walletAddress: process.env.WALLET_MISTRAL_PUBLIC,
     enabled: true,
   },
+  // DeepSeek V3.2 (Test)
+  {
+    id: "openrouter/deepseek/deepseek-v3.2",
+    name: "DeepSeek V3.2",
+    provider: "openrouter",
+    contextLength: 64000,
+    pricing: { prompt: 0.14, completion: 0.28 },
+    description: "DeepSeek V3.2 - Latest version for testing",
+    supportsVision: false,
+    supportsFunctions: true,
+    // Arena config
+    series: "deepseek",
+    chartColor: "#a78bfa", // Light violet
+    walletAddress: process.env.TEST_WALLET_PUBLIC_KEY,
+    enabled: true,
+  },
 ];
 
 /**
@@ -290,6 +306,7 @@ const WALLET_PRIVATE_KEY_MAP: Record<string, string | undefined> = {
   "openrouter/deepseek-chat": process.env.WALLET_DEEPSEEK_PRIVATE,
   "openrouter/llama-3.3-70b": process.env.WALLET_LLAMA_PRIVATE,
   "openrouter/mistral-large": process.env.WALLET_MISTRAL_PRIVATE,
+  "openrouter/deepseek/deepseek-v3.2": process.env.TEST_WALLET_PRIVATE_KEY,
 };
 
 /**

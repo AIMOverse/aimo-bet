@@ -25,6 +25,8 @@ export interface TradingInput {
   modelId: string;
   walletAddress: string;
   signal?: MarketSignal;
+  /** When true, uses test prompt that forces a $1-5 trade */
+  testMode?: boolean;
 }
 
 // Re-export TradingResult for consumers
@@ -169,6 +171,7 @@ async function runAgentStep(
   return await agent.run({
     signal: input.signal,
     usdcBalance,
+    testMode: input.testMode,
   });
 }
 

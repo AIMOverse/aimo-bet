@@ -230,14 +230,6 @@ export interface BroadcastWithModel extends Broadcast {
 // Performance & Leaderboard Types
 // =============================================================================
 
-export interface PerformanceSnapshot {
-  id: string;
-  sessionId: string;
-  modelId: string;
-  accountValue: number;
-  timestamp: Date;
-}
-
 // Chart data point for recharts
 export interface ChartDataPoint {
   timestamp: string;
@@ -452,22 +444,6 @@ export interface DbTradingSessionInsert {
   created_at?: string;
 }
 
-export interface DbPerformanceSnapshot {
-  id: string;
-  session_id: string;
-  model_id: string;
-  account_value: number;
-  timestamp: string;
-}
-
-export interface DbPerformanceSnapshotInsert {
-  id?: string;
-  session_id: string;
-  model_id: string;
-  account_value: number;
-  timestamp?: string;
-}
-
 export interface DbArenaChatMessage {
   id: string;
   session_id: string;
@@ -505,12 +481,6 @@ export interface Database {
         Row: DbTradingSession;
         Insert: DbTradingSessionInsert;
         Update: Partial<DbTradingSessionInsert>;
-        Relationships: GenericRelationship[];
-      };
-      performance_snapshots: {
-        Row: DbPerformanceSnapshot;
-        Insert: DbPerformanceSnapshotInsert;
-        Update: Partial<DbPerformanceSnapshotInsert>;
         Relationships: GenericRelationship[];
       };
       arena_chat_messages: {

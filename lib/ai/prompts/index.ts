@@ -6,4 +6,4 @@
 
 // Trading prompts
 export { TRADING_SYSTEM_PROMPT } from "./trading/systemPrompt";
-export { buildTradingPrompt } from "./trading/promptBuilder";
+export { buildTradingPrompt, buildTestPrompt } from "./trading/promptBuilder";

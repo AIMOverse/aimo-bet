@@ -83,13 +83,14 @@ ${signalDetails}
 ## Your Resources
 
 Available USDC: $${usdcBalance.toFixed(2)}
+**Max trade size: $10 USDC per trade**
 
 ## Instructions
 
 1. Use \`discoverEvent\` to get current details for market "${signal.ticker}"
 2. Use \`retrievePosition\` to check if you have existing positions
 3. Analyze whether this ${signalType.toLowerCase()} presents a trading opportunity
-4. If confident (>70%), execute a trade using \`increasePosition\` or \`decreasePosition\`
+4. If confident (>70%), execute a trade using \`increasePosition\` or \`decreasePosition\` (max $10 USDC)
 5. Explain your reasoning clearly`;
 }
 
@@ -99,12 +100,42 @@ function buildPeriodicPrompt(usdcBalance: number): string {
 ## Your Resources
 
 Available USDC: $${usdcBalance.toFixed(2)}
+**Max trade size: $10 USDC per trade**
 
 ## Instructions
 
 1. Use \`discoverEvent\` to browse active prediction markets
 2. Use \`retrievePosition\` to review your current positions
 3. Look for mispriced markets or opportunities based on your analysis
-4. If you find a high-conviction opportunity (>70%), execute a trade
+4. If you find a high-conviction opportunity (>70%), execute a trade (max $10 USDC)
 5. If no compelling opportunities, explain why you're holding`;
+}
+
+/**
+ * Test prompt that forces the agent to execute a small trade (1-5 USDC)
+ * Use this for testing the trading pipeline end-to-end
+ */
+export function buildTestPrompt(usdcBalance: number): string {
+  return `## TEST MODE - Execute Trade
+
+**This is a test run. You MUST execute a trade.**
+
+## Your Resources
+
+Available USDC: $${usdcBalance.toFixed(2)}
+
+## Instructions
+
+1. Use \`discoverEvent\` to find any active prediction market
+2. Pick the first available market with reasonable liquidity
+3. **Execute a trade between $1 and $5 USDC** - this is mandatory for testing
+4. Use \`increasePosition\` to buy either YES or NO tokens
+5. Report the trade details
+
+## Important
+
+- This is a TEST - do not skip trading
+- Trade size: between $1 and $5 USDC (pick any amount in this range)
+- Pick any side (YES or NO) - the goal is to verify the trading pipeline works
+- If discoverEvent returns markets, you MUST trade one of them`;
 }

@@ -503,6 +503,12 @@ export const discoverEventTool = tool({
         markets: totalMarkets,
       });
 
+      // Debug: Log all market tickers returned to verify what the agent receives
+      console.log(
+        "[discoverEvent] Market tickers returned:",
+        outputEvents.flatMap((e) => e.markets.map((m) => m.market_ticker)),
+      );
+
       return {
         success: true,
         events: outputEvents,

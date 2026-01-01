@@ -1,4 +1,4 @@
-import { getSupabaseClient } from "./client";
+import { createServerClient } from "./server";
 import type { UIMessage } from "ai";
 import type {
   TradingSession,
@@ -7,10 +7,7 @@ import type {
   ChatMessage,
 } from "./types";
 import { DEFAULT_STARTING_CAPITAL } from "@/lib/config";
-import type {
-  DbTradingSessionInsert,
-  DbArenaChatMessageInsert,
-} from "./types";
+import type { DbTradingSessionInsert, DbArenaChatMessageInsert } from "./types";
 
 // ============================================================================
 // CONSTANTS
@@ -27,7 +24,7 @@ const GLOBAL_SESSION_NAME = "Global Arena";
  * This session always exists and is used when no specific sessionId is provided.
  */
 export async function getGlobalSession(): Promise<TradingSession> {
-  const client = getSupabaseClient();
+  const client = createServerClient();
   if (!client) throw new Error("Supabase not configured");
 
   // Try to find existing running global session
@@ -75,7 +72,7 @@ export async function getGlobalSession(): Promise<TradingSession> {
 // ============================================================================
 
 export async function getTradingSessions(): Promise<TradingSession[]> {
-  const client = getSupabaseClient();
+  const client = createServerClient();
   if (!client) return [];
 
   const { data, error } = await client
@@ -94,7 +91,7 @@ export async function getTradingSessions(): Promise<TradingSession[]> {
 export async function getTradingSession(
   id: string,
 ): Promise<TradingSession | null> {
-  const client = getSupabaseClient();
+  const client = createServerClient();
   if (!client) return null;
 
   const { data, error } = await client
@@ -113,7 +110,7 @@ export async function getTradingSession(
 }
 
 export async function getActiveSession(): Promise<TradingSession | null> {
-  const client = getSupabaseClient();
+  const client = createServerClient();
   if (!client) return null;
 
   const { data, error } = await client
@@ -137,7 +134,7 @@ export async function createTradingSession(
   name?: string,
   startingCapital = DEFAULT_STARTING_CAPITAL,
 ): Promise<TradingSession> {
-  const client = getSupabaseClient();
+  const client = createServerClient();
   if (!client) throw new Error("Supabase not configured");
 
   const insertData: DbTradingSessionInsert = {
@@ -164,7 +161,7 @@ export async function updateSessionStatus(
   id: string,
   status: SessionStatus,
 ): Promise<void> {
-  const client = getSupabaseClient();
+  const client = createServerClient();
   if (!client) throw new Error("Supabase not configured");
 
   const updates: Record<string, unknown> = { status };
@@ -197,7 +194,7 @@ export async function getChatMessages(
   sessionId: string,
   limit = 100,
 ): Promise<ChatMessage[]> {
-  const client = getSupabaseClient();
+  const client = createServerClient();
   if (!client) return [];
 
   const { data, error } = await client
@@ -216,7 +213,7 @@ export async function getChatMessages(
 }
 
 export async function saveChatMessage(message: ChatMessage): Promise<void> {
-  const client = getSupabaseClient();
+  const client = createServerClient();
   if (!client) throw new Error("Supabase not configured");
 
   const insertData: DbArenaChatMessageInsert = {
@@ -236,14 +233,6 @@ export async function saveChatMessage(message: ChatMessage): Promise<void> {
     throw error;
   }
 }
-
-// ============================================================================
-// PERFORMANCE SNAPSHOTS (DEPRECATED - Use agent_decisions via lib/supabase/agents.ts)
-// ============================================================================
-
-// NOTE: Performance snapshots are now derived from agent_decisions.portfolio_value_after.
-// Use getChartData() from lib/supabase/agents.ts or the usePerformanceChart hook instead.
-// The performance_snapshots table is deprecated.
 
 // ============================================================================
 // MAPPERS
