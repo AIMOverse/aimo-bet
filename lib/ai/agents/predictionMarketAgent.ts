@@ -26,6 +26,7 @@ import { createIncreasePositionTool } from "@/lib/ai/tools/increasePosition";
 import { createDecreasePositionTool } from "@/lib/ai/tools/decreasePosition";
 import { createRetrievePositionTool } from "@/lib/ai/tools/retrievePosition";
 import { createRedeemPositionTool } from "@/lib/ai/tools/redeemPosition";
+import { webSearchTool } from "@/lib/ai/tools/webSearch";
 
 import type {
   AgentConfig,
@@ -77,6 +78,7 @@ export class PredictionMarketAgent {
         this.config.walletAddress,
         signer,
       ),
+      webSearch: webSearchTool,
     };
 
     // Create ToolLoopAgent for this run

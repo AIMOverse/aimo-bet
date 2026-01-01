@@ -14,6 +14,9 @@ importers:
       '@ai-sdk/react':
         specifier: 3.0.3
         version: 3.0.3(react@19.2.1)(zod@4.2.1)
+      '@exalabs/ai-sdk':
+        specifier: ^1.0.5
+        version: 1.0.5(ai@6.0.3(zod@4.2.1))
       '@radix-ui/react-avatar':
         specifier: ^1.1.11
         version: 1.1.11(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
@@ -789,6 +792,11 @@ packages:
   '@eslint/plugin-kit@0.4.1':
     resolution: {integrity: sha512-43/qtrDUokr7LJqoF2c3+RInu/t4zfrpYdoSDfYyhg52rwLV6TnOvdG4fXm7IkSB3wErkcmJS9iEhjVtOSEjjA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+
+  '@exalabs/ai-sdk@1.0.5':
+    resolution: {integrity: sha512-+2Sv8+JmrjFrmpiOlE9bzbZeko8ceym7lR3mkopLtnhjZp+EjDOm3rxaouf7nxwG6E6f0y3F2VZfmt0wupq7eA==}
+    peerDependencies:
+      ai: ^5.0.83
 
   '@fastify/busboy@2.1.1':
     resolution: {integrity: sha512-vBZP4NlzfOlerQTnba4aqZoMhE/a9HY7HRqoOPaETQcSQuWEIyZMHGfVu6w9wGtGK5fED5qRs2DteVCjOH60sA==}
@@ -5741,6 +5749,11 @@ snapshots:
     dependencies:
       '@eslint/core': 0.17.0
       levn: 0.4.1
+
+  '@exalabs/ai-sdk@1.0.5(ai@6.0.3(zod@4.2.1))':
+    dependencies:
+      ai: 6.0.3(zod@4.2.1)
+      zod: 3.25.76
 
   '@fastify/busboy@2.1.1': {}
 
