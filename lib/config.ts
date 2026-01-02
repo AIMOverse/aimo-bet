@@ -110,7 +110,7 @@ export const MARKET_CATEGORIES = [
 
 /** Chart configuration */
 export const CHART_CONFIG = {
-  height: 600,
+  height: 500,
   margin: { top: 20, right: 30, left: 20, bottom: 5 },
   animationDuration: 300,
 } as const;

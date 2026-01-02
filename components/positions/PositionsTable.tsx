@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { Briefcase } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -8,6 +9,7 @@ import { cn } from "@/lib/utils";
 
 interface PositionsTableProps {
   positions: DflowPosition[];
+  selectedModelId?: string | null;
 }
 
 function PositionRow({ position }: { position: DflowPosition }) {
@@ -54,39 +56,23 @@ function PositionRow({ position }: { position: DflowPosition }) {
   );
 }
 
-export function PositionsTable({ positions }: PositionsTableProps) {
-  // Calculate totals
-  const totalQuantity = positions.reduce((sum, p) => sum + p.quantity, 0);
+export function PositionsTable({
+  positions,
+  selectedModelId,
+}: PositionsTableProps) {
+  // Filter positions by selected model
+  const filteredPositions = useMemo(() => {
+    if (!selectedModelId) return positions;
+    return positions.filter((p) => p.modelId === selectedModelId);
+  }, [positions, selectedModelId]);
 
   return (
     <Card className="h-full flex flex-col">
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Briefcase className="h-5 w-5" />
-            Open Positions
-          </CardTitle>
-          <span className="text-sm text-muted-foreground">
-            {positions.length} positions
-          </span>
-        </div>
-
-        {/* Totals summary */}
-        {positions.length > 0 && (
-          <div className="flex items-center gap-4 mt-2 pt-2 border-t text-sm">
-            <div>
-              <span className="text-muted-foreground">Total Quantity: </span>
-              <span className="font-medium">
-                {totalQuantity.toLocaleString()}
-              </span>
-            </div>
-          </div>
-        )}
-      </CardHeader>
+      <CardHeader className="pb-3"></CardHeader>
 
       <CardContent className="flex-1 min-h-0">
         <ScrollArea className="h-full pr-4">
-          {positions.length === 0 ? (
+          {filteredPositions.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <Briefcase className="h-12 w-12 text-muted-foreground/50 mb-4" />
               <p className="text-muted-foreground">No open positions</p>
@@ -96,7 +82,7 @@ export function PositionsTable({ positions }: PositionsTableProps) {
             </div>
           ) : (
             <div className="space-y-3">
-              {positions.map((position, index) => (
+              {filteredPositions.map((position, index) => (
                 <PositionRow
                   key={`${position.marketTicker}-${position.outcome}-${index}`}
                   position={position}

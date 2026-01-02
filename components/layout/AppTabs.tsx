@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { MODELS } from "@/lib/ai/models";
+import { MODELS, getModelById } from "@/lib/ai/models";
 import type { ArenaTab } from "@/lib/supabase/types";
 
 const APP_TABS: { value: ArenaTab; label: string; icon: React.ReactNode }[] = [
@@ -37,15 +37,26 @@ interface AppTabsProps {
   onModelChange: (modelId: string | null) => void;
 }
 
+// Capitalize first letter of series name for display
+function formatSeriesName(series: string): string {
+  return series.charAt(0).toUpperCase() + series.slice(1);
+}
+
 export function AppTabs({
   activeTab,
   onTabChange,
   selectedModelId,
   onModelChange,
 }: AppTabsProps) {
+  // Get selected model's series name for display
+  const selectedModel = selectedModelId ? getModelById(selectedModelId) : null;
+  const displayValue = selectedModel?.series
+    ? formatSeriesName(selectedModel.series)
+    : "All";
+
   return (
-    <div className="border-b px-4 py-2 bg-muted/30">
-      <div className="flex items-center justify-between gap-2">
+    <div className="border-b">
+      <div className="flex items-center justify-between">
         {/* Tabs */}
         <Tabs
           value={activeTab}
@@ -72,12 +83,12 @@ export function AppTabs({
             onModelChange(value === "all" ? null : value)
           }
         >
-          <SelectTrigger className="w-35 h-9 text-xs">
-            <Filter className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
-            <SelectValue placeholder="All Models" />
+          <SelectTrigger className="w-28 h-9 text-xs">
+            <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="truncate">{displayValue}</span>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Models</SelectItem>
+            <SelectItem value="all">All</SelectItem>
             {MODELS.filter((m) => m.enabled).map((model) => (
               <SelectItem key={model.id} value={model.id}>
                 <div className="flex items-center gap-2">

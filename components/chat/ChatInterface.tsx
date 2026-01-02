@@ -2,89 +2,107 @@
 
 import { useMemo, useEffect, useRef } from "react";
 import { MessageSquare, Loader2 } from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardFooter,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { ChatMessage } from "./ChatMessage";
-import { ChatInput } from "./ChatInput";
 import { useChat } from "@/hooks/chat/useChat";
 import type {
   ArenaModel,
   ChatMessage as ChatMessageType,
 } from "@/lib/supabase/types";
 
-interface ModelChatFeedProps {
-  /** Trading session ID */
+// Format time ago
+function formatTimeAgo(timestamp: number): string {
+  const now = Date.now();
+  const diffMs = now - timestamp;
+  const diffMins = Math.floor(diffMs / 60000);
+
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
+// Simple message bubble - just avatar, name, time, and text
+function MessageBubble({
+  message,
+  modelInfo,
+}: {
+  message: ChatMessageType;
+  modelInfo?: { name: string; color: string };
+}) {
+  const text = message.parts?.find((p) => p.type === "text")?.text ?? "";
+  const createdAt = message.metadata?.createdAt ?? 0;
+  const name = modelInfo?.name ?? "Model";
+  const color = modelInfo?.color ?? "#6366f1";
+
+  return (
+    <div className="flex gap-3 p-3 rounded-lg bg-muted/30">
+      <div
+        className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
+        style={{ backgroundColor: color }}
+      >
+        {name.charAt(0).toUpperCase()}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="font-medium text-sm">{name}</span>
+          <span className="text-xs text-muted-foreground">
+            {formatTimeAgo(createdAt)}
+          </span>
+        </div>
+        <div className="text-sm leading-relaxed whitespace-pre-wrap">
+          {text}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface ChatInterfaceProps {
   sessionId: string | null;
-  /** Currently selected model for filtering (null = show all) */
   selectedModelId?: string | null;
-  /** All arena models for display info */
   models?: ArenaModel[];
 }
 
-export function ModelChatFeed({
+export function ChatInterface({
   sessionId,
   selectedModelId = null,
   models = [],
-}: ModelChatFeedProps) {
-  const { messages, isLoading, error, sendMessage, input, setInput } = useChat({
-    sessionId,
-  });
-
+}: ChatInterfaceProps) {
+  const { messages, isLoading, error } = useChat({ sessionId });
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Create a map of model info for quick lookup
+  // Model info lookup map
   const modelInfoMap = useMemo(() => {
     const map = new Map<string, { name: string; color: string }>();
     for (const model of models) {
-      map.set(model.id, {
-        name: model.name,
-        color: model.chartColor,
-      });
+      map.set(model.id, { name: model.name, color: model.chartColor });
     }
     return map;
   }, [models]);
 
-  // Filter by model if selected
+  // Filter by selected model
   const filteredMessages = useMemo(() => {
     if (!selectedModelId) return messages;
-    return messages.filter((msg: ChatMessageType) => {
-      // Show all non-model messages (user, assistant)
-      if (msg.metadata?.authorType !== "model") return true;
-      // Filter model messages by selected model
-      return msg.metadata?.authorId === selectedModelId;
-    });
+    return messages.filter(
+      (msg: ChatMessageType) => msg.metadata?.authorId === selectedModelId,
+    );
   }, [messages, selectedModelId]);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll on new messages
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [filteredMessages.length]);
 
-  const handleSend = () => {
-    if (input.trim()) {
-      sendMessage(input);
-      setInput("");
-    }
-  };
-
-  // Show placeholder if no session
   if (!sessionId) {
     return (
       <Card className="h-full flex flex-col">
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <MessageSquare className="h-5 w-5" />
-            Model Chat
-          </CardTitle>
-        </CardHeader>
         <CardContent className="flex-1 flex items-center justify-center">
           <div className="text-center text-muted-foreground">
             <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-50" />
@@ -98,57 +116,35 @@ export function ModelChatFeed({
   return (
     <Card className="h-full flex flex-col">
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-lg">
-          <MessageSquare className="h-5 w-5" />
-          Model Chat
-          {isLoading && (
-            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-          )}
-        </CardTitle>
+        {isLoading && (
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        )}
       </CardHeader>
-
       <CardContent className="flex-1 min-h-0">
         <ScrollArea className="h-full pr-4" ref={scrollRef}>
           {error ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <MessageSquare className="h-12 w-12 text-destructive/50 mb-4" />
               <p className="text-destructive">Failed to load messages</p>
-              <p className="text-sm text-muted-foreground">{error.message}</p>
             </div>
           ) : filteredMessages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <MessageSquare className="h-12 w-12 text-muted-foreground/50 mb-4" />
               <p className="text-muted-foreground">No messages yet</p>
-              <p className="text-sm text-muted-foreground/70">
-                Model analysis and commentary will appear here
-              </p>
             </div>
           ) : (
             <div className="space-y-3">
               {filteredMessages.map((msg: ChatMessageType) => (
-                <ChatMessage
+                <MessageBubble
                   key={msg.id}
                   message={msg}
-                  modelInfo={
-                    msg.metadata?.authorType === "model"
-                      ? modelInfoMap.get(msg.metadata.authorId)
-                      : undefined
-                  }
+                  modelInfo={modelInfoMap.get(msg.metadata?.authorId ?? "")}
                 />
               ))}
             </div>
           )}
         </ScrollArea>
       </CardContent>
-
-      <CardFooter className="pt-3 border-t">
-        <ChatInput
-          value={input}
-          onChange={setInput}
-          onSend={handleSend}
-          disabled={isLoading || !sessionId}
-        />
-      </CardFooter>
     </Card>
   );
 }

@@ -1,20 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { ArrowRightLeft, Filter } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { useMemo } from "react";
+import { ArrowRightLeft, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { TradeCard } from "./TradeCard";
-import type { TradeFilter } from "@/lib/supabase/types";
+import { cn } from "@/lib/utils";
 import type { DflowTradeWithModel } from "@/hooks/trades/useTrades";
 
 interface TradesFeedProps {
@@ -22,81 +12,126 @@ interface TradesFeedProps {
   selectedModelId: string | null;
 }
 
+// Format time ago
+function formatTimeAgo(timestamp: string): string {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
+// Format currency
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function TradeCard({ trade }: { trade: DflowTradeWithModel }) {
+  const isBuy = trade.action === "buy";
+  const isYes = trade.side === "yes";
+
+  return (
+    <div className="p-4 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2">
+          <div
+            className="w-3 h-3 rounded-full shrink-0"
+            style={{ backgroundColor: trade.model.chartColor }}
+          />
+          <span className="font-medium text-sm">{trade.model.name}</span>
+        </div>
+        <span className="text-xs text-muted-foreground">
+          {formatTimeAgo(trade.timestamp)}
+        </span>
+      </div>
+
+      {/* Trade action */}
+      <div className="flex items-center gap-2 mb-2">
+        <span
+          className={cn(
+            "flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium",
+            isBuy
+              ? "bg-green-500/10 text-green-500"
+              : "bg-red-500/10 text-red-500",
+          )}
+        >
+          {isBuy ? (
+            <ArrowUpRight className="h-3 w-3" />
+          ) : (
+            <ArrowDownRight className="h-3 w-3" />
+          )}
+          {trade.action.toUpperCase()}
+        </span>
+        <span
+          className={cn(
+            "px-2 py-0.5 rounded text-xs font-medium",
+            isYes
+              ? "bg-blue-500/10 text-blue-500"
+              : "bg-orange-500/10 text-orange-500",
+          )}
+        >
+          {trade.side.toUpperCase()}
+        </span>
+      </div>
+
+      {/* Market ticker */}
+      <p className="text-sm mb-2 line-clamp-2 font-mono">
+        {trade.market_ticker}
+      </p>
+
+      {/* Trade details */}
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span>
+          {trade.quantity} @ {formatCurrency(trade.price)}
+        </span>
+        <span className="font-medium text-foreground">
+          {formatCurrency(trade.total)}
+        </span>
+      </div>
+
+      {/* Transaction signature link */}
+      {trade.tx_signature && (
+        <a
+          href={`https://solscan.io/tx/${trade.tx_signature}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-2 text-xs text-blue-500 hover:underline block truncate"
+        >
+          View on Solscan
+        </a>
+      )}
+    </div>
+  );
+}
+
 export function TradesFeed({ trades, selectedModelId }: TradesFeedProps) {
-  const [tradeFilter, setTradeFilter] = useState<TradeFilter>({});
-
-  const clearTradeFilter = () => setTradeFilter({});
-
-  // Filter trades
+  // Filter trades by selected model only
   const filteredTrades = useMemo(() => {
     return trades.filter((trade) => {
       if (selectedModelId && trade.model.id !== selectedModelId) {
         return false;
       }
-      if (tradeFilter.action && trade.action !== tradeFilter.action) {
-        return false;
-      }
-      if (tradeFilter.side && trade.side !== tradeFilter.side) {
-        return false;
-      }
       return true;
     });
-  }, [trades, selectedModelId, tradeFilter]);
-
-  const hasFilters = selectedModelId || tradeFilter.action || tradeFilter.side;
+  }, [trades, selectedModelId]);
 
   return (
     <Card className="h-full flex flex-col">
-      <CardHeader className="pb-3 flex-row items-center justify-between space-y-0">
-        <CardTitle className="flex items-center gap-2 text-lg">
-          <ArrowRightLeft className="h-5 w-5" />
-          Recent Trades
-        </CardTitle>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant={hasFilters ? "secondary" : "ghost"}
-              size="sm"
-              className="gap-2"
-            >
-              <Filter className="h-4 w-4" />
-              Filter
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuLabel>Filter by Action</DropdownMenuLabel>
-            <DropdownMenuItem
-              onClick={() => setTradeFilter({ ...tradeFilter, action: "buy" })}
-            >
-              Buy only
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => setTradeFilter({ ...tradeFilter, action: "sell" })}
-            >
-              Sell only
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>Filter by Side</DropdownMenuLabel>
-            <DropdownMenuItem
-              onClick={() => setTradeFilter({ ...tradeFilter, side: "yes" })}
-            >
-              YES positions
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => setTradeFilter({ ...tradeFilter, side: "no" })}
-            >
-              NO positions
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            {hasFilters && (
-              <DropdownMenuItem onClick={clearTradeFilter}>
-                Clear filters
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </CardHeader>
+      <CardHeader className="pb-3"></CardHeader>
 
       <CardContent className="flex-1 min-h-0">
         <ScrollArea className="h-full pr-4">

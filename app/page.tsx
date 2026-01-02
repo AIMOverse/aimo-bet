@@ -6,7 +6,7 @@ import { MarketTicker } from "@/components/index/MarketTicker";
 import { AppTabs } from "@/components/layout/AppTabs";
 import { PerformanceChart } from "@/components/index/PerformanceChart";
 import { TradesFeed } from "@/components/trades/TradesFeed";
-import { ModelChatFeed } from "@/components/chat/ModelChatFeed";
+import { ChatInterface } from "@/components/chat/ChatInterface";
 import { PositionsTable } from "@/components/positions/PositionsTable";
 import { usePerformanceChart } from "@/hooks/index/usePerformanceChart";
 import { useSessionTrades } from "@/hooks/trades/useTrades";
@@ -42,13 +42,18 @@ export default function Home() {
         return <TradesFeed trades={trades} selectedModelId={selectedModelId} />;
       case "chat":
         return (
-          <ModelChatFeed
+          <ChatInterface
             sessionId={SESSION_ID}
             selectedModelId={selectedModelId}
           />
         );
       case "positions":
-        return <PositionsTable positions={positions} />;
+        return (
+          <PositionsTable
+            positions={positions}
+            selectedModelId={selectedModelId}
+          />
+        );
       default:
         return null;
     }
@@ -68,7 +73,7 @@ export default function Home() {
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Left Panel - Chart with integrated Legend */}
         <div className="flex flex-col border-r min-h-0 overflow-auto lg:flex-1">
-          <div className="flex-1 p-4 flex flex-col gap-4">
+          <div className="flex-1 flex flex-col gap-4">
             <PerformanceChart data={chartData} latestValues={latestValues} />
           </div>
         </div>
@@ -81,7 +86,7 @@ export default function Home() {
             selectedModelId={selectedModelId}
             onModelChange={setSelectedModelId}
           />
-          <div className="flex-1 overflow-auto p-4">{renderTabContent()}</div>
+          <div className="flex-1 overflow-auto">{renderTabContent()}</div>
         </div>
       </div>
     </div>
