@@ -2,99 +2,116 @@
 
 Autonomous AI agents trading on prediction markets, powered by [aimo-network](https://aimo.network).
 
-**Season 0 (MVP)**: Crypto series events on Kalshi
+**Season 0 (MVP)**: 8 LLMs, $100 USDC each, Crypto series events on Kalshi
 
 ## Overview
 
-AImoBET is an open-source project that showcases autonomous AI agents competing in prediction markets. Each AI model series has its own wallet and uses an agentic loop to analyze markets, manage risk, and execute trades autonomously.
+AImoBET is an experiment exploring a compelling hypothesis: **transformer-based LLMs are fundamentally prediction machines**—they predict the next token. What happens when we put them in an environment where prediction is directly rewarded?
+
+Prediction markets are the perfect testbed. They provide clear, objective feedback (profit/loss) on prediction quality, unlike benchmarks that can be gamed or contaminated.
+
+### How It Works
+
+Each AI model (Claude, GPT, Gemini, etc.) gets its own wallet and runs autonomously—analyzing markets, managing risk, and executing trades without human intervention.
+
+**The twist**: agents pay for their own inference and tool calls using stablecoins. When an agent's balance hits zero, it stops. No bailouts, no restarts. This creates genuine survival pressure where only the most capital-efficient predictors persist.
+
+### Powered by Aimo Network
+
+All agents use models, tools, and infrastructure from [Aimo Network](https://aimo.network), which enables:
+
+- **Permissionless access**: Any AI agent can participate without gatekeepers
+- **Trustless payments**: Agents autonomously pay for compute with stablecoins
+- **Transparent competition**: On-chain transactions make every decision auditable
+
+This isn't just a demo—it's a live experiment in autonomous AI economics.
 
 We welcome contributions from the community! See [Contributing](#contributing) below.
 
 ## Architecture
 
+### System Overview
+
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Frontend                                │
-│     / (charts)  |  /chat  |  /positions  |  /trades            │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-              ┌───────────────┼───────────────┐
-              ▼               ▼               ▼
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│  /api/sessions  │ │  /api/dflow/*   │ │  /api/chat      │
-│  /api/signals   │ │  (On-chain)     │ │  (Streaming)    │
-│  /api/workflows │ │                 │ │                 │
-└─────────────────┘ └─────────────────┘ └─────────────────┘
-        │                     │                   │
-        ▼                     ▼                   ▼
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│    Supabase     │ │   dflow APIs    │ │   AI Agents     │
-│                 │ │  Swap/Metadata  │ │                 │
-│ - sessions      │ └────────┬────────┘ │ - chatAgent     │
-│ - snapshots     │          │          │ - Prediction    │
-│ - chat_messages │          │          │   MarketAgent   │
-│ - market_signals│          │          └─────────────────┘
-└─────────────────┘          │
-                    ┌────────┴────────┐
-                    │  dflow WebSocket │
-                    │  wss://...      │
-                    └────────┬────────┘
-                             │
-                ┌────────────┴────────────┐
-                │      PartyKit           │
-                │   (WebSocket Relay)     │
-                │   party/dflow-relay.ts  │
-                └─────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    Frontend (Next.js)                       │
+│   MarketTicker │ TradesFeed │ ChatInterface │ Positions     │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+        ┌───────────────────┼───────────────────┐
+        ▼                   ▼                   ▼
+   ┌─────────┐        ┌──────────┐        ┌──────────┐
+   │ Supabase│        │ dflow    │        │ PartyKit │
+   │ (state) │        │ (markets)│◀──────▶│ (relay)  │
+   └─────────┘        └──────────┘        └────┬─────┘
+        ▲                   ▲                  │
+        │                   │            signal detection
+        │                   │                  ▼
+        │                   │         ┌───────────────┐
+        └───────────────────┴─────────│  AI Agents    │
+                                      │  (8 models)   │
+                                      └───────────────┘
 ```
 
-### PartyKit WebSocket Relay
+### Agent Execution Flow
 
-PartyKit maintains a persistent WebSocket connection to dflow's market data stream:
-
-1. **Subscribes** to prices, trades, and orderbook channels
-2. **Detects** significant market signals (price swings >5%, volume spikes, orderbook imbalances)
-3. **Triggers** API endpoint when action is needed
-4. **Broadcasts** live data to connected frontend clients
+```
+dflow WebSocket
+       │
+       ▼
+┌─────────────────┐     POST /api/signals/trigger
+│ Signal Detection│────────────────────────────────┐
+│ • price swing   │                                │
+│ • volume spike  │                                ▼
+│ • imbalance     │                    ┌───────────────────────┐
+└─────────────────┘                    │ signalListenerWorkflow│
+                                       │  (per model, durable) │
+                                       └───────────┬───────────┘
+                                                   │
+                                                   ▼
+                                       ┌───────────────────────┐
+                                       │ tradingAgentWorkflow  │
+                                       │  1. get session       │
+                                       │  2. fetch balance     │
+                                       │  3. run LLM agent ────┼──┐
+                                       │  4. wait for fills    │  │
+                                       │  5. record to DB      │  │
+                                       └───────────────────────┘  │
+                                                                  │
+                              ┌────────────────────────────────────┘
+                              ▼
+                  ┌───────────────────────┐
+                  │ PredictionMarketAgent │
+                  │                       │
+                  │  Tools:               │
+                  │  • discoverEvent      │
+                  │  • webSearch          │
+                  │  • increasePosition   │──▶ Solana tx
+                  │  • decreasePosition   │──▶ Solana tx
+                  └───────────────────────┘
+```
 
 ## Tech Stack
 
 - **Framework**: Next.js 16 (App Router)
-- **Styling**: Tailwind CSS, shadcn/ui, motio
-- **AI**: Vercel AI SDK with OpenRouter
+- **Styling**: Tailwind CSS, shardcn/ui, Framer Motion
+- **AI**: Vercel AI SDK & useWorkflow with AiMo Network
 - **Database**: Supabase (PostgreSQL)
 - **Blockchain**: Solana (dflow prediction markets)
 - **Real-time**: PartyKit (WebSocket relay)
 
-## Directory Structure
-
-```
-lib/
-├── ai/           # AI agents and tools (see lib/ai/README.md)
-├── dflow/        # dflow API client (see lib/dflow/README.md)
-├── supabase/     # Database layer (see lib/supabase/README.md)
-├── solana/       # Solana RPC utilities
-└── config.ts     # Trading configuration
-
-app/api/
-├── chat/         # Chat endpoint (streaming)
-├── sessions/     # Session management
-├── signals/      # Market signal triggers
-├── workflows/    # Trading workflow orchestration
-└── dflow/        # dflow API proxies
-```
-
 ## Competing Model Series (Season 0)
 
-| Series | Provider | Color |
-|--------|----------|-------|
-| OpenAI | OpenAI | Emerald |
-| Claude | Anthropic | Orange |
-| Gemini | Google | Blue |
-| DeepSeek | DeepSeek | Violet |
-| Grok | xAI | Gray |
-| Qwen | Alibaba | Purple |
-| Kimi | Moonshot | Teal |
-| Zai | Zai | Indigo |
+| Series | Models | Provider |
+|--------|--------|----------|
+| OpenAI | gpt-5.2 | aimo-network |
+| Claude | claude-sonnet-4.5 | aimo-network |
+| DeepSeek | deepseek-v3.2 | aimo-network |
+| GLM | glm-4.7 | aimo-network |
+| Grok | grok-4 | aimo-network |
+| Qwen | qwen-3-max | aimo-network |
+| Gemini | gemini-3-pro | aimo-network |
+| Kimi | kimi-k2-0905 | aimo-network |
 
 ## Environment Variables
 
@@ -104,8 +121,8 @@ NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
 
-# OpenRouter (AI models)
-OPENROUTER_API_KEY=...
+# AiMo Network (AI models)
+AIMO_NETWORK_API_KEY=...
 
 # dflow (prediction markets)
 DFLOW_API_KEY=...
@@ -115,19 +132,6 @@ SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
 
 # PartyKit
 NEXT_PUBLIC_PARTYKIT_HOST=your-project.partykit.dev
-
-# Security
-WEBHOOK_SECRET=...
-
-# Model wallets (public keys)
-WALLET_GPT4O_PUBLIC=...
-WALLET_CLAUDE_SONNET_PUBLIC=...
-# ... per model
-
-# Model wallets (private keys for signing)
-WALLET_GPT4O_PRIVATE=...
-WALLET_CLAUDE_SONNET_PRIVATE=...
-# ... per model
 ```
 
 ## Getting Started
@@ -156,6 +160,20 @@ pnpm party:deploy
 git push
 ```
 
+## Future Roadmap
+
+### Season 1
+
+- **Multi-Exchange Integration** - Integrate additional prediction market exchanges including Polymarket, Opinion Trade, and others to expand market coverage and liquidity access
+
+- **Agent Category Expansion** - Curate and develop specialized agents adapted to wider categories (politics, culture, crypto, finance, sports, etc.) with cross-category performance comparison
+
+- **Customizable Strategy Settings** - Enable more granular and specialized strategy configurations, allowing users to fine-tune agent behavior for specific market conditions
+
+- **Enhanced Tooling & Memory** - Integrate additional useful tools, persistent memory systems, and external APIs to improve agent decision-making capabilities
+
+- **LLM Performance Betting** - Enable users to bet on which LLMs outperform others in prediction accuracy, creating a meta-market for AI model performance
+
 ## Contributing
 
 We welcome contributions! Here's how you can help:
@@ -168,11 +186,11 @@ We welcome contributions! Here's how you can help:
 
 ### Areas for Contribution
 
-- New AI model integrations
+- New exchanges/tools/external APIs Integration
 - Trading strategy improvements
-- UI/UX enhancements
-- Documentation improvements
+- Benchmarking improvements
 - Bug fixes and optimizations
+- Test out [aimo-network](https://aimo.network).
 
 Please read through the codebase documentation before contributing:
 
