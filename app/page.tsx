@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { AppHeader } from "@/components/layout/AppHeader";
+import { MarketTicker } from "@/components/index/MarketTicker";
 import { AppTabs } from "@/components/layout/AppTabs";
 import { PerformanceChart } from "@/components/index/PerformanceChart";
 import { TradesFeed } from "@/components/trades/TradesFeed";
@@ -10,6 +11,7 @@ import { PositionsTable } from "@/components/positions/PositionsTable";
 import { usePerformanceChart } from "@/hooks/index/usePerformanceChart";
 import { useSessionTrades } from "@/hooks/trades/useTrades";
 import { useSessionPositions } from "@/hooks/positions/usePositions";
+import { useLivePrices } from "@/hooks/index/useLivePrices";
 import type { ArenaTab } from "@/lib/supabase/types";
 
 // Session ID for the arena (in production, this would come from routing/state)
@@ -31,6 +33,7 @@ export default function Home() {
   const { trades, isLoading: tradesLoading } = useSessionTrades(SESSION_ID);
   const { positions, isLoading: positionsLoading } =
     useSessionPositions(SESSION_ID);
+  const livePrices = useLivePrices();
 
   // Render the right panel content based on active tab
   const renderTabContent = () => {
@@ -55,6 +58,11 @@ export default function Home() {
     <div className="flex flex-col h-screen">
       {/* Header */}
       <AppHeader />
+
+      {/* Market Ticker Strip */}
+      <div className="border-b bg-background/50">
+        <MarketTicker {...livePrices} />
+      </div>
 
       {/* Main Content: Left (Chart) + Right (Tabs + Content) */}
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">

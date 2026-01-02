@@ -2,7 +2,6 @@
 
 import { Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { MarketTicker } from "@/components/index/MarketTicker";
 import { useTheme } from "next-themes";
 
 export function AppHeader() {
@@ -13,11 +12,6 @@ export function AppHeader() {
       {/* Left: Title + Status */}
       <div className="flex items-center gap-3">
         <h1 className="text-xl font-bold">AIMO BET</h1>
-      </div>
-
-      {/* Center: Market Ticker */}
-      <div className="hidden md:flex">
-        <MarketTicker />
       </div>
 
       {/* Theme toggle */}

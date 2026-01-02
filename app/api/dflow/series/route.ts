@@ -60,9 +60,10 @@ export async function GET(req: Request) {
 
     return NextResponse.json(data);
   } catch (error) {
-    console.error("[dflow/series] Failed to fetch series:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[dflow/series] Failed to fetch series:", message);
     return NextResponse.json(
-      { error: "Failed to fetch series" },
+      { error: `Failed to fetch series: ${message}` },
       { status: 500 },
     );
   }
