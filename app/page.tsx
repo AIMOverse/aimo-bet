@@ -28,6 +28,7 @@ export default function Home() {
   const {
     chartData,
     latestValues,
+    deadModels,
     loading: performanceLoading,
   } = usePerformanceChart({ sessionId: SESSION_ID });
   const { trades, isLoading: tradesLoading } = useSessionTrades(SESSION_ID);
@@ -74,7 +75,11 @@ export default function Home() {
         {/* Left Panel - Chart with integrated Legend */}
         <div className="flex flex-col border-r min-h-0 overflow-auto lg:flex-1">
           <div className="flex-1 flex flex-col gap-4">
-            <PerformanceChart data={chartData} latestValues={latestValues} />
+            <PerformanceChart
+              data={chartData}
+              latestValues={latestValues}
+              deadModels={deadModels}
+            />
           </div>
         </div>
 

@@ -13,6 +13,7 @@ interface UsePerformanceChartOptions {
 interface UsePerformanceChartReturn {
   chartData: ChartDataPoint[];
   latestValues: Map<string, number>;
+  deadModels: Set<string>;
   loading: boolean;
   error: Error | null;
 }
@@ -29,6 +30,7 @@ export function usePerformanceChart({
   const [latestValues, setLatestValues] = useState<Map<string, number>>(
     new Map(),
   );
+  const [deadModels, setDeadModels] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
@@ -142,6 +144,17 @@ export function usePerformanceChart({
             latest.set(row.model_name, row.portfolio_value_after);
           }
           setLatestValues(latest);
+
+          // Check for dead models (portfolio value <= 0)
+          const dead = new Set<string>();
+          for (const [modelName, value] of latest) {
+            if (value <= 0) {
+              dead.add(modelName);
+            }
+          }
+          if (dead.size > 0) {
+            setDeadModels(dead);
+          }
         }
       } catch (err) {
         console.error("[usePerformanceChart] Error fetching chart data:", err);
@@ -224,6 +237,11 @@ export function usePerformanceChart({
                 );
                 return updated;
               });
+
+              // Check if model is now dead
+              if (newPoint.portfolio_value_after <= 0) {
+                setDeadModels((prev) => new Set(prev).add(newPoint.model_name));
+              }
             }
           } catch (err) {
             console.error(
@@ -242,5 +260,5 @@ export function usePerformanceChart({
     };
   }, [sessionId, hoursBack, transformToChartData]);
 
-  return { chartData, latestValues, loading, error };
+  return { chartData, latestValues, deadModels, loading, error };
 }
