@@ -29,7 +29,11 @@ interface PerformanceChartProps {
   title?: string;
   latestValues?: Map<string, number>;
   leaderboard?: LeaderboardEntry[];
+  deadModels?: Set<string>;
 }
+
+// Color for dead/muted models
+const DEAD_MODEL_COLOR = "hsl(var(--muted-foreground))";
 
 type TimeRange = "24H" | "72H" | "ALL";
 type ValueDisplay = "dollar" | "percent";
@@ -119,6 +123,7 @@ interface LineEndLabelProps {
   color: string;
   isHovered: boolean;
   isDimmed: boolean;
+  isDead: boolean;
   onHover: (name: string | null) => void;
   latestValue: number;
   valueDisplay: ValueDisplay;
@@ -133,6 +138,7 @@ function LineEndLabel({
   color,
   isHovered,
   isDimmed,
+  isDead,
   onHover,
   latestValue,
   valueDisplay,
@@ -176,9 +182,10 @@ function LineEndLabel({
           className={cn(
             "size-5 ring-[1.5px] ring-offset-0 bg-background shrink-0",
             isHovered && "ring-2",
+            isDead && "grayscale opacity-60",
           )}
           style={{
-            ["--tw-ring-color" as string]: color,
+            ["--tw-ring-color" as string]: isDead ? DEAD_MODEL_COLOR : color,
           }}
         >
           {logoPath ? (
@@ -198,11 +205,17 @@ function LineEndLabel({
         <span
           className={cn(
             "text-[11px] font-semibold whitespace-nowrap tabular-nums",
-            valueDisplay === "percent" &&
+            isDead && "text-muted-foreground",
+            !isDead &&
+              valueDisplay === "percent" &&
               (isPositive ? "text-green-500" : "text-red-500"),
           )}
           style={{
-            color: valueDisplay === "dollar" ? color : undefined,
+            color: isDead
+              ? undefined
+              : valueDisplay === "dollar"
+                ? color
+                : undefined,
           }}
         >
           {valueDisplay === "dollar" ? (
@@ -252,6 +265,7 @@ interface CustomLegendProps {
   leaderboard?: LeaderboardEntry[];
   hoveredModel: string | null;
   onModelHover: (modelName: string | null) => void;
+  deadModels?: Set<string>;
 }
 
 function CustomLegend({
@@ -260,6 +274,7 @@ function CustomLegend({
   leaderboard,
   hoveredModel,
   onModelHover,
+  deadModels,
 }: CustomLegendProps) {
   if (!payload || payload.length === 0) return null;
 
@@ -287,6 +302,7 @@ function CustomLegend({
         const isPositive = model.value >= DEFAULT_STARTING_CAPITAL;
         const isHovered = hoveredModel === model.name;
         const isDimmed = hoveredModel !== null && !isHovered;
+        const isDead = deadModels?.has(model.name) ?? false;
         const changePercent =
           ((model.value - DEFAULT_STARTING_CAPITAL) /
             DEFAULT_STARTING_CAPITAL) *
@@ -299,19 +315,30 @@ function CustomLegend({
               "flex items-center gap-1 px-1 rounded transition-opacity cursor-default text-xs",
               "hover:bg-muted/50",
               isDimmed && "opacity-30",
+              isDead && "opacity-60",
             )}
             onMouseEnter={() => onModelHover(model.name)}
             onMouseLeave={() => onModelHover(null)}
           >
             <div
               className="w-2 h-2 rounded-full shrink-0"
-              style={{ backgroundColor: model.color }}
+              style={{
+                backgroundColor: isDead ? DEAD_MODEL_COLOR : model.color,
+              }}
             />
-            <span className="font-medium">{model.name}</span>
+            <span
+              className={cn("font-medium", isDead && "text-muted-foreground")}
+            >
+              {model.name}
+            </span>
             <span
               className={cn(
                 "font-medium",
-                isPositive ? "text-green-500" : "text-red-500",
+                isDead
+                  ? "text-muted-foreground"
+                  : isPositive
+                    ? "text-green-500"
+                    : "text-red-500",
               )}
             >
               {changePercent >= 0 ? "+" : ""}
@@ -329,6 +356,7 @@ export function PerformanceChart({
   title = "Account Value Over Time",
   latestValues,
   leaderboard,
+  deadModels,
 }: PerformanceChartProps) {
   const [timeRange, setTimeRange] = useState<TimeRange>("ALL");
   const [valueDisplay, setValueDisplay] = useState<ValueDisplay>("dollar");
@@ -490,7 +518,9 @@ export function PerformanceChart({
                 strokeOpacity={0.5}
               />
               {modelNames.map((name) => {
-                const color = colorMap.get(name) || "#6366f1";
+                const baseColor = colorMap.get(name) || "#6366f1";
+                const isDead = deadModels?.has(name) ?? false;
+                const lineColor = isDead ? DEAD_MODEL_COLOR : baseColor;
                 const isHovered = hoveredModel === name;
                 const isDimmed = hoveredModel !== null && !isHovered;
                 return (
@@ -498,9 +528,9 @@ export function PerformanceChart({
                     key={name}
                     type="monotone"
                     dataKey={name}
-                    stroke={color}
+                    stroke={lineColor}
                     strokeWidth={isHovered ? 3 : 2}
-                    strokeOpacity={isDimmed ? 0.2 : 1}
+                    strokeOpacity={isDimmed ? 0.2 : isDead ? 0.6 : 1}
                     dot={false}
                     activeDot={{ r: 4 }}
                     animationDuration={CHART_CONFIG.animationDuration}
@@ -512,9 +542,10 @@ export function PerformanceChart({
                           {...props}
                           dataLength={chartData.length}
                           modelName={name}
-                          color={color}
+                          color={lineColor}
                           isHovered={isHovered}
                           isDimmed={isDimmed}
+                          isDead={isDead}
                           onHover={setHoveredModel}
                           latestValue={
                             latestValues?.get(name) ?? DEFAULT_STARTING_CAPITAL
@@ -533,6 +564,7 @@ export function PerformanceChart({
                     leaderboard={leaderboard}
                     hoveredModel={hoveredModel}
                     onModelHover={setHoveredModel}
+                    deadModels={deadModels}
                   />
                 }
                 verticalAlign="bottom"
