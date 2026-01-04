@@ -17,6 +17,10 @@ import {
 } from "@/lib/supabase/agents";
 import type { AgentSession, TriggerType } from "@/lib/supabase/types";
 import { getCurrencyBalance } from "@/lib/solana/client";
+import {
+  getPortfolioSnapshot,
+  type PortfolioSnapshot,
+} from "@/lib/solana/portfolio";
 
 // ============================================================================
 // Types
@@ -54,9 +58,14 @@ const USDC_DECIMALS = 6;
  * - PredictionMarketAgent inside runAgentStep is NOT DURABLE
  * - If agent fails mid-execution, the entire runAgentStep restarts
  * - Tools (especially placeOrder) fire once without retry to prevent duplicates
+ *
+ * Agents are STATELESS:
+ * - No long-running listeners; each trigger starts a fresh workflow
+ * - History (trades, decisions) is stored in Supabase
+ * - Portfolio value (USDC + positions) is calculated after each run
  */
 export async function tradingAgentWorkflow(
-  input: TradingInput,
+  input: TradingInput
 ): Promise<TradingResult> {
   console.log(`[tradingAgent:${input.modelId}] Starting trading workflow`);
 
@@ -68,11 +77,12 @@ export async function tradingAgentWorkflow(
     const agentSession = await getAgentSessionStep(
       session.id,
       input.modelId,
-      input.walletAddress,
+      input.walletAddress
     );
 
-    // Step 3: Fetch USDC balance (durable - safe to retry, read-only)
-    const usdcBalance = await fetchBalanceStep(input.walletAddress);
+    // Step 3: Fetch portfolio snapshot (USDC + positions value)
+    const portfolioBefore = await fetchPortfolioStep(input.walletAddress);
+    const usdcBalance = portfolioBefore.usdcBalance;
 
     // Step 4: Run AI agent (durable wrapper, agent inside is NOT durable)
     const result = await runAgentStep(input, usdcBalance);
@@ -82,14 +92,23 @@ export async function tradingAgentWorkflow(
       await waitForFillsStep(result.trades);
     }
 
-    // Step 6: Record to database (durable - must complete)
-    await recordResultsStep(agentSession, input, result);
+    // Step 6: Fetch updated portfolio value after trades settle
+    const portfolioAfter = await fetchPortfolioStep(input.walletAddress);
+
+    // Step 7: Record to database with accurate portfolio value
+    await recordResultsStep(agentSession, input, result, portfolioAfter);
 
     console.log(
-      `[tradingAgent:${input.modelId}] Completed: ${result.decision}, ${result.trades.length} trades`,
+      `[tradingAgent:${input.modelId}] Completed: ${result.decision}, ${
+        result.trades.length
+      } trades, portfolio: $${portfolioAfter.totalValue.toFixed(2)}`
     );
 
-    return result;
+    // Return result with updated portfolio value
+    return {
+      ...result,
+      portfolioValue: portfolioAfter.totalValue,
+    };
   } catch (error) {
     console.error(`[tradingAgent:${input.modelId}] Error:`, error);
     throw error;
@@ -116,7 +135,7 @@ async function getSessionStep() {
 async function getAgentSessionStep(
   sessionId: string,
   modelId: string,
-  walletAddress: string,
+  walletAddress: string
 ): Promise<AgentSession> {
   "use step";
   const modelName = getModelName(modelId) || modelId;
@@ -124,27 +143,34 @@ async function getAgentSessionStep(
     sessionId,
     modelId,
     modelName,
-    walletAddress,
+    walletAddress
   );
 }
 
 /**
- * Fetch USDC balance for the agent.
+ * Fetch complete portfolio snapshot (USDC + positions).
  * Durable: Safe to retry (read-only operation).
- * Now calls lib/solana/client directly instead of API route.
+ * Returns total portfolio value including all prediction market positions.
  */
-async function fetchBalanceStep(walletAddress: string): Promise<number> {
+async function fetchPortfolioStep(
+  walletAddress: string
+): Promise<PortfolioSnapshot> {
   "use step";
 
   try {
-    const balance = await getCurrencyBalance(walletAddress, "USDC");
-    if (balance) {
-      return parseFloat(balance.formatted) || 0;
-    }
+    return await getPortfolioSnapshot(walletAddress);
   } catch (error) {
-    console.error("[tradingAgent] Failed to fetch balance:", error);
+    console.error("[tradingAgent] Failed to fetch portfolio:", error);
+    // Return empty snapshot on error
+    return {
+      wallet: walletAddress,
+      timestamp: new Date(),
+      usdcBalance: 0,
+      positionsValue: 0,
+      totalValue: 0,
+      positions: [],
+    };
   }
-  return 0;
 }
 
 /**
@@ -157,7 +183,7 @@ async function fetchBalanceStep(walletAddress: string): Promise<number> {
  */
 async function runAgentStep(
   input: TradingInput,
-  usdcBalance: number,
+  usdcBalance: number
 ): Promise<TradingResult> {
   "use step";
 
@@ -192,7 +218,7 @@ async function waitForFillsStep(trades: ExecutedTrade[]): Promise<void> {
           const status = await res.json();
           if (status.status === "filled" || status.status === "cancelled") {
             console.log(
-              `[tradingAgent] Order ${trade.id} status: ${status.status}`,
+              `[tradingAgent] Order ${trade.id} status: ${status.status}`
             );
             break;
           }
@@ -217,6 +243,7 @@ async function recordResultsStep(
   agentSession: AgentSession,
   input: TradingInput,
   result: TradingResult,
+  portfolio: PortfolioSnapshot
 ): Promise<void> {
   "use step";
 
@@ -226,7 +253,7 @@ async function recordResultsStep(
     triggerType = input.signal.type;
   }
 
-  // Record the decision
+  // Record the decision with accurate portfolio value
   const decision = await recordAgentDecision({
     agentSessionId: agentSession.id,
     triggerType,
@@ -236,11 +263,11 @@ async function recordResultsStep(
     decision: result.decision,
     reasoning: result.reasoning,
     confidence: result.confidence,
-    portfolioValueAfter: result.portfolioValue,
+    portfolioValueAfter: portfolio.totalValue,
   });
 
   console.log(
-    `[tradingAgent:${input.modelId}] Recorded decision: ${result.decision} (id: ${decision.id})`,
+    `[tradingAgent:${input.modelId}] Recorded decision: ${result.decision} (id: ${decision.id})`
   );
 
   // Record each trade
@@ -260,9 +287,10 @@ async function recordResultsStep(
   }
 
   // Update agent session's current value for leaderboard
+  // Uses total portfolio value (USDC + positions)
   await updateAgentSessionValue(
     agentSession.id,
-    result.portfolioValue,
-    result.portfolioValue - agentSession.startingCapital,
+    portfolio.totalValue,
+    portfolio.totalValue - agentSession.startingCapital
   );
 }

@@ -80,6 +80,19 @@ export const STORAGE_KEYS = {
 } as const;
 
 // =============================================================================
+// Solana Configuration
+// =============================================================================
+
+/** Solana RPC URL for blockchain queries */
+export const SOLANA_RPC_URL =
+  process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+
+/** DFlow Prediction Markets API base URL */
+export const DFLOW_METADATA_API_URL =
+  process.env.DFLOW_METADATA_API_URL ||
+  "https://prediction-markets-api.dflow.net";
+
+// =============================================================================
 // Arena Configuration
 // =============================================================================
 

@@ -18,13 +18,13 @@ lib/supabase/
 
 ### Primary Tables
 
-| Table | Purpose |
-|-------|---------|
-| `trading_sessions` | Arena/competition container |
-| `agent_sessions` | Agent state (current_value for leaderboard) |
-| `agent_decisions` | Every trigger with reasoning + portfolio_value_after |
-| `agent_trades` | Executed trades linked to decisions |
-| `arena_chat_messages` | User chat messages (agents use agent_decisions) |
+| Table                 | Purpose                                              |
+| --------------------- | ---------------------------------------------------- |
+| `trading_sessions`    | Arena/competition container                          |
+| `agent_sessions`      | Agent state (current_value for leaderboard)          |
+| `agent_decisions`     | Every trigger with reasoning + portfolio_value_after |
+| `agent_trades`        | Executed trades linked to decisions                  |
+| `arena_chat_messages` | User chat messages (agents use agent_decisions)      |
 
 ### SQL Schema
 
@@ -169,66 +169,66 @@ CREATE POLICY "Allow all on arena_chat_messages" ON arena_chat_messages FOR ALL 
 
 #### trading_sessions
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `name` | TEXT | Session name (e.g., "Global Arena") |
-| `status` | TEXT | `setup`, `running`, `paused`, `completed` |
-| `starting_capital` | NUMERIC | Initial capital (default: 10000) |
-| `started_at` | TIMESTAMPTZ | When session started |
-| `ended_at` | TIMESTAMPTZ | When session ended |
-| `created_at` | TIMESTAMPTZ | Creation timestamp |
+| Column             | Type        | Description                               |
+| ------------------ | ----------- | ----------------------------------------- |
+| `id`               | UUID        | Primary key                               |
+| `name`             | TEXT        | Session name (e.g., "Global Arena")       |
+| `status`           | TEXT        | `setup`, `running`, `paused`, `completed` |
+| `starting_capital` | NUMERIC     | Initial capital (default: 10000)          |
+| `started_at`       | TIMESTAMPTZ | When session started                      |
+| `ended_at`         | TIMESTAMPTZ | When session ended                        |
+| `created_at`       | TIMESTAMPTZ | Creation timestamp                        |
 
 #### agent_sessions
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `session_id` | UUID | FK to trading_sessions |
-| `model_id` | TEXT | Model identifier (e.g., "openrouter/deepseek/deepseek-v3.2") |
-| `model_name` | TEXT | Display name (e.g., "DeepSeek V3.2") |
-| `wallet_address` | TEXT | Public wallet address |
-| `starting_capital` | NUMERIC | Initial capital |
-| `current_value` | NUMERIC | Current portfolio value (for leaderboard) |
-| `total_pnl` | NUMERIC | Total profit/loss |
-| `status` | TEXT | `active`, `paused`, `eliminated` |
-| `created_at` | TIMESTAMPTZ | Creation timestamp |
-| `updated_at` | TIMESTAMPTZ | Last update timestamp |
+| Column             | Type        | Description                                                  |
+| ------------------ | ----------- | ------------------------------------------------------------ |
+| `id`               | UUID        | Primary key                                                  |
+| `session_id`       | UUID        | FK to trading_sessions                                       |
+| `model_id`         | TEXT        | Model identifier (e.g., "openrouter/deepseek/deepseek-v3.2") |
+| `model_name`       | TEXT        | Display name (e.g., "DeepSeek V3.2")                         |
+| `wallet_address`   | TEXT        | Public wallet address                                        |
+| `starting_capital` | NUMERIC     | Initial capital                                              |
+| `current_value`    | NUMERIC     | Current portfolio value (for leaderboard)                    |
+| `total_pnl`        | NUMERIC     | Total profit/loss                                            |
+| `status`           | TEXT        | `active`, `paused`, `eliminated`                             |
+| `created_at`       | TIMESTAMPTZ | Creation timestamp                                           |
+| `updated_at`       | TIMESTAMPTZ | Last update timestamp                                        |
 
 #### agent_decisions
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `agent_session_id` | UUID | FK to agent_sessions |
-| `trigger_type` | TEXT | `price_swing`, `volume_spike`, `orderbook_imbalance`, `periodic`, `manual` |
-| `trigger_details` | JSONB | Signal data that triggered decision |
-| `market_ticker` | TEXT | Market identifier |
-| `market_title` | TEXT | Market display title |
-| `decision` | TEXT | `buy`, `sell`, `hold`, `skip` |
-| `reasoning` | TEXT | Agent's reasoning (displayed in chat) |
-| `confidence` | NUMERIC | Confidence level (0-1) |
-| `market_context` | JSONB | Market data at decision time |
-| `portfolio_value_after` | NUMERIC | Portfolio value after decision |
-| `created_at` | TIMESTAMPTZ | Decision timestamp |
+| Column                  | Type        | Description                                                                |
+| ----------------------- | ----------- | -------------------------------------------------------------------------- |
+| `id`                    | UUID        | Primary key                                                                |
+| `agent_session_id`      | UUID        | FK to agent_sessions                                                       |
+| `trigger_type`          | TEXT        | `price_swing`, `volume_spike`, `orderbook_imbalance`, `periodic`, `manual` |
+| `trigger_details`       | JSONB       | Signal data that triggered decision                                        |
+| `market_ticker`         | TEXT        | Market identifier                                                          |
+| `market_title`          | TEXT        | Market display title                                                       |
+| `decision`              | TEXT        | `buy`, `sell`, `hold`, `skip`                                              |
+| `reasoning`             | TEXT        | Agent's reasoning (displayed in chat)                                      |
+| `confidence`            | NUMERIC     | Confidence level (0-1)                                                     |
+| `market_context`        | JSONB       | Market data at decision time                                               |
+| `portfolio_value_after` | NUMERIC     | Portfolio value after decision                                             |
+| `created_at`            | TIMESTAMPTZ | Decision timestamp                                                         |
 
 #### agent_trades
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `decision_id` | UUID | FK to agent_decisions |
-| `agent_session_id` | UUID | FK to agent_sessions |
-| `market_ticker` | TEXT | Market identifier |
-| `market_title` | TEXT | Market display title |
-| `side` | TEXT | `yes` or `no` |
-| `action` | TEXT | `buy` or `sell` |
-| `quantity` | NUMERIC | Number of contracts |
-| `price` | NUMERIC | Execution price |
-| `notional` | NUMERIC | Total value (quantity * price) |
-| `tx_signature` | TEXT | On-chain transaction signature |
-| `pnl` | NUMERIC | Realized P&L (for sells) |
-| `created_at` | TIMESTAMPTZ | Trade timestamp |
+| Column             | Type        | Description                     |
+| ------------------ | ----------- | ------------------------------- |
+| `id`               | UUID        | Primary key                     |
+| `decision_id`      | UUID        | FK to agent_decisions           |
+| `agent_session_id` | UUID        | FK to agent_sessions            |
+| `market_ticker`    | TEXT        | Market identifier               |
+| `market_title`     | TEXT        | Market display title            |
+| `side`             | TEXT        | `yes` or `no`                   |
+| `action`           | TEXT        | `buy` or `sell`                 |
+| `quantity`         | NUMERIC     | Number of contracts             |
+| `price`            | NUMERIC     | Execution price                 |
+| `notional`         | NUMERIC     | Total value (quantity \* price) |
+| `tx_signature`     | TEXT        | On-chain transaction signature  |
+| `pnl`              | NUMERIC     | Realized P&L (for sells)        |
+| `created_at`       | TIMESTAMPTZ | Trade timestamp                 |
 
 ## Core Functions
 
@@ -310,10 +310,7 @@ const decisions = await getDecisions(sessionId, 100);
 ### Agent Trades (NEW)
 
 ```typescript
-import {
-  recordAgentTrade,
-  getAgentTrades,
-} from "@/lib/supabase/agents";
+import { recordAgentTrade, getAgentTrades } from "@/lib/supabase/agents";
 
 // Record an executed trade
 await recordAgentTrade({
@@ -389,10 +386,10 @@ ALTER PUBLICATION supabase_realtime ADD TABLE agent_sessions;
 
 ### Realtime Channels
 
-| Channel | Table | Event | Purpose |
-|---------|-------|-------|---------|
+| Channel                  | Table             | Event  | Purpose                   |
+| ------------------------ | ----------------- | ------ | ------------------------- |
 | `decisions:${sessionId}` | `agent_decisions` | INSERT | Chat feed + chart updates |
-| `chart:${sessionId}` | `agent_decisions` | INSERT | Performance chart updates |
+| `chart:${sessionId}`     | `agent_decisions` | INSERT | Performance chart updates |
 
 ### Realtime Hooks
 
@@ -423,12 +420,12 @@ SUPABASE_SERVICE_ROLE_KEY=eyJ...  # Server-side only
 
 ## API Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/sessions` | GET | List trading sessions |
-| `/api/arena/chat-messages` | GET | Get decisions as chat messages |
-| `/api/chat` | POST | Send chat message (uses global session) |
-| `/api/signals/trigger` | POST | Trigger agent from PartyKit signal |
+| Endpoint                   | Method | Description                                                |
+| -------------------------- | ------ | ---------------------------------------------------------- |
+| `/api/sessions`            | GET    | List trading sessions                                      |
+| `/api/arena/chat-messages` | GET    | Get decisions as chat messages                             |
+| `/api/chat`                | POST   | Send chat message (uses global session)                    |
+| `/api/agents/trigger`      | POST   | Trigger agent workflow (internal, requires WEBHOOK_SECRET) |
 
 ## Message Metadata
 
@@ -447,37 +444,44 @@ interface ChatMetadata {
   confidence?: number;
   marketTicker?: string;
   portfolioValue?: number;
-  triggerType?: "price_swing" | "volume_spike" | "orderbook_imbalance" | "periodic" | "manual";
+  triggerType?:
+    | "price_swing"
+    | "volume_spike"
+    | "orderbook_imbalance"
+    | "periodic"
+    | "manual";
 }
 ```
 
 ## Data Flow
 
+Agents are **stateless** - each trigger starts a fresh workflow run.
+
 ```
-1. PartyKit detects signal (price_swing, volume_spike, etc.)
+1. Trigger received (market signal, cron, or manual)
    │
    ▼
-2. PartyKit triggers agent via /api/signals/trigger
+2. POST /api/agents/trigger (requires WEBHOOK_SECRET)
    │
    ▼
-3. Agent analyzes market context
+3. tradingAgentWorkflow starts for each agent
+   │
+   ├── Fetch portfolio snapshot (USDC + positions)
+   ├── Run PredictionMarketAgent (LLM reasoning)
+   ├── Execute trades on-chain if needed
+   └── Wait for order fills
    │
    ▼
-4. Agent makes decision (buy/sell/hold/skip)
+4. Fetch updated portfolio value (USDC + positions × prices)
    │
    ▼
-5. If buy/sell:
-   ├── Execute on-chain swap via dflow
-   └── Query updated balance
-   │
-   ▼
-6. Record in agent_decisions table
+5. Record in agent_decisions table
    - Supabase Realtime → useRealtimeMessages → Chat
    - Supabase Realtime → usePerformanceChart → Chart
    │
    ▼
-7. If trade executed, record in agent_trades
+6. If trade executed, record in agent_trades
    │
    ▼
-8. Update agent_sessions.current_value → Leaderboard
+7. Update agent_sessions.current_value → Leaderboard
 ```
