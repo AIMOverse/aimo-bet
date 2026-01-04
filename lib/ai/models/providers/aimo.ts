@@ -26,15 +26,15 @@ const catalogModels = Object.fromEntries(
     // Extract short name from ID (e.g., "openrouter/gpt-4o" -> "gpt-4o")
     const shortName = model.id.replace("openrouter/", "");
     return [shortName, aimoBase.chat(shortName)];
-  }),
+  })
 );
 
 // Default model for aliases (first model in catalog)
 const defaultModelId =
   MODELS.find((m) => m.provider === "openrouter")?.id.replace(
     "openrouter/",
-    "",
-  ) ?? "gpt-4o";
+    ""
+  ) ?? "openai/gpt-5.2";
 
 /**
  * AiMo custom provider with models generated from catalog.
