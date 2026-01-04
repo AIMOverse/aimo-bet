@@ -67,16 +67,16 @@ export class PredictionMarketAgent {
       discoverEvent: discoverEventTool,
       increasePosition: createIncreasePositionTool(
         this.config.walletAddress,
-        signer,
+        signer
       ),
       decreasePosition: createDecreasePositionTool(
         this.config.walletAddress,
-        signer,
+        signer
       ),
       retrievePosition: createRetrievePositionTool(this.config.walletAddress),
       redeemPosition: createRedeemPositionTool(
         this.config.walletAddress,
-        signer,
+        signer
       ),
       webSearch: webSearchTool,
     };
@@ -115,8 +115,7 @@ export class PredictionMarketAgent {
     }
 
     console.log(
-      `[PredictionMarketAgent:${this.config.modelId}] Starting agent run with prompt:`,
-      prompt,
+      `[PredictionMarketAgent:${this.config.modelId}] Starting agent run`
     );
 
     // Run the agent with ToolLoopAgent.generate()
@@ -124,35 +123,7 @@ export class PredictionMarketAgent {
     const result = await agent.generate({ prompt });
 
     console.log(
-      `[PredictionMarketAgent:${this.config.modelId}] Raw result keys:`,
-      Object.keys(result),
-    );
-
-    console.log(
-      `[PredictionMarketAgent:${this.config.modelId}] Completed with ${result.steps.length} steps`,
-    );
-
-    // Log the full inference response for debugging
-    console.log(
-      `[PredictionMarketAgent:${this.config.modelId}] Agent Response:`,
-      JSON.stringify(
-        {
-          text: result.text,
-          steps: result.steps.map((step, i) => ({
-            step: i + 1,
-            toolCalls: step.toolCalls?.map((tc) => ({
-              tool: tc.toolName,
-              input: tc.input,
-            })),
-            toolResults: step.toolResults?.map((tr) => ({
-              id: tr.toolCallId,
-              output: tr.output,
-            })),
-          })),
-        },
-        null,
-        2,
-      ),
+      `[PredictionMarketAgent:${this.config.modelId}] Completed with ${result.steps.length} steps`
     );
 
     // Extract trades from tool call results
@@ -188,7 +159,7 @@ export class PredictionMarketAgent {
         input: unknown;
       }>;
       toolResults?: Array<{ toolCallId: string; output?: unknown }>;
-    }>,
+    }>
   ): ExecutedTrade[] {
     const trades: ExecutedTrade[] = [];
 
@@ -199,7 +170,7 @@ export class PredictionMarketAgent {
         // Handle increasePosition tool
         if (call.toolName === "increasePosition") {
           const resultEntry = step.toolResults.find(
-            (r) => r.toolCallId === call.toolCallId,
+            (r) => r.toolCallId === call.toolCallId
           );
 
           const typedOutput = resultEntry?.output as
@@ -236,7 +207,7 @@ export class PredictionMarketAgent {
         // Handle decreasePosition tool
         if (call.toolName === "decreasePosition") {
           const resultEntry = step.toolResults.find(
-            (r) => r.toolCallId === call.toolCallId,
+            (r) => r.toolCallId === call.toolCallId
           );
 
           const typedOutput = resultEntry?.output as
@@ -279,7 +250,7 @@ export class PredictionMarketAgent {
    */
   private determineDecision(
     text: string | undefined,
-    trades: ExecutedTrade[],
+    trades: ExecutedTrade[]
   ): DecisionType {
     if (trades.length > 0) {
       return trades[0].action === "buy" ? "buy" : "sell";
