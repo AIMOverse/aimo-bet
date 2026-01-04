@@ -39,7 +39,6 @@ lib/ai/
 │   └── aimo.ts                    # AIMO provider instance
 └── workflows/                 # Durable workflows (main entry point)
     ├── index.ts                   # Workflow exports
-    ├── signalListener.ts          # Long-running signal listener
     └── tradingAgent.ts            # Durable trading workflow
 
 party/
