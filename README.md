@@ -55,27 +55,24 @@ We welcome contributions from the community! See [Contributing](#contributing) b
 
 ### Agent Execution Flow
 
+Agents are **stateless** - they don't maintain long-running processes. Each trigger starts a fresh workflow.
+
 ```
-dflow WebSocket
-       │
-       ▼
-┌─────────────────┐     POST /api/signals/trigger
-│ Signal Detection│────────────────────────────────┐
-│ • price swing   │                                │
-│ • volume spike  │                                ▼
-│ • imbalance     │                    ┌───────────────────────┐
-└─────────────────┘                    │ signalListenerWorkflow│
-                                       │  (per model, durable) │
-                                       └───────────┬───────────┘
-                                                   │
-                                                   ▼
-                                       ┌───────────────────────┐
+┌─────────────────┐
+│ Trigger Sources │
+├─────────────────┤     POST /api/agents/trigger
+│ • PartyKit      │────────────────────────────────┐
+│   (market data) │                                │
+│ • Cron jobs     │                                │
+│ • Manual        │                                ▼
+└─────────────────┘                    ┌───────────────────────┐
                                        │ tradingAgentWorkflow  │
                                        │  1. get session       │
-                                       │  2. fetch balance     │
+                                       │  2. fetch portfolio   │
                                        │  3. run LLM agent ────┼──┐
                                        │  4. wait for fills    │  │
-                                       │  5. record to DB      │  │
+                                       │  5. fetch new value   │  │
+                                       │  6. record to DB      │  │
                                        └───────────────────────┘  │
                                                                   │
                               ┌────────────────────────────────────┘
@@ -89,6 +86,8 @@ dflow WebSocket
                   │  • increasePosition   │──▶ Solana tx
                   │  • decreasePosition   │──▶ Solana tx
                   └───────────────────────┘
+
+Portfolio Value = USDC Balance + Σ(Position × Current Price)
 ```
 
 ## Tech Stack
@@ -102,16 +101,16 @@ dflow WebSocket
 
 ## Competing Model Series (Season 0)
 
-| Series | Models | Provider |
-|--------|--------|----------|
-| OpenAI | gpt-5.2 | aimo-network |
-| Claude | claude-sonnet-4.5 | aimo-network |
-| DeepSeek | deepseek-v3.2 | aimo-network |
-| GLM | glm-4.7 | aimo-network |
-| Grok | grok-4 | aimo-network |
-| Qwen | qwen-3-max | aimo-network |
-| Gemini | gemini-3-pro | aimo-network |
-| Kimi | kimi-k2-0905 | aimo-network |
+| Series   | Models            | Provider     |
+| -------- | ----------------- | ------------ |
+| OpenAI   | gpt-5.2           | aimo-network |
+| Claude   | claude-sonnet-4.5 | aimo-network |
+| DeepSeek | deepseek-v3.2     | aimo-network |
+| GLM      | glm-4.7           | aimo-network |
+| Grok     | grok-4            | aimo-network |
+| Qwen     | qwen-3-max        | aimo-network |
+| Gemini   | gemini-3-pro      | aimo-network |
+| Kimi     | kimi-k2-0905      | aimo-network |
 
 ## Environment Variables
 

@@ -10,132 +10,54 @@ import type { ModelDefinition } from "./types";
  * Wallet private keys are stored in environment variables (ARENA_WALLET_<MODEL_KEY>).
  */
 export const MODELS: ModelDefinition[] = [
-  // GPT-4o - Default model
+  // GPT-5.2 - Default model
   {
-    id: "openrouter/gpt-4o",
-    name: "GPT-4o",
+    id: "openrouter/openai/gpt-5.2",
+    name: "GPT-5.2",
     provider: "openrouter",
     contextLength: 128000,
-    pricing: { prompt: 2.5, completion: 10 },
+    pricing: { prompt: 1.75, completion: 14 },
     description: "OpenAI's most capable model",
     supportsVision: true,
     supportsFunctions: true,
     // Arena config
     series: "openai",
     chartColor: "#10b981", // Emerald
-    walletAddress: process.env.WALLET_GPT4O_PUBLIC,
+    walletAddress: process.env.WALLET_GPT_PUBLIC,
     enabled: true,
   },
-  // GPT-4o Mini
+  // Gemini 3 Pro Preview
   {
-    id: "openrouter/gpt-4o-mini",
-    name: "GPT-4o Mini",
-    provider: "openrouter",
-    contextLength: 128000,
-    pricing: { prompt: 0.15, completion: 0.6 },
-    description: "Fast and affordable GPT-4o variant",
-    supportsVision: true,
-    supportsFunctions: true,
-    // Arena config
-    series: "openai",
-    chartColor: "#22c55e", // Green
-    walletAddress: process.env.WALLET_GPT4O_MINI_PUBLIC,
-    enabled: true,
-  },
-  // Claude Sonnet 4
-  {
-    id: "openrouter/claude-sonnet-4",
-    name: "Claude Sonnet 4",
-    provider: "openrouter",
-    contextLength: 200000,
-    pricing: { prompt: 3, completion: 15 },
-    description: "Anthropic's balanced model for most tasks",
-    supportsVision: true,
-    supportsFunctions: true,
-    // Arena config
-    series: "claude",
-    chartColor: "#f97316", // Orange
-    walletAddress: process.env.WALLET_CLAUDE_SONNET_PUBLIC,
-    enabled: true,
-  },
-  // Claude 3.5 Haiku
-  {
-    id: "openrouter/claude-3.5-haiku",
-    name: "Claude 3.5 Haiku",
-    provider: "openrouter",
-    contextLength: 200000,
-    pricing: { prompt: 0.8, completion: 4 },
-    description: "Fast and efficient Claude model",
-    supportsVision: true,
-    supportsFunctions: true,
-    // Arena config
-    series: "claude",
-    chartColor: "#fb923c", // Amber
-    walletAddress: process.env.WALLET_CLAUDE_HAIKU_PUBLIC,
-    enabled: true,
-  },
-  // Gemini 2.0 Flash
-  {
-    id: "openrouter/gemini-2.0-flash",
-    name: "Gemini 2.0 Flash",
+    id: "openrouter/google/gemini-3-pro-preview",
+    name: "Gemini 3 Pro",
     provider: "openrouter",
     contextLength: 1000000,
-    pricing: { prompt: 0.1, completion: 0.4 },
-    description: "Google's fast multimodal model",
+    pricing: { prompt: 4, completion: 18 },
+    description:
+      "Gemini 3 Pro is Google's flagship frontier model for high-precision multimodal reasoning, combining strong performance across text, image, video, audio, and code with a 1M-token context window.",
     supportsVision: true,
     supportsFunctions: true,
     // Arena config
     series: "gemini",
-    chartColor: "#3b82f6", // Blue
-    walletAddress: process.env.WALLET_GEMINI_FLASH_PUBLIC,
+    chartColor: "#22c55e", // Green
+    walletAddress: process.env.WALLET_GEMINI_PUBLIC,
     enabled: true,
   },
-  // DeepSeek Chat
+  // Grok 4
   {
-    id: "openrouter/deepseek-chat",
-    name: "DeepSeek Chat",
+    id: "openrouter/x-ai/grok-4",
+    name: "Grok 4",
     provider: "openrouter",
-    contextLength: 64000,
-    pricing: { prompt: 0.14, completion: 0.28 },
-    description: "Powerful and cost-effective model",
-    supportsVision: false,
+    contextLength: 256000,
+    pricing: { prompt: 3, completion: 15 },
+    description:
+      "Grok 4 is xAI's latest reasoning model with a 256k context window.",
+    supportsVision: true,
     supportsFunctions: true,
     // Arena config
-    series: "deepseek",
-    chartColor: "#8b5cf6", // Violet
-    walletAddress: process.env.WALLET_DEEPSEEK_PUBLIC,
-    enabled: true,
-  },
-  // Llama 3.3 70B
-  {
-    id: "openrouter/llama-3.3-70b",
-    name: "Llama 3.3 70B",
-    provider: "openrouter",
-    contextLength: 128000,
-    pricing: { prompt: 0.12, completion: 0.3 },
-    description: "Meta's open-source flagship model",
-    supportsVision: false,
-    supportsFunctions: true,
-    // Arena config
-    series: "llama",
-    chartColor: "#ec4899", // Pink
-    walletAddress: process.env.WALLET_LLAMA_PUBLIC,
-    enabled: true,
-  },
-  // Mistral Large
-  {
-    id: "openrouter/mistral-large",
-    name: "Mistral Large",
-    provider: "openrouter",
-    contextLength: 128000,
-    pricing: { prompt: 2, completion: 6 },
-    description: "Mistral's most capable model",
-    supportsVision: false,
-    supportsFunctions: true,
-    // Arena config
-    series: "mistral",
-    chartColor: "#06b6d4", // Cyan
-    walletAddress: process.env.WALLET_MISTRAL_PUBLIC,
+    series: "grok",
+    chartColor: "#f97316", // Orange
+    walletAddress: process.env.WALLET_GROK_PUBLIC,
     enabled: true,
   },
   // DeepSeek V3.2 (Test)
@@ -145,13 +67,14 @@ export const MODELS: ModelDefinition[] = [
     provider: "openrouter",
     contextLength: 64000,
     pricing: { prompt: 0.14, completion: 0.28 },
-    description: "DeepSeek V3.2 - Latest version for testing",
+    description:
+      "DeepSeek-V3.2 is a large language model designed to harmonize high computational efficiency with strong reasoning and agentic tool-use performance.",
     supportsVision: false,
     supportsFunctions: true,
     // Arena config
     series: "deepseek",
     chartColor: "#a78bfa", // Light violet
-    walletAddress: process.env.TEST_WALLET_PUBLIC_KEY,
+    walletAddress: process.env.WALLET_DEEPSEEK_PUBLIC,
     enabled: true,
   },
 ];
@@ -207,7 +130,7 @@ export function getArenaModel(id: string): ModelDefinition | undefined {
  * Get a specific arena model by short ID (e.g., "gpt-4o" instead of "openrouter/gpt-4o")
  */
 export function getArenaModelByShortId(
-  shortId: string,
+  shortId: string
 ): ModelDefinition | undefined {
   return MODELS.find((m) => m.id.endsWith(`/${shortId}`) || m.id === shortId);
 }
@@ -298,15 +221,14 @@ export function getModelsWithWallets(): ModelDefinition[] {
  * Maps model ID to corresponding private key env var.
  */
 const WALLET_PRIVATE_KEY_MAP: Record<string, string | undefined> = {
-  "openrouter/gpt-4o": process.env.WALLET_GPT4O_PRIVATE,
-  "openrouter/gpt-4o-mini": process.env.WALLET_GPT4O_MINI_PRIVATE,
-  "openrouter/claude-sonnet-4": process.env.WALLET_CLAUDE_SONNET_PRIVATE,
-  "openrouter/claude-3.5-haiku": process.env.WALLET_CLAUDE_HAIKU_PRIVATE,
-  "openrouter/gemini-2.0-flash": process.env.WALLET_GEMINI_FLASH_PRIVATE,
-  "openrouter/deepseek-chat": process.env.WALLET_DEEPSEEK_PRIVATE,
-  "openrouter/llama-3.3-70b": process.env.WALLET_LLAMA_PRIVATE,
-  "openrouter/mistral-large": process.env.WALLET_MISTRAL_PRIVATE,
-  "openrouter/deepseek/deepseek-v3.2": process.env.TEST_WALLET_PRIVATE_KEY,
+  "openrouter/openai/gpt-5.2": process.env.WALLET_GPT_PRIVATE,
+  // "openrouter/gpt-4o-mini": process.env.WALLET_GPT4O_MINI_PRIVATE,
+  // "openrouter/claude-sonnet-4": process.env.WALLET_CLAUDE_SONNET_PRIVATE,
+  // "openrouter/claude-3.5-haiku": process.env.WALLET_CLAUDE_HAIKU_PRIVATE,
+  "openrouter/google/gemini-3-pro-preview": process.env.WALLET_GEMINI_PRIVATE,
+  // "openrouter/deepseek-chat": process.env.WALLET_DEEPSEEK_PRIVATE,
+  "openrouter/x-ai/grok-4": process.env.WALLET_GROK_PRIVATE,
+  "openrouter/deepseek/deepseek-v3.2": process.env.WALLET_DEEPSEEK_PRIVATE,
 };
 
 /**

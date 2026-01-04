@@ -2,14 +2,14 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { customProvider } from "ai";
 import { MODELS } from "../catalog";
 
-const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+const REDPILL_BASE_URL = "https://api.redpill.ai/v1";
 
 /**
  * Base OpenRouter client using OpenAI-compatible API
  */
 const openrouterBase = createOpenAI({
-  baseURL: OPENROUTER_BASE_URL,
-  apiKey: process.env.OPENROUTER_API_KEY ?? "",
+  baseURL: REDPILL_BASE_URL,
+  apiKey: process.env.REDPILL_API_KEY ?? "",
 });
 
 /**
@@ -21,7 +21,7 @@ const languageModels = Object.fromEntries(
     // Extract short name from ID (e.g., "openrouter/gpt-4o" -> "gpt-4o")
     const shortName = model.id.replace("openrouter/", "");
     return [shortName, openrouterBase.chat(shortName)];
-  }),
+  })
 );
 
 /**

@@ -76,21 +76,21 @@ export default class DflowRelay implements PartyKitServer {
           type: "subscribe",
           channel: "prices",
           all: true,
-        }),
+        })
       );
       this.dflowWs!.send(
         JSON.stringify({
           type: "subscribe",
           channel: "trades",
           all: true,
-        }),
+        })
       );
       this.dflowWs!.send(
         JSON.stringify({
           type: "subscribe",
           channel: "orderbook",
           all: true,
-        }),
+        })
       );
     };
 
@@ -154,7 +154,9 @@ export default class DflowRelay implements PartyKitServer {
 
       if (change >= SWING_THRESHOLD) {
         console.log(
-          `[dflow-relay] Price swing detected: ${msg.market_ticker} ${(change * 100).toFixed(2)}%`,
+          `[dflow-relay] Price swing detected: ${msg.market_ticker} ${(
+            change * 100
+          ).toFixed(2)}%`
         );
         return {
           type: "price_swing",
@@ -194,7 +196,9 @@ export default class DflowRelay implements PartyKitServer {
 
     if (msg.count >= avgVolume * VOLUME_SPIKE_MULTIPLIER) {
       console.log(
-        `[dflow-relay] Volume spike detected: ${ticker} ${msg.count} vs avg ${avgVolume.toFixed(0)}`,
+        `[dflow-relay] Volume spike detected: ${ticker} ${
+          msg.count
+        } vs avg ${avgVolume.toFixed(0)}`
       );
       return {
         type: "volume_spike",
@@ -218,19 +222,19 @@ export default class DflowRelay implements PartyKitServer {
     // Safely handle potentially missing fields with defaults
     const yesBidDepth = Object.values(msg.yes_bids || {}).reduce(
       (a, b) => a + b,
-      0,
+      0
     );
     const yesAskDepth = Object.values(msg.yes_asks || {}).reduce(
       (a, b) => a + b,
-      0,
+      0
     );
     const noBidDepth = Object.values(msg.no_bids || {}).reduce(
       (a, b) => a + b,
-      0,
+      0
     );
     const noAskDepth = Object.values(msg.no_asks || {}).reduce(
       (a, b) => a + b,
-      0,
+      0
     );
 
     // Total depth on each side (YES vs NO)
@@ -244,7 +248,9 @@ export default class DflowRelay implements PartyKitServer {
     // Significant imbalance: 3:1 or 1:3
     if (ratio >= 3 || ratio <= 0.33) {
       console.log(
-        `[dflow-relay] Orderbook imbalance: ${msg.market_ticker} ratio ${ratio.toFixed(2)}`,
+        `[dflow-relay] Orderbook imbalance: ${
+          msg.market_ticker
+        } ratio ${ratio.toFixed(2)}`
       );
       return {
         type: "orderbook_imbalance",
@@ -273,24 +279,33 @@ export default class DflowRelay implements PartyKitServer {
 
     if (!vercelUrl || !webhookSecret) {
       console.warn(
-        "[dflow-relay] Missing VERCEL_URL or WEBHOOK_SECRET, skipping agent trigger",
+        "[dflow-relay] Missing VERCEL_URL or WEBHOOK_SECRET, skipping agent trigger"
       );
       return;
     }
 
     try {
-      const response = await fetch(`${vercelUrl}/api/signals/trigger`, {
+      // Trigger all agents with the market signal
+      const response = await fetch(`${vercelUrl}/api/agents/trigger`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${webhookSecret}`,
         },
-        body: JSON.stringify(signal),
+        body: JSON.stringify({
+          signal,
+          triggerType: "market",
+        }),
       });
 
       if (!response.ok) {
         console.error(
-          `[dflow-relay] Failed to trigger agents: ${response.status}`,
+          `[dflow-relay] Failed to trigger agents: ${response.status}`
+        );
+      } else {
+        const result = await response.json();
+        console.log(
+          `[dflow-relay] Triggered ${result.triggered} agents for ${signal.ticker}`
         );
       }
     } catch (error) {

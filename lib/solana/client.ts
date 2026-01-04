@@ -5,13 +5,11 @@
 // ============================================================================
 
 import { createSolanaRpc, address, type Address } from "@solana/kit";
+import { SOLANA_RPC_URL } from "@/lib/config";
 
 // ============================================================================
 // RPC Client Setup
 // ============================================================================
-
-const SOLANA_RPC_URL =
-  process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
 
 /**
  * Create a Solana RPC client
@@ -102,7 +100,7 @@ export interface TokenAmount {
  * @returns Token balance info, or null on error
  */
 export async function getTokenAccountBalance(
-  tokenAccount: string,
+  tokenAccount: string
 ): Promise<TokenAmount | null> {
   try {
     const rpc = getRpc();
@@ -143,7 +141,7 @@ export interface TokenAccountInfo {
  */
 export async function getTokenAccountsByOwner(
   owner: string,
-  mint: string,
+  mint: string
 ): Promise<TokenAccountInfo[] | null> {
   try {
     const rpc = getRpc();
@@ -151,7 +149,7 @@ export async function getTokenAccountsByOwner(
       .getTokenAccountsByOwner(
         address(owner),
         { mint: address(mint) },
-        { encoding: "jsonParsed" },
+        { encoding: "jsonParsed" }
       )
       .send();
 
@@ -197,7 +195,7 @@ export interface TokenAccountWithBalance {
 export async function getTokenAccountsByProgram(
   owner: string,
   programId: string = PROGRAM_IDS.TOKEN_2022,
-  nonZeroOnly: boolean = true,
+  nonZeroOnly: boolean = true
 ): Promise<TokenAccountWithBalance[]> {
   try {
     const rpc = getRpc();
@@ -206,7 +204,7 @@ export async function getTokenAccountsByProgram(
       .getTokenAccountsByOwner(
         address(owner),
         { programId: address(programId) },
-        { encoding: "jsonParsed" },
+        { encoding: "jsonParsed" }
       )
       .send();
 
@@ -234,7 +232,9 @@ export async function getTokenAccountsByProgram(
   } catch (error) {
     console.error("[solana/client] getTokenAccountsByProgram error:", error);
     throw new Error(
-      `Failed to fetch token accounts: ${error instanceof Error ? error.message : "Unknown error"}`,
+      `Failed to fetch token accounts: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`
     );
   }
 }
@@ -247,7 +247,7 @@ export async function getTokenAccountsByProgram(
  */
 export async function getTokenBalanceByOwner(
   owner: string,
-  mint: string,
+  mint: string
 ): Promise<{
   amount: bigint;
   decimals: number;
@@ -285,7 +285,7 @@ export async function getTokenBalanceByOwner(
  */
 export async function getCurrencyBalance(
   owner: string,
-  currency: SupportedCurrency,
+  currency: SupportedCurrency
 ): Promise<{
   wallet: string;
   currency: SupportedCurrency;

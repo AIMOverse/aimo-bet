@@ -48,12 +48,12 @@ party/
 
 ## Design Decisions
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Tool creation | Direct imports in agent | Clearer dependencies, simpler code |
-| Context injection | Signer passed at agent level | Only signer needed for trading tools |
-| Prompt strategy | Lean context (signal + balance) | Agent discovers via tools, fresher data |
-| Market fetching | Agent uses discoverEvent | No stale pre-fetched data |
+| Decision          | Choice                          | Rationale                               |
+| ----------------- | ------------------------------- | --------------------------------------- |
+| Tool creation     | Direct imports in agent         | Clearer dependencies, simpler code      |
+| Context injection | Signer passed at agent level    | Only signer needed for trading tools    |
+| Prompt strategy   | Lean context (signal + balance) | Agent discovers via tools, fresher data |
+| Market fetching   | Agent uses discoverEvent        | No stale pre-fetched data               |
 
 ## Trading Workflow
 
@@ -96,8 +96,8 @@ interface AgentConfig {
 
 ```typescript
 interface AgentRunInput {
-  signal?: MarketSignal;  // Optional signal from PartyKit
-  usdcBalance: number;    // Current USDC balance
+  signal?: MarketSignal; // Optional signal from PartyKit
+  usdcBalance: number; // Current USDC balance
 }
 ```
 
@@ -131,18 +131,22 @@ export { createRetrievePositionTool } from "./retrievePosition";
 export { createRedeemPositionTool } from "./redeemPosition";
 
 // Utilities
-export { resolveMints, getTradeMintsForBuy, getTradeMintsForSell } from "./utils/resolveMints";
+export {
+  resolveMints,
+  getTradeMintsForBuy,
+  getTradeMintsForSell,
+} from "./utils/resolveMints";
 ```
 
 ### Tool Overview
 
-| Tool | Purpose | Input | Output |
-|------|---------|-------|--------|
-| `discoverEvent` | Discover events with markets | query, category, event_ticker | events[], markets[] |
-| `increasePosition` | Buy YES/NO tokens | market_ticker, side, usdc_amount | filled_quantity, signature |
-| `decreasePosition` | Sell YES/NO tokens | market_ticker, side, quantity | sold_quantity, signature |
-| `retrievePosition` | Get current positions | market_ticker (optional) | positions[], summary |
-| `redeemPosition` | Redeem winning tokens | market_ticker, side | payout_amount, signature |
+| Tool               | Purpose                      | Input                            | Output                     |
+| ------------------ | ---------------------------- | -------------------------------- | -------------------------- |
+| `discoverEvent`    | Discover events with markets | query, category, event_ticker    | events[], markets[]        |
+| `increasePosition` | Buy YES/NO tokens            | market_ticker, side, usdc_amount | filled_quantity, signature |
+| `decreasePosition` | Sell YES/NO tokens           | market_ticker, side, quantity    | sold_quantity, signature   |
+| `retrievePosition` | Get current positions        | market_ticker (optional)         | positions[], summary       |
+| `redeemPosition`   | Redeem winning tokens        | market_ticker, side              | payout_amount, signature   |
 
 ### discoverEvent
 
@@ -260,14 +264,14 @@ const prompt = buildTradingPrompt({
     type: "price_swing",
     ticker: "BTC-100K-2024",
     data: { previousPrice: 0.45, currentPrice: 0.52, changePercent: 0.155 },
-    timestamp: Date.now()
+    timestamp: Date.now(),
   },
-  usdcBalance: 100.00
+  usdcBalance: 100.0,
 });
 
 // Periodic scan prompt (no signal)
 const prompt = buildTradingPrompt({
-  usdcBalance: 100.00
+  usdcBalance: 100.0,
 });
 ```
 
@@ -330,7 +334,7 @@ import { createRedeemPositionTool } from "@/lib/ai/tools/redeemPosition";
 
 async run(input: AgentRunInput): Promise<TradingResult> {
   // Create signer
-  const signer = this.config.privateKey 
+  const signer = this.config.privateKey
     ? await createSignerFromBase58PrivateKey(this.config.privateKey)
     : undefined;
 
@@ -369,8 +373,10 @@ interface TradingInput {
 // Simplified context - just balance
 async function fetchBalanceStep(walletAddress: string): Promise<number> {
   "use step";
-  
-  const res = await fetch(`${BASE_URL}/api/solana/balance?wallet=${walletAddress}`);
+
+  const res = await fetch(
+    `${BASE_URL}/api/solana/balance?wallet=${walletAddress}`
+  );
   if (res.ok) {
     const data = await res.json();
     return parseFloat(data.formatted) || 0;
