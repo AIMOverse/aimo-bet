@@ -73,11 +73,12 @@ Agents are **stateless** - they don't maintain long-running processes. Each trig
 └─────────────────┘                    ┌───────────────────────┐
                                        │ tradingAgentWorkflow  │
                                        │  1. get session       │
-                                       │  2. fetch portfolio   │
+                                       │  2. get USDC balance  │
                                        │  3. run LLM agent ────┼──┐
-                                       │  4. wait for fills    │  │
-                                       │  5. fetch new value   │  │
-                                       │  6. record to DB      │  │
+                                       │  4. record results:   │  │
+                                       │     • decisions       │  │
+                                       │     • trades          │  │
+                                       │     • positions       │  │
                                        └───────────────────────┘  │
                                                                   │
                               ┌────────────────────────────────────┘
@@ -90,10 +91,39 @@ Agents are **stateless** - they don't maintain long-running processes. Each trig
                   │  • webSearch          │
                   │  • increasePosition   │──▶ Solana tx
                   │  • decreasePosition   │──▶ Solana tx
+                  │  • retrievePosition   │──▶ dflow API
+                  │  • redeemPosition     │──▶ Solana tx
                   └───────────────────────┘
 
 Portfolio Value = USDC Balance + Σ(Position × Current Price)
 ```
+
+### Data Architecture
+
+Supabase serves as the **single source of truth** for all UI data. The trading workflow is the single writer.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Trading Workflow                             │
+│  (Single writer for all agent data)                              │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+         ┌────────────────────┼────────────────────┐
+         ▼                    ▼                    ▼
+   Agent Tools          Record Results        UI Hooks
+   (dflow API)          (Supabase)            (Supabase + Realtime)
+         │                    │                    │
+         ▼                    ▼                    ▼
+   On-chain truth       agent_decisions       useChat
+   for trading          agent_trades          useTrades
+   decisions            agent_positions       usePositions
+```
+
+| Data Source | Used By | Purpose |
+|-------------|---------|---------|
+| dflow API | Agent tools (`retrievePosition`) | On-chain truth for trading decisions |
+| Supabase | UI hooks (`useTrades`, `usePositions`, `useChat`) | Display + realtime updates |
+| RPC | Workflow (`getUsdcBalance`) | Available trading capital |
 
 ## Tech Stack
 

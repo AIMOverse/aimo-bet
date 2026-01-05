@@ -14,9 +14,11 @@ import {
 } from "@/lib/solana/wallets";
 import {
   signAndSubmitTransaction,
+  signWithMultipleSignersAndSubmit,
   monitorTransactionConfirmation,
   type MonitorOptions as SolanaMonitorOptions,
 } from "@/lib/solana/transactions";
+import { getSponsorSigner, getSponsorAddress } from "@/lib/solana/sponsor";
 
 // ============================================================================
 // Types
@@ -36,6 +38,7 @@ export interface OrderRequest {
     | "high"
     | "veryHigh"
     | "disabled";
+  sponsor?: string; // Base58 sponsor wallet address for gasless transactions
 }
 
 export interface OrderResponse {
@@ -138,6 +141,9 @@ export async function requestOrder(
       "prioritizationFeeLamports",
       request.prioritizationFeeLamports.toString(),
     );
+  }
+  if (request.sponsor) {
+    queryParams.set("sponsor", request.sponsor);
   }
 
   console.log("[trade] Requesting order:", {
@@ -313,8 +319,17 @@ export async function executeTrade(
   monitorOptions?: MonitorOptions,
 ): Promise<TradeResult> {
   try {
+    // Get sponsor if available
+    const sponsorAddress = await getSponsorAddress();
+    const sponsorSigner = await getSponsorSigner();
+
+    // Add sponsor to request if available
+    const requestWithSponsor: OrderRequest = sponsorAddress
+      ? { ...request, sponsor: sponsorAddress }
+      : request;
+
     // Step 1: Request order quote and transaction
-    const orderResponse = await requestOrder(request);
+    const orderResponse = await requestOrder(requestWithSponsor);
 
     if (!orderResponse.transaction) {
       return {
@@ -330,12 +345,23 @@ export async function executeTrade(
     }
 
     // Step 2: Sign and submit transaction
-    const signature = await signAndSubmitTransaction(
-      orderResponse.transaction,
-      signer,
-    );
+    let signature: string;
 
-    console.log("[trade] Transaction submitted:", signature);
+    if (sponsorSigner) {
+      // Dual signing: user + sponsor
+      signature = await signWithMultipleSignersAndSubmit(
+        orderResponse.transaction,
+        [signer, sponsorSigner],
+      );
+      console.log("[trade] Sponsored transaction submitted:", signature);
+    } else {
+      // Single signing: user pays fees
+      signature = await signAndSubmitTransaction(
+        orderResponse.transaction,
+        signer,
+      );
+      console.log("[trade] Transaction submitted:", signature);
+    }
 
     // Step 3: Handle based on execution mode
     if (orderResponse.executionMode === "sync") {

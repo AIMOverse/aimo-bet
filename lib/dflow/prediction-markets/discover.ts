@@ -47,8 +47,8 @@ export interface FetchEventsOptions {
   isInitialized?: boolean;
   /** Maximum number of events to return */
   limit?: number;
-  /** Cursor for pagination */
-  cursor?: string;
+  /** Pagination offset - number of events to skip */
+  cursor?: number;
   /** Sort field */
   sort?: string;
 }
@@ -93,8 +93,8 @@ export async function fetchEvents(
   if (options.limit) {
     params.set("limit", String(options.limit));
   }
-  if (options.cursor) {
-    params.set("cursor", options.cursor);
+  if (options.cursor !== undefined) {
+    params.set("cursor", String(options.cursor));
   }
   if (options.sort) {
     params.set("sort", options.sort);

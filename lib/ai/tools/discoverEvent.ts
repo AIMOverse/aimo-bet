@@ -57,7 +57,8 @@ interface DiscoverEventResult {
   total_events: number;
   total_markets: number;
   filters_applied: Record<string, unknown>;
-  cursor?: string;
+  /** Pagination offset for next page - pass this value to cursor parameter to get more results */
+  cursor?: number;
   has_more: boolean;
   price_note: string;
   prices_as_of?: string;
@@ -71,14 +72,22 @@ interface DiscoverEventResult {
 // Constants
 // ============================================================================
 
+// Categories available from dflow API (as of 2025-01)
+// Only "Crypto" is currently enabled for agent discovery
 const KNOWN_CATEGORIES = [
-  "crypto",
-  "sports",
-  "politics",
-  "entertainment",
-  "economics",
-  "science",
-  "technology",
+  "Crypto",
+  // "Climate and Weather",
+  // "Companies",
+  // "Economics",
+  // "Elections",
+  // "Entertainment",
+  // "Financials",
+  // "Mentions",
+  // "Politics",
+  // "Science and Technology",
+  // "Social",
+  // "Sports",
+  // "Transportation",
 ];
 
 const PRICE_NOTE =
@@ -219,7 +228,7 @@ export const discoverEventTool = tool({
     category: z
       .string()
       .optional()
-      .describe("Filter by category: crypto, sports, politics, entertainment"),
+      .describe("Filter by category. Currently only 'Crypto' is available."),
     tags: z
       .array(z.string())
       .optional()
@@ -245,9 +254,14 @@ export const discoverEventTool = tool({
       .default(10)
       .describe("Maximum events to return (default: 10, max: 50)"),
     cursor: z
-      .string()
+      .number()
+      .int()
+      .nonnegative()
       .optional()
-      .describe("Pagination cursor from previous response"),
+      .describe(
+        "Pagination offset - number of events to skip. Use 0 or omit to start from beginning. " +
+          "Only use values returned in previous response's 'cursor' field.",
+      ),
   }),
   execute: async ({
     query,
@@ -273,7 +287,7 @@ export const discoverEventTool = tool({
     const filtersApplied: Record<string, unknown> = {};
     const seriesMap = new Map<string, Series>();
     let events: Event[] = [];
-    let responseCursor: string | undefined;
+    let responseCursor: number | undefined;
     let availableCategories: string[] | undefined;
     let availableSeries: Array<{ ticker: string; title: string }> | undefined;
 

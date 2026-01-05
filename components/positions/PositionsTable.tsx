@@ -5,7 +5,7 @@ import { Briefcase } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import type { DflowPosition } from "@/hooks/positions/usePositions";
+import type { AgentPosition } from "@/hooks/positions/usePositions";
 import { cn } from "@/lib/utils";
 import {
   getSeriesLogoPath,
@@ -14,12 +14,12 @@ import {
 } from "@/lib/ai/models/catalog";
 
 interface PositionsTableProps {
-  positions: DflowPosition[];
+  positions: AgentPosition[];
   selectedModelId?: string | null;
 }
 
-function PositionRow({ position }: { position: DflowPosition }) {
-  const isYes = position.outcome === "yes";
+function PositionRow({ position }: { position: AgentPosition }) {
+  const isYes = position.side === "yes";
   const modelName = position.modelName ?? "Model";
   const logoPath = getSeriesLogoPath(modelName);
   const chartColor = position.modelName
@@ -67,7 +67,7 @@ function PositionRow({ position }: { position: DflowPosition }) {
               : "bg-orange-500/10 text-orange-500",
           )}
         >
-          {position.outcome.toUpperCase()}
+          {position.side.toUpperCase()}
         </span>
       </div>
 
@@ -115,7 +115,7 @@ export function PositionsTable({
             <div className="space-y-3">
               {filteredPositions.map((position, index) => (
                 <PositionRow
-                  key={`${position.marketTicker}-${position.outcome}-${index}`}
+                  key={`${position.marketTicker}-${position.side}-${index}`}
                   position={position}
                 />
               ))}

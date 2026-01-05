@@ -4,7 +4,7 @@
 // ============================================================================
 
 const DFLOW_METADATA_API = "https://prediction-markets-api.dflow.net/api/v1";
-const DFLOW_QUOTE_API = "https://quote-api.dflow.net";
+const DFLOW_QUOTE_API = "https://a.quote-api.dflow.net";
 
 /**
  * Get the dflow API key from environment

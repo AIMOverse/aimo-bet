@@ -7,16 +7,17 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { getSeriesLogoPath } from "@/lib/ai/models/catalog";
-import type { DflowTradeWithModel } from "@/hooks/trades/useTrades";
+import type { AgentTrade } from "@/hooks/trades/useTrades";
+import { MODELS } from "@/lib/ai/models";
 
 interface TradesFeedProps {
-  trades: DflowTradeWithModel[];
+  trades: AgentTrade[];
   selectedModelId: string | null;
 }
 
 // Format time ago
-function formatTimeAgo(timestamp: string): string {
-  const date = new Date(timestamp);
+function formatTimeAgo(timestamp: Date | string): string {
+  const date = typeof timestamp === "string" ? new Date(timestamp) : timestamp;
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
@@ -41,11 +42,13 @@ function formatCurrency(value: number): string {
   }).format(value);
 }
 
-function TradeCard({ trade }: { trade: DflowTradeWithModel }) {
+function TradeCard({ trade }: { trade: AgentTrade }) {
   const isBuy = trade.action === "buy";
   const isYes = trade.side === "yes";
-  const logoPath = getSeriesLogoPath(trade.model.name);
-  const initial = trade.model.name.charAt(0).toUpperCase();
+  const modelName = trade.modelName || "Model";
+  const chartColor = trade.modelColor || "#6366f1";
+  const logoPath = getSeriesLogoPath(modelName);
+  const initial = modelName.charAt(0).toUpperCase();
 
   return (
     <div className="p-4 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
@@ -55,27 +58,27 @@ function TradeCard({ trade }: { trade: DflowTradeWithModel }) {
           <Avatar
             className="size-5 ring-[1.5px] ring-offset-0 bg-background shrink-0"
             style={{
-              ["--tw-ring-color" as string]: trade.model.chartColor,
+              ["--tw-ring-color" as string]: chartColor,
             }}
           >
             {logoPath ? (
               <AvatarImage
                 src={logoPath}
-                alt={`${trade.model.name} logo`}
+                alt={`${modelName} logo`}
                 className="p-0.5"
               />
             ) : null}
             <AvatarFallback
               className="text-[10px] font-semibold text-foreground"
-              style={{ backgroundColor: `${trade.model.chartColor}20` }}
+              style={{ backgroundColor: `${chartColor}20` }}
             >
               {initial}
             </AvatarFallback>
           </Avatar>
-          <span className="font-medium text-sm">{trade.model.name}</span>
+          <span className="font-medium text-sm">{modelName}</span>
         </div>
         <span className="text-xs text-muted-foreground">
-          {formatTimeAgo(trade.timestamp)}
+          {formatTimeAgo(trade.createdAt)}
         </span>
       </div>
 
@@ -110,7 +113,7 @@ function TradeCard({ trade }: { trade: DflowTradeWithModel }) {
 
       {/* Market ticker */}
       <p className="text-sm mb-2 line-clamp-2 font-mono">
-        {trade.market_ticker}
+        {trade.marketTicker}
       </p>
 
       {/* Trade details */}
@@ -119,14 +122,14 @@ function TradeCard({ trade }: { trade: DflowTradeWithModel }) {
           {trade.quantity} @ {formatCurrency(trade.price)}
         </span>
         <span className="font-medium text-foreground">
-          {formatCurrency(trade.total)}
+          {formatCurrency(trade.notional)}
         </span>
       </div>
 
       {/* Transaction signature link */}
-      {trade.tx_signature && (
+      {trade.txSignature && (
         <a
-          href={`https://solscan.io/tx/${trade.tx_signature}`}
+          href={`https://solscan.io/tx/${trade.txSignature}`}
           target="_blank"
           rel="noopener noreferrer"
           className="mt-2 text-xs text-blue-500 hover:underline block truncate"
@@ -142,7 +145,7 @@ export function TradesFeed({ trades, selectedModelId }: TradesFeedProps) {
   // Filter trades by selected model only
   const filteredTrades = useMemo(() => {
     return trades.filter((trade) => {
-      if (selectedModelId && trade.model.id !== selectedModelId) {
+      if (selectedModelId && trade.modelId !== selectedModelId) {
         return false;
       }
       return true;

@@ -1,56 +1,30 @@
 "use client";
 
-import useSWR from "swr";
-import { POLLING_INTERVALS } from "@/lib/config";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { getSupabaseClient } from "@/lib/supabase/client";
 import { MODELS } from "@/lib/ai/models";
-import type { ModelDefinition } from "@/lib/ai/models/types";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 
 // ============================================================================
-// Types for dflow trades
+// Types
 // ============================================================================
 
-export interface DflowTrade {
+export interface AgentTrade {
   id: string;
-  market_ticker: string;
-  wallet: string;
+  marketTicker: string;
+  marketTitle?: string;
   side: "yes" | "no";
-  action: "buy" | "sell";
+  action: "buy" | "sell" | "redeem";
   quantity: number;
   price: number;
-  total: number;
-  timestamp: string;
-  tx_signature?: string;
-  // Enriched fields
+  notional: number;
+  txSignature?: string;
+  createdAt: Date;
+  // Enriched
   modelId?: string;
   modelName?: string;
   modelColor?: string;
 }
-
-export interface DflowTradeWithModel extends DflowTrade {
-  model: ModelDefinition;
-}
-
-// ============================================================================
-// Fetch trades from dflow API
-// ============================================================================
-
-async function fetchDflowTrades(
-  wallet: string,
-  limit: number,
-): Promise<DflowTrade[]> {
-  const response = await fetch(
-    `/api/dflow/trades?wallet=${wallet}&limit=${limit}`,
-  );
-  if (!response.ok) {
-    throw new Error("Failed to fetch trades");
-  }
-  const data = await response.json();
-  return Array.isArray(data) ? data : [];
-}
-
-// ============================================================================
-// Hook to fetch trades for a session
-// ============================================================================
 
 interface UseTradesOptions {
   sessionId: string;
@@ -58,78 +32,166 @@ interface UseTradesOptions {
   limit?: number;
 }
 
+// ============================================================================
+// Hook
+// ============================================================================
+
 export function useTrades({
   sessionId,
   modelId,
   limit = 50,
 }: UseTradesOptions) {
-  // Build wallet to model mapping from models config
-  const walletToModel = new Map<string, ModelDefinition>();
-  if (modelId) {
-    const model = MODELS.find((m) => m.id === modelId);
-    if (model?.walletAddress) {
-      walletToModel.set(model.walletAddress, model);
-    }
-  } else {
-    MODELS.forEach((m) => {
-      if (m.walletAddress) {
-        walletToModel.set(m.walletAddress, m);
-      }
-    });
-  }
+  const [trades, setTrades] = useState<AgentTrade[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | undefined>();
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
-  const wallets = Array.from(walletToModel.keys());
+  // Load initial trades
+  const loadTrades = useCallback(async () => {
+    const client = getSupabaseClient();
+    if (!client || !sessionId) return;
 
-  // Fetch trades from dflow for each wallet
-  const { data, isLoading, error, mutate } = useSWR<DflowTradeWithModel[]>(
-    wallets.length > 0 ? `dflow/trades/${wallets.join(",")}/${limit}` : null,
-    async () => {
-      const results = await Promise.all(
-        wallets.map(async (wallet) => {
-          const trades = await fetchDflowTrades(wallet, limit);
-          const model = walletToModel.get(wallet);
-          return trades.map((t) => ({
-            ...t,
-            modelId: model?.id,
-            modelName: model?.name,
-            modelColor: model?.chartColor,
-            model: model || {
-              id: "unknown",
-              name: "Unknown Model",
-              provider: "unknown",
-              contextLength: 0,
-              pricing: { prompt: 0, completion: 0 },
-              chartColor: "#6366f1",
-              enabled: true,
-            },
-          }));
-        }),
-      );
-
-      // Merge and sort by timestamp (most recent first)
-      return results
-        .flat()
-        .sort(
-          (a, b) =>
-            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+    setIsLoading(true);
+    try {
+      let query = client
+        .from("agent_trades")
+        .select(
+          `
+          *,
+          agent_sessions!inner(session_id, model_id, model_name)
+        `,
         )
-        .slice(0, limit);
-    },
-    {
-      refreshInterval: POLLING_INTERVALS.trades,
-    },
-  );
+        .eq("agent_sessions.session_id", sessionId)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+
+      if (modelId) {
+        query = query.eq("agent_sessions.model_id", modelId);
+      }
+
+      const { data, error: fetchError } = await query;
+
+      if (fetchError) throw fetchError;
+
+      setTrades((data || []).map(mapTradeRow));
+      setError(undefined);
+    } catch (err) {
+      console.error("[useTrades] Failed to fetch:", err);
+      setError(
+        err instanceof Error ? err : new Error("Failed to fetch trades"),
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, [sessionId, modelId, limit]);
+
+  // Initial load
+  useEffect(() => {
+    if (sessionId) loadTrades();
+  }, [sessionId, loadTrades]);
+
+  // Realtime subscription
+  useEffect(() => {
+    if (!sessionId) return;
+
+    const client = getSupabaseClient();
+    if (!client) return;
+
+    console.log(`[useTrades] Subscribing to trades for session: ${sessionId}`);
+
+    const channel = client
+      .channel(`trades:${sessionId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "agent_trades",
+        },
+        async (payload) => {
+          // Fetch full trade with agent info
+          const { data } = await client
+            .from("agent_trades")
+            .select(
+              `
+              *,
+              agent_sessions!inner(session_id, model_id, model_name)
+            `,
+            )
+            .eq("id", payload.new.id)
+            .single();
+
+          if (data) {
+            const row = data as Record<string, unknown>;
+            const agentSession = row.agent_sessions as {
+              session_id: string;
+              model_id: string;
+              model_name: string;
+            };
+
+            // Only add if matches our session (and optionally model)
+            if (agentSession.session_id === sessionId) {
+              if (!modelId || agentSession.model_id === modelId) {
+                const trade = mapTradeRow(row);
+                setTrades((prev) => {
+                  // Dedupe
+                  if (prev.some((t) => t.id === trade.id)) return prev;
+                  return [trade, ...prev].slice(0, limit);
+                });
+              }
+            }
+          }
+        },
+      )
+      .subscribe();
+
+    channelRef.current = channel;
+
+    return () => {
+      console.log(`[useTrades] Unsubscribing from session: ${sessionId}`);
+      channel.unsubscribe();
+      channelRef.current = null;
+    };
+  }, [sessionId, modelId, limit]);
 
   return {
-    trades: data || [],
+    trades,
     isLoading,
     error,
-    mutate,
+    mutate: loadTrades,
   };
 }
 
 // ============================================================================
-// Hook to fetch all trades for a session
+// Helpers
+// ============================================================================
+
+function mapTradeRow(row: Record<string, unknown>): AgentTrade {
+  const agentSession = row.agent_sessions as {
+    model_id: string;
+    model_name: string;
+  };
+  const model = MODELS.find((m) => m.id === agentSession.model_id);
+
+  return {
+    id: row.id as string,
+    marketTicker: row.market_ticker as string,
+    marketTitle: (row.market_title as string) ?? undefined,
+    side: row.side as "yes" | "no",
+    action: row.action as "buy" | "sell" | "redeem",
+    quantity: row.quantity as number,
+    price: row.price as number,
+    notional: row.notional as number,
+    txSignature: (row.tx_signature as string) ?? undefined,
+    createdAt: new Date(row.created_at as string),
+    modelId: agentSession.model_id,
+    modelName: model?.name || agentSession.model_name,
+    modelColor: model?.chartColor,
+  };
+}
+
+// ============================================================================
+// Session Trades Hook
 // ============================================================================
 
 export function useSessionTrades(sessionId: string | null, limit = 50) {
@@ -137,10 +199,10 @@ export function useSessionTrades(sessionId: string | null, limit = 50) {
 
   if (!sessionId) {
     return {
-      trades: [] as DflowTradeWithModel[],
+      trades: [] as AgentTrade[],
       isLoading: false,
       error: undefined,
-      mutate: () => Promise.resolve(undefined),
+      mutate: () => Promise.resolve(),
     };
   }
 

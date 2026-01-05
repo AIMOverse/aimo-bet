@@ -27,7 +27,7 @@ lib/ai/
 │   ├── discoverEvent.ts           # Event-centric market discovery
 │   ├── increasePosition.ts        # Buy YES/NO tokens
 │   ├── decreasePosition.ts        # Sell YES/NO tokens
-│   ├── retrievePosition.ts        # Get current positions
+│   ├── retrievePosition.ts        # Get current positions (dflow API)
 │   ├── redeemPosition.ts          # Redeem winning positions
 │   └── utils/
 │       └── resolveMints.ts        # Market ticker → mint address resolution
@@ -54,15 +54,44 @@ party/
 | Context injection | Signer passed at agent level    | Only signer needed for trading tools    |
 | Prompt strategy   | Lean context (signal + balance) | Agent discovers via tools, fresher data |
 | Market fetching   | Agent uses discoverEvent        | No stale pre-fetched data               |
+| Agent tools       | dflow API (on-chain truth)      | Trading decisions need real-time data   |
+| UI hooks          | Supabase (recorded data)        | Display uses single source of truth     |
 
 ## Trading Workflow
 
-The trading system uses a durable workflow that:
+The trading system uses a durable workflow with 5 steps:
 
-1. **Fetches balance only** - Lean context (no pre-fetched markets)
-2. **Agent discovers via tools** - Uses `discoverEvent` for fresh market data
-3. **Durable tool execution** - Tools marked with `"use step"` are retryable
-4. **Records decisions** - Writes to `agent_decisions` table (triggers Realtime)
+1. **Get session** - Fetch global trading session
+2. **Get agent session** - Get or create agent session for this model
+3. **Get USDC balance** - Single RPC call for available trading capital
+4. **Run agent** - Agent discovers markets via tools, executes trades
+   - Trade tools (`increasePosition`, `decreasePosition`) wait for confirmation
+   - `retrievePosition` uses dflow API for on-chain truth
+   - Sync trades: confirmed via RPC `getSignatureStatuses`
+   - Async trades: polled via dflow `/order-status` endpoint
+5. **Record results** - Atomically write to Supabase:
+   - `agent_decisions` - Decision record (triggers Realtime for chat)
+   - `agent_trades` - Trade records (triggers Realtime for trades feed)
+   - `agent_positions` - Delta-based position upserts (triggers Realtime for positions)
+   - `agent_sessions` - Update portfolio value for leaderboard
+
+### Data Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Trading Workflow                             │
+│  (Single writer for all agent data)                              │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+         ┌────────────────────┼────────────────────┐
+         ▼                    ▼                    ▼
+   Agent Tools          Record Results        UI Hooks
+   (dflow API)          (Supabase)            (Supabase)
+         │                    │                    │
+         ▼                    ▼                    ▼
+   On-chain truth       Single writer         Realtime updates
+   for trading          for all data          for display
+```
 
 ### Usage
 
@@ -98,6 +127,23 @@ interface AgentConfig {
 interface AgentRunInput {
   signal?: MarketSignal; // Optional signal from PartyKit
   usdcBalance: number; // Current USDC balance
+  testMode?: boolean; // Force small trade for testing
+}
+```
+
+### ExecutedTrade
+
+```typescript
+interface ExecutedTrade {
+  id: string;
+  marketTicker: string;
+  marketTitle?: string;
+  side: PositionSide;
+  action: TradeAction; // 'buy' | 'sell' | 'redeem'
+  quantity: number;
+  price: number;
+  notional: number;
+  mint?: string; // For position tracking
 }
 ```
 
@@ -149,6 +195,8 @@ export {
 | `decreasePosition` | Sell YES/NO tokens           | market_ticker, side, quantity    | sold_quantity, signature   |
 | `retrievePosition` | Get current positions        | market_ticker (optional)         | positions[], summary       |
 | `redeemPosition`   | Redeem winning tokens        | market_ticker, side              | payout_amount, signature   |
+
+**Note**: `retrievePosition` uses dflow API (on-chain truth) for trading decisions. UI uses Supabase `agent_positions` table for display.
 
 ### discoverEvent
 
@@ -220,7 +268,7 @@ const result = await decreasePosition({
 
 ### retrievePosition
 
-Get current positions.
+Get current positions from on-chain data (dflow API).
 
 ```typescript
 const result = await retrievePosition({});
@@ -277,50 +325,6 @@ const prompt = buildTradingPrompt({
 });
 ```
 
-### Signal Prompt Output
-
-```
-## Trading Signal Detected
-
-**Type:** PRICE SWING
-**Market:** BTC-100K-2024
-**Time:** 2025-01-15T10:30:00.000Z
-
-- Previous price: 0.4500
-- Current price: 0.5200
-- Change: 15.50%
-
-## Your Resources
-
-Available USDC: $100.00
-
-## Instructions
-
-1. Use `discoverEvent` to get current details for market "BTC-100K-2024"
-2. Use `retrievePosition` to check if you have existing positions
-3. Analyze whether this price swing presents a trading opportunity
-4. If confident (>70%), execute a trade using `increasePosition` or `decreasePosition`
-5. Explain your reasoning clearly
-```
-
-### Periodic Prompt Output
-
-```
-## Periodic Market Scan
-
-## Your Resources
-
-Available USDC: $100.00
-
-## Instructions
-
-1. Use `discoverEvent` to browse active prediction markets
-2. Use `retrievePosition` to review your current positions
-3. Look for mispriced markets or opportunities based on your analysis
-4. If you find a high-conviction opportunity (>70%), execute a trade
-5. If no compelling opportunities, explain why you're holding
-```
-
 ## Agent Implementation
 
 The agent uses direct tool imports - no factory.
@@ -361,7 +365,7 @@ async run(input: AgentRunInput): Promise<TradingResult> {
 
 ## Workflow Implementation
 
-The workflow fetches only balance - agent discovers markets via tools.
+The workflow fetches only USDC balance - agent discovers markets via tools.
 
 ```typescript
 // lib/ai/workflows/tradingAgent.ts
@@ -370,27 +374,44 @@ interface TradingInput {
   modelId: string;
   walletAddress: string;
   signal?: MarketSignal;
+  testMode?: boolean;
 }
 
-// Simplified context - just balance
-async function fetchBalanceStep(walletAddress: string): Promise<number> {
+// Get USDC balance (single RPC call)
+async function getUsdcBalanceStep(walletAddress: string): Promise<number> {
   "use step";
-
-  const res = await fetch(
-    `${BASE_URL}/api/solana/balance?wallet=${walletAddress}`
-  );
-  if (res.ok) {
-    const data = await res.json();
-    return parseFloat(data.formatted) || 0;
-  }
-  return 0;
+  const balance = await getCurrencyBalance(walletAddress, "USDC");
+  return balance ? parseFloat(balance.formatted) : 0;
 }
 
-// Run agent with lean context
-const result = await agent.run({
-  signal: input.signal,
-  usdcBalance,
-});
+// Record all results atomically
+async function recordResultsStep(...): Promise<void> {
+  "use step";
+  
+  // 1. Record decision
+  const decision = await recordAgentDecision({...});
+  
+  // 2. Record trades + update positions
+  for (const trade of result.trades) {
+    await recordAgentTrade({...});
+    
+    // Delta-based position update
+    const quantityDelta = trade.action === "buy" 
+      ? trade.quantity 
+      : -trade.quantity;
+    
+    await upsertAgentPosition({
+      agentSessionId,
+      marketTicker: trade.marketTicker,
+      side: trade.side,
+      mint: trade.mint || "",
+      quantityDelta,
+    });
+  }
+  
+  // 3. Update session value for leaderboard
+  await updateAgentSessionValue(agentSessionId, portfolioValue, pnl);
+}
 ```
 
 ## Guardrails
@@ -443,14 +464,18 @@ Signal (PartyKit) → POST /api/agents/trigger → tradingAgentWorkflow
                                                      │
                     ┌────────────────────────────────┼────────────────────────┐
                     ▼                                ▼                        ▼
-              fetchBalanceStep                 runAgentStep           recordResultsStep
+              getUsdcBalanceStep               runAgentStep           recordResultsStep
                     │                                │                        │
                     ▼                                ▼                        ▼
-              USDC balance                     Agent uses tools          Supabase write
-                                               (discoverEvent,           (agent_decisions)
-                                                increasePosition,             │
-                                                retrievePosition)             ▼
-                                                                        Realtime update
+              Single RPC call              Agent uses tools           Supabase writes:
+              (USDC balance)               (discoverEvent,            • agent_decisions
+                                            increasePosition,          • agent_trades
+                                            retrievePosition)          • agent_positions
+                                                     │                 • agent_sessions
+                                                     ▼                        │
+                                               Trade execution                ▼
+                                               (waits for               Realtime updates
+                                                confirmation)           to UI hooks
 ```
 
 ## Agent Trigger Architecture
@@ -477,8 +502,8 @@ The PartyKit relay (`party/dflow-relay.ts`) monitors dflow WebSocket and detects
 
 When `filterByPosition: true` is passed to the trigger endpoint:
 
-1. Query `agent_trades` to derive net positions per agent
-2. Filter to only agents with positive holdings in the signaled ticker
+1. Query `agent_positions` table to find agents holding the ticker
+2. Filter to only agents with positive quantity
 3. Skip agents that already have an active workflow running
 
 ```typescript
@@ -490,26 +515,5 @@ getAgentsHoldingTicker(sessionId, ticker) // → ["openai/gpt-5.2", "anthropic/c
 ### Key Constraints
 
 1. **One workflow per agent at a time** - Skip triggers if agent already has active workflow
-2. **Derive positions from `agent_trades`** - No new table, calculate net quantity on demand
+2. **Positions tracked in `agent_positions`** - Delta-based updates from trades
 3. **Filtered signals** - Only `price_swing` (10%) and `volume_spike` (10x) for positions
-
-### Architecture Flow
-
-**Cron Trigger (Market Discovery)**
-```
-Every 5 min
-  → /api/agents/cron
-  → All agents (if not already running)
-  → buildPeriodicPrompt()
-  → Agent discovers markets + reviews portfolio
-```
-
-**Position Signal (Real-time)**
-```
-dflow WebSocket
-  → price_swing or volume_spike detected
-  → POST /api/agents/trigger { signal, filterByPosition: true }
-  → Trigger endpoint filters to agents holding ticker
-  → Only those agents spawn workflows
-  → buildSignalPrompt() with signal context
-```

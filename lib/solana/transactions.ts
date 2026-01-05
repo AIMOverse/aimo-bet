@@ -119,6 +119,49 @@ export async function signAndSubmitTransaction(
   return signature;
 }
 
+/**
+ * Sign a transaction with multiple signers and submit to Solana
+ * Used for sponsored transactions where both user and sponsor must sign
+ *
+ * @param transactionBase64 - Base64-encoded transaction
+ * @param signers - Array of KeyPairSigners (user + sponsor)
+ * @returns Transaction signature (base58)
+ */
+export async function signWithMultipleSignersAndSubmit(
+  transactionBase64: string,
+  signers: KeyPairSigner[],
+): Promise<string> {
+  // Decode the base64 transaction to bytes
+  const base64Encoder = getBase64Encoder();
+  const transactionBytes = base64Encoder.encode(transactionBase64);
+
+  // Decode bytes to Transaction object
+  const transactionDecoder = getTransactionDecoder();
+  const transaction = transactionDecoder.decode(transactionBytes);
+
+  // Sign with all signers
+  const keyPairs = signers.map((s) => s.keyPair);
+  const signedTransaction = await signTransaction(keyPairs, transaction);
+
+  // Get signature for logging/tracking
+  const signature = getSignatureFromTransaction(signedTransaction);
+
+  // Encode to base64 wire format for RPC
+  const encodedTransaction = getBase64EncodedWireTransaction(signedTransaction);
+
+  // Send via RPC
+  const rpc = getRpc();
+  await rpc
+    .sendTransaction(encodedTransaction, {
+      encoding: "base64",
+      skipPreflight: false,
+      preflightCommitment: "confirmed",
+    })
+    .send();
+
+  return signature;
+}
+
 // ============================================================================
 // Transaction Monitoring
 // ============================================================================

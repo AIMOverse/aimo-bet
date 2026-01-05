@@ -1,301 +1,878 @@
-# Agent Trigger Architecture Refactor
+# Supabase as Single Source of Truth for Agent Data
 
-Refactor the agent workflow trigger system to separate **position management** (real-time, filtered) from **market discovery** (periodic cron).
+Refactor the agent data architecture so all UI hooks read from Supabase tables, with the trading workflow as the single writer.
 
 ---
 
 ## Overview
 
-### Current Problem
+**Current state:** Hooks fetch from mixed sources (dflow API, RPC, Supabase)
+**Target state:** All hooks read from Supabase; workflow writes all agent data
 
-The `dflow-relay.ts` subscribes to ALL markets and triggers ALL agents on every signal. This causes:
-- 100+ triggers per minute during active markets
-- 7 agents × N signals = workflow explosion
-- Agents wake up for markets they don't hold
+| Hook | Current Source | Target Source |
+|------|----------------|---------------|
+| `useChat` | Supabase `agent_decisions` | ✅ Already correct |
+| `useTrades` | dflow Metadata API | → Supabase `agent_trades` |
+| `usePositions` | RPC + dflow API | → Supabase `agent_positions` (new) |
 
-### New Architecture
-
-| Trigger Type | Purpose | Frequency | Which Agents |
-|--------------|---------|-----------|--------------|
-| **Cron (periodic)** | Market discovery + portfolio review | Every 5 minutes | All agents |
-| **Position signal** | React to held position movements | Real-time (filtered) | Only agents holding that ticker |
-
-### Key Constraints
-
-1. **One workflow per agent at a time** - Skip triggers if agent already has active workflow
-2. **Derive positions from `agent_trades`** - No new table, calculate on demand
-3. **Filtered signals** - Only `price_swing` (10%) and `volume_spike` (10x) for positions
-4. **Exclude `orderbook_imbalance`** - Too noisy, fires constantly
+**Note:** The agent's `retrievePosition` tool continues to use dflow API (on-chain truth) for trading decisions. Supabase is for UI display, not agent decision-making.
 
 ---
 
-## Implementation Guide
+## Architecture
 
-### Phase 1: Add Position Query Function
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Trading Workflow                             │
+│  (Single writer for all agent data)                              │
+│                                                                   │
+│  1. Get session + agent session                                  │
+│  2. Get USDC balance (single RPC call)                           │
+│  3. Run AI agent (tools use dflow API for on-chain data)         │
+│  4. Record all results atomically:                               │
+│     → agent_decisions                                            │
+│     → agent_trades                                               │
+│     → agent_positions (upsert)                                   │
+│     → agent_sessions (update value)                              │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     Supabase Tables                              │
+│                                                                   │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
+│  │ agent_decisions │  │  agent_trades   │  │ agent_positions │  │
+│  │                 │  │                 │  │     (NEW)       │  │
+│  │ → useChat       │  │ → useTrades     │  │ → usePositions  │  │
+│  │   (realtime)    │  │   (realtime)    │  │   (realtime)    │  │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘  │
+│                                                                   │
+│  ┌─────────────────┐                                             │
+│  │ agent_sessions  │  (portfolio value, P&L for leaderboard)    │
+│  └─────────────────┘                                             │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                 UI Hooks (Direct Supabase + Realtime)            │
+│                                                                   │
+│  useChat        → Supabase client + realtime subscription       │
+│  useTrades      → Supabase client + realtime subscription       │
+│  usePositions   → Supabase client + realtime subscription       │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-**File:** `lib/supabase/agents.ts`
+---
 
-Add function to derive held tickers from trade history:
+## Database Changes
+
+### New Table: `agent_positions`
+
+```sql
+CREATE TABLE agent_positions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_session_id UUID NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+  market_ticker TEXT NOT NULL,
+  market_title TEXT,
+  side TEXT NOT NULL CHECK (side IN ('yes', 'no')),
+  mint TEXT NOT NULL,
+  quantity NUMERIC NOT NULL DEFAULT 0,
+  avg_entry_price NUMERIC,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  
+  UNIQUE(agent_session_id, market_ticker, side)
+);
+
+-- Index for fast lookups
+CREATE INDEX idx_agent_positions_session ON agent_positions(agent_session_id);
+
+-- Enable realtime
+ALTER TABLE agent_positions REPLICA IDENTITY FULL;
+```
+
+### Update `agent_trades` Table
+
+Add `action` type for redemptions:
+
+```sql
+-- Ensure action column supports 'redeem'
+ALTER TABLE agent_trades 
+  DROP CONSTRAINT IF EXISTS agent_trades_action_check,
+  ADD CONSTRAINT agent_trades_action_check 
+    CHECK (action IN ('buy', 'sell', 'redeem'));
+```
+
+**Database function for atomic position upsert:**
+
+```sql
+CREATE OR REPLACE FUNCTION upsert_agent_position(
+  p_agent_session_id UUID,
+  p_market_ticker TEXT,
+  p_market_title TEXT,
+  p_side TEXT,
+  p_mint TEXT,
+  p_quantity_delta NUMERIC
+) RETURNS VOID AS $$
+BEGIN
+  INSERT INTO agent_positions (
+    agent_session_id, market_ticker, market_title, side, mint, quantity
+  ) VALUES (
+    p_agent_session_id, p_market_ticker, p_market_title, p_side, p_mint, p_quantity_delta
+  )
+  ON CONFLICT (agent_session_id, market_ticker, side)
+  DO UPDATE SET
+    quantity = agent_positions.quantity + p_quantity_delta,
+    market_title = COALESCE(p_market_title, agent_positions.market_title),
+    updated_at = NOW();
+END;
+$$ LANGUAGE plpgsql;
+```
+
+---
+
+## Files to Modify
+
+### 1. `lib/supabase/types.ts` - Add Position Types
 
 ```typescript
+// Add to existing types
+export type TradeAction = "buy" | "sell" | "redeem";
+
+export interface AgentPosition {
+  id: string;
+  agentSessionId: string;
+  marketTicker: string;
+  marketTitle?: string;
+  side: PositionSide;
+  mint: string;
+  quantity: number;
+  avgEntryPrice?: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface DbAgentPositionInsert {
+  agent_session_id: string;
+  market_ticker: string;
+  market_title?: string | null;
+  side: PositionSide;
+  mint: string;
+  quantity: number;
+  avg_entry_price?: number | null;
+}
+```
+
+---
+
+### 2. `lib/supabase/agents.ts` - Add Position Functions
+
+```typescript
+// ============================================================================
+// Agent Positions
+// ============================================================================
+
+export interface UpsertPositionInput {
+  agentSessionId: string;
+  marketTicker: string;
+  marketTitle?: string;
+  side: PositionSide;
+  mint: string;
+  quantityDelta: number;  // Positive for buy, negative for sell
+  price?: number;         // For avg price calculation
+}
+
 /**
- * Get market tickers where an agent currently holds a position.
- * Derives from agent_trades by calculating net quantity (buys - sells) per ticker.
+ * Upsert an agent position (delta-based update)
+ * Creates position if doesn't exist, updates quantity if exists
  */
-export async function getAgentHeldTickers(
-  agentSessionId: string
-): Promise<string[]> {
+export async function upsertAgentPosition(
+  input: UpsertPositionInput,
+): Promise<void> {
+  const client = createServerClient();
+  if (!client) throw new Error("Supabase not configured");
+
+  const { error } = await client.rpc('upsert_agent_position', {
+    p_agent_session_id: input.agentSessionId,
+    p_market_ticker: input.marketTicker,
+    p_market_title: input.marketTitle || null,
+    p_side: input.side,
+    p_mint: input.mint,
+    p_quantity_delta: input.quantityDelta,
+  });
+
+  if (error) {
+    console.error("[agents] Failed to upsert position:", error);
+    throw error;
+  }
+}
+
+/**
+ * Get all positions for an agent session
+ */
+export async function getAgentPositions(
+  agentSessionId: string,
+): Promise<AgentPosition[]> {
   const client = createServerClient();
   if (!client) return [];
 
   const { data, error } = await client
-    .from("agent_trades")
-    .select("market_ticker, action, quantity")
-    .eq("agent_session_id", agentSessionId);
+    .from("agent_positions")
+    .select("*")
+    .eq("agent_session_id", agentSessionId)
+    .gt("quantity", 0)
+    .order("updated_at", { ascending: false });
 
-  if (error || !data) {
-    console.error("[agents] Failed to fetch trades for positions:", error);
+  if (error) {
+    console.error("[agents] Failed to fetch positions:", error);
     return [];
   }
 
-  // Aggregate net quantity per ticker
-  const positions = new Map<string, number>();
-  
-  for (const trade of data) {
-    const current = positions.get(trade.market_ticker) || 0;
-    const delta = trade.action === "buy" ? trade.quantity : -trade.quantity;
-    positions.set(trade.market_ticker, current + delta);
-  }
-
-  // Return tickers with positive net quantity
-  return Array.from(positions.entries())
-    .filter(([_, qty]) => qty > 0)
-    .map(([ticker, _]) => ticker);
-}
-
-/**
- * Get all agents (by modelId) that hold a position in a specific market ticker.
- */
-export async function getAgentsHoldingTicker(
-  sessionId: string,
-  marketTicker: string
-): Promise<string[]> {
-  const client = createServerClient();
-  if (!client) return [];
-
-  // Get all agent sessions for this trading session
-  const { data: sessions, error: sessionsError } = await client
-    .from("agent_sessions")
-    .select("id, model_id")
-    .eq("session_id", sessionId);
-
-  if (sessionsError || !sessions) {
-    console.error("[agents] Failed to fetch agent sessions:", sessionsError);
-    return [];
-  }
-
-  // For each agent, check if they hold this ticker
-  const holdingAgents: string[] = [];
-
-  for (const session of sessions) {
-    const heldTickers = await getAgentHeldTickers(session.id);
-    if (heldTickers.includes(marketTicker)) {
-      holdingAgents.push(session.model_id);
-    }
-  }
-
-  return holdingAgents;
+  return (data || []).map((row: Record<string, unknown>) => ({
+    id: row.id as string,
+    agentSessionId: row.agent_session_id as string,
+    marketTicker: row.market_ticker as string,
+    marketTitle: (row.market_title as string) ?? undefined,
+    side: row.side as PositionSide,
+    mint: row.mint as string,
+    quantity: row.quantity as number,
+    avgEntryPrice: (row.avg_entry_price as number) ?? undefined,
+    createdAt: new Date(row.created_at as string),
+    updatedAt: new Date(row.updated_at as string),
+  }));
 }
 ```
 
 ---
 
-### Phase 2: Update Trigger Endpoint
-
-**File:** `app/api/agents/trigger/route.ts`
-
-#### 2.1 Add `filterByPosition` flag to request type
+### 3. `lib/ai/workflows/tradingAgent.ts` - Simplified Workflow
 
 ```typescript
-interface TriggerRequest {
-  /** Specific model to trigger (omit to trigger all enabled models) */
-  modelId?: string;
-  /** Market signal data (for market-triggered runs) */
-  signal?: MarketSignal;
-  /** What initiated this trigger */
-  triggerType: TriggerType;
-  /** When true, uses test prompt that forces a $1-5 trade */
-  testMode?: boolean;
-  /** When true, only trigger agents holding a position in signal.ticker */
-  filterByPosition?: boolean;  // NEW
-}
-```
+"use workflow";
 
-#### 2.2 Add position filtering logic
-
-After getting `modelsToTrigger`, add filtering:
-
-```typescript
-const { modelId, signal, triggerType = "manual", testMode = false, filterByPosition = false } = body;
-
-// ... existing code to get modelsToTrigger ...
-
-// NEW: Filter to only agents holding the signaled ticker
-let filteredModels = modelsToTrigger;
-
-if (filterByPosition && signal?.ticker) {
-  const session = await getGlobalSession();
-  const holdingModelIds = await getAgentsHoldingTicker(session.id, signal.ticker);
-  
-  filteredModels = modelsToTrigger.filter(m => holdingModelIds.includes(m.id));
-  
-  console.log(
-    `[agents/trigger] Position filter: ${holdingModelIds.length} agents hold ${signal.ticker}, ` +
-    `triggering ${filteredModels.length} of ${modelsToTrigger.length}`
-  );
-  
-  if (filteredModels.length === 0) {
-    return NextResponse.json({
-      success: true,
-      triggerType,
-      signal: { type: signal.type, ticker: signal.ticker },
-      spawned: 0,
-      failed: 0,
-      workflows: [],
-      errors: [],
-      message: `No agents hold position in ${signal.ticker}`,
-    } satisfies TriggerResponse);
-  }
-}
-```
-
-#### 2.3 Add active workflow check before spawning
-
-```typescript
-const results = await Promise.allSettled(
-  filteredModels.map(async (model): Promise<SpawnedWorkflow> => {
-    // NEW: Check if agent already has active workflow
-    const existingRun = Array.from(activeWorkflowsMap.entries())
-      .find(([_, meta]) => meta.modelId === model.id);
-
-    if (existingRun) {
-      console.log(`[agents/trigger] Skipping ${model.id}, workflow already running: ${existingRun[0]}`);
-      throw new Error("Workflow already running");
-    }
-
-    // ... rest of existing code
-  })
-);
-```
-
-#### 2.4 Add required imports
-
-```typescript
+import {
+  PredictionMarketAgent,
+  type TradingResult,
+  type MarketSignal,
+} from "@/lib/ai/agents";
+import { getWalletPrivateKey, getModelName } from "@/lib/ai/models/catalog";
 import { getGlobalSession } from "@/lib/supabase/db";
-import { getAgentsHoldingTicker } from "@/lib/supabase/agents";
-```
+import {
+  getOrCreateAgentSession,
+  recordAgentDecision,
+  recordAgentTrade,
+  upsertAgentPosition,
+  updateAgentSessionValue,
+} from "@/lib/supabase/agents";
+import type { AgentSession, TriggerType } from "@/lib/supabase/types";
+import { getCurrencyBalance } from "@/lib/solana/client";
 
----
+// ============================================================================
+// Types
+// ============================================================================
 
-### Phase 3: Update dflow-relay Signal Detection
-
-**File:** `party/dflow-relay.ts`
-
-#### 3.1 Update Thresholds
-
-```typescript
-const SWING_THRESHOLD = 0.10; // 10% price change (was 0.05)
-const VOLUME_SPIKE_MULTIPLIER = 10; // 10x average volume (was 5)
-```
-
-#### 3.2 Disable Orderbook Imbalance Triggers
-
-```typescript
-// In handleDflowMessage(), comment out or remove orderbook signal:
-private async handleDflowMessage(msg: DflowMessage) {
-  let signal: Signal | null = null;
-
-  switch (msg.channel) {
-    case "prices":
-      signal = this.detectPriceSwing(msg);
-      break;
-    case "trades":
-      signal = this.detectVolumeSpike(msg);
-      break;
-    case "orderbook":
-      // DISABLED: Too noisy for position management
-      // signal = this.detectOrderbookImbalance(msg);
-      break;
-  }
-
-  // ... rest unchanged
+export interface TradingInput {
+  modelId: string;
+  walletAddress: string;
+  signal?: MarketSignal;
+  testMode?: boolean;
 }
-```
 
-#### 3.3 Simplify triggerAgents() with filterByPosition flag
+export type { TradingResult, MarketSignal };
 
-Replace `triggerAgents()` with simplified version that uses the new flag:
+// ============================================================================
+// Trading Agent Workflow (Durable)
+// ============================================================================
 
-```typescript
-/**
- * Trigger agents via Vercel API with position filtering.
- * The trigger endpoint handles filtering to only agents holding the ticker.
- */
-private async triggerAgents(signal: Signal) {
-  const vercelUrl = this.room.env.VERCEL_URL as string | undefined;
-  const webhookSecret = this.room.env.WEBHOOK_SECRET as string | undefined;
-
-  if (!vercelUrl || !webhookSecret) {
-    console.warn("[dflow-relay] Missing VERCEL_URL or WEBHOOK_SECRET");
-    return;
-  }
+export async function tradingAgentWorkflow(
+  input: TradingInput,
+): Promise<TradingResult> {
+  console.log(`[tradingAgent:${input.modelId}] Starting trading workflow`);
 
   try {
-    const response = await fetch(`${vercelUrl}/api/agents/trigger`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${webhookSecret}`,
-      },
-      body: JSON.stringify({
-        signal,
-        triggerType: "market",
-        filterByPosition: true,  // NEW: Only trigger agents holding this ticker
-      }),
+    // Step 1: Get session
+    const session = await getSessionStep();
+
+    // Step 2: Get or create agent session
+    const agentSession = await getAgentSessionStep(
+      session.id,
+      input.modelId,
+      input.walletAddress,
+    );
+
+    // Step 3: Get USDC balance (single RPC call - needed for trading budget)
+    const usdcBalance = await getUsdcBalanceStep(input.walletAddress);
+
+    // Step 4: Run AI agent
+    // Agent's retrievePosition tool uses dflow API (on-chain truth)
+    const result = await runAgentStep(input, usdcBalance);
+
+    // Step 5: Record all results atomically
+    // (decision + trades + positions + session value)
+    await recordResultsStep(agentSession, input, result, usdcBalance);
+
+    console.log(
+      `[tradingAgent:${input.modelId}] Completed: ${result.decision}, ${result.trades.length} trades`,
+    );
+
+    return result;
+  } catch (error) {
+    console.error(`[tradingAgent:${input.modelId}] Error:`, error);
+    throw error;
+  }
+}
+
+// ============================================================================
+// Durable Step Functions
+// ============================================================================
+
+async function getSessionStep() {
+  "use step";
+  return await getGlobalSession();
+}
+
+async function getAgentSessionStep(
+  sessionId: string,
+  modelId: string,
+  walletAddress: string,
+): Promise<AgentSession> {
+  "use step";
+  const modelName = getModelName(modelId) || modelId;
+  return await getOrCreateAgentSession(
+    sessionId,
+    modelId,
+    modelName,
+    walletAddress,
+  );
+}
+
+/**
+ * Get USDC balance only (single RPC call).
+ */
+async function getUsdcBalanceStep(walletAddress: string): Promise<number> {
+  "use step";
+  try {
+    return await getCurrencyBalance(walletAddress, "USDC");
+  } catch (error) {
+    console.error("[tradingAgent] Failed to fetch USDC balance:", error);
+    return 0;
+  }
+}
+
+/**
+ * Run the PredictionMarketAgent.
+ * Agent tools use dflow API for on-chain data (not Supabase).
+ */
+async function runAgentStep(
+  input: TradingInput,
+  usdcBalance: number,
+): Promise<TradingResult> {
+  "use step";
+
+  const agent = new PredictionMarketAgent({
+    modelId: input.modelId,
+    walletAddress: input.walletAddress,
+    privateKey: getWalletPrivateKey(input.modelId),
+    maxSteps: 10,
+  });
+
+  return await agent.run({
+    signal: input.signal,
+    usdcBalance,
+    testMode: input.testMode,
+  });
+}
+
+/**
+ * Record all results to database in one step.
+ * Updates: agent_decisions, agent_trades, agent_positions, agent_sessions
+ */
+async function recordResultsStep(
+  agentSession: AgentSession,
+  input: TradingInput,
+  result: TradingResult,
+  usdcBalance: number,
+): Promise<void> {
+  "use step";
+
+  // Determine trigger type
+  let triggerType: TriggerType = "periodic";
+  if (input.signal) {
+    triggerType = input.signal.type;
+  }
+
+  // 1. Record decision
+  const decision = await recordAgentDecision({
+    agentSessionId: agentSession.id,
+    triggerType,
+    triggerDetails: input.signal?.data || {},
+    marketTicker: result.marketTicker,
+    marketTitle: result.marketTitle,
+    decision: result.decision,
+    reasoning: result.reasoning,
+    confidence: result.confidence,
+    portfolioValueAfter: result.portfolioValue || usdcBalance,
+  });
+
+  console.log(
+    `[tradingAgent:${input.modelId}] Recorded decision: ${result.decision} (id: ${decision.id})`,
+  );
+
+  // 2. Record trades + update positions
+  for (const trade of result.trades) {
+    // Record trade
+    await recordAgentTrade({
+      decisionId: decision.id,
+      agentSessionId: agentSession.id,
+      marketTicker: trade.marketTicker,
+      marketTitle: trade.marketTitle,
+      side: trade.side,
+      action: trade.action,
+      quantity: trade.quantity,
+      price: trade.price,
+      notional: trade.notional,
+      txSignature: trade.id,
     });
 
-    if (!response.ok) {
-      console.error(`[dflow-relay] Failed to trigger agents: ${response.status}`);
-    } else {
-      const result = await response.json() as { spawned: number; failed: number; message?: string };
-      if (result.spawned > 0) {
-        console.log(`[dflow-relay] Triggered ${result.spawned} agent(s) for ${signal.ticker}`);
-      } else {
-        console.log(`[dflow-relay] ${result.message || "No agents triggered"}`);
-      }
-    }
-  } catch (error) {
-    console.error("[dflow-relay] Error triggering agents:", error);
+    // Update position (delta-based)
+    const quantityDelta = trade.action === "buy" 
+      ? trade.quantity 
+      : -trade.quantity;  // sell or redeem decreases
+
+    await upsertAgentPosition({
+      agentSessionId: agentSession.id,
+      marketTicker: trade.marketTicker,
+      marketTitle: trade.marketTitle,
+      side: trade.side,
+      mint: trade.mint || "",
+      quantityDelta,
+      price: trade.price,
+    });
   }
+
+  // 3. Update agent session value
+  await updateAgentSessionValue(
+    agentSession.id,
+    result.portfolioValue || usdcBalance,
+    (result.portfolioValue || usdcBalance) - agentSession.startingCapital,
+  );
 }
 ```
 
 ---
 
-### Phase 4: Update Cron Schedule
+### 4. `hooks/trades/useTrades.ts` - Direct Supabase + Realtime
 
-**File:** `vercel.json`
+```typescript
+"use client";
 
-Update cron schedule to 5 minutes:
+import { useState, useEffect, useCallback, useRef } from "react";
+import { getSupabaseClient } from "@/lib/supabase/client";
+import { MODELS } from "@/lib/ai/models";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 
-```json
-{
-  "crons": [
-    {
-      "path": "/api/agents/cron",
-      "schedule": "*/5 * * * *"
+// ============================================================================
+// Types
+// ============================================================================
+
+export interface AgentTrade {
+  id: string;
+  marketTicker: string;
+  marketTitle?: string;
+  side: "yes" | "no";
+  action: "buy" | "sell" | "redeem";
+  quantity: number;
+  price: number;
+  notional: number;
+  txSignature?: string;
+  createdAt: Date;
+  // Enriched
+  modelId?: string;
+  modelName?: string;
+  modelColor?: string;
+}
+
+interface UseTradesOptions {
+  sessionId: string;
+  modelId?: string;
+  limit?: number;
+}
+
+// ============================================================================
+// Hook
+// ============================================================================
+
+export function useTrades({ sessionId, modelId, limit = 50 }: UseTradesOptions) {
+  const [trades, setTrades] = useState<AgentTrade[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | undefined>();
+  const channelRef = useRef<RealtimeChannel | null>(null);
+
+  // Load initial trades
+  const loadTrades = useCallback(async () => {
+    const client = getSupabaseClient();
+    if (!client || !sessionId) return;
+
+    setIsLoading(true);
+    try {
+      let query = client
+        .from("agent_trades")
+        .select(`
+          *,
+          agent_sessions!inner(session_id, model_id, model_name)
+        `)
+        .eq("agent_sessions.session_id", sessionId)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+
+      if (modelId) {
+        query = query.eq("agent_sessions.model_id", modelId);
+      }
+
+      const { data, error: fetchError } = await query;
+
+      if (fetchError) throw fetchError;
+
+      setTrades((data || []).map(mapTradeRow));
+      setError(undefined);
+    } catch (err) {
+      console.error("[useTrades] Failed to fetch:", err);
+      setError(err instanceof Error ? err : new Error("Failed to fetch trades"));
+    } finally {
+      setIsLoading(false);
     }
-  ]
+  }, [sessionId, modelId, limit]);
+
+  // Initial load
+  useEffect(() => {
+    if (sessionId) loadTrades();
+  }, [sessionId, loadTrades]);
+
+  // Realtime subscription
+  useEffect(() => {
+    if (!sessionId) return;
+
+    const client = getSupabaseClient();
+    if (!client) return;
+
+    console.log(`[useTrades] Subscribing to trades for session: ${sessionId}`);
+
+    const channel = client
+      .channel(`trades:${sessionId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "agent_trades",
+        },
+        async (payload) => {
+          // Fetch full trade with agent info
+          const { data } = await client
+            .from("agent_trades")
+            .select(`
+              *,
+              agent_sessions!inner(session_id, model_id, model_name)
+            `)
+            .eq("id", payload.new.id)
+            .single();
+
+          if (data) {
+            const agentSession = data.agent_sessions as {
+              session_id: string;
+              model_id: string;
+              model_name: string;
+            };
+
+            // Only add if matches our session (and optionally model)
+            if (agentSession.session_id === sessionId) {
+              if (!modelId || agentSession.model_id === modelId) {
+                const trade = mapTradeRow(data);
+                setTrades((prev) => {
+                  // Dedupe
+                  if (prev.some((t) => t.id === trade.id)) return prev;
+                  return [trade, ...prev].slice(0, limit);
+                });
+              }
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    channelRef.current = channel;
+
+    return () => {
+      console.log(`[useTrades] Unsubscribing from session: ${sessionId}`);
+      channel.unsubscribe();
+      channelRef.current = null;
+    };
+  }, [sessionId, modelId, limit]);
+
+  return {
+    trades,
+    isLoading,
+    error,
+    mutate: loadTrades,
+  };
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function mapTradeRow(row: Record<string, unknown>): AgentTrade {
+  const agentSession = row.agent_sessions as {
+    model_id: string;
+    model_name: string;
+  };
+  const model = MODELS.find((m) => m.id === agentSession.model_id);
+
+  return {
+    id: row.id as string,
+    marketTicker: row.market_ticker as string,
+    marketTitle: (row.market_title as string) ?? undefined,
+    side: row.side as "yes" | "no",
+    action: row.action as "buy" | "sell" | "redeem",
+    quantity: row.quantity as number,
+    price: row.price as number,
+    notional: row.notional as number,
+    txSignature: (row.tx_signature as string) ?? undefined,
+    createdAt: new Date(row.created_at as string),
+    modelId: agentSession.model_id,
+    modelName: model?.name || agentSession.model_name,
+    modelColor: model?.chartColor,
+  };
+}
+
+// ============================================================================
+// Session Trades Hook
+// ============================================================================
+
+export function useSessionTrades(sessionId: string | null, limit = 50) {
+  const result = useTrades({ sessionId: sessionId ?? "", limit });
+
+  if (!sessionId) {
+    return {
+      trades: [] as AgentTrade[],
+      isLoading: false,
+      error: undefined,
+      mutate: () => Promise.resolve(),
+    };
+  }
+
+  return result;
+}
+```
+
+---
+
+### 5. `hooks/positions/usePositions.ts` - Direct Supabase + Realtime
+
+```typescript
+"use client";
+
+import { useState, useEffect, useCallback, useRef } from "react";
+import { getSupabaseClient } from "@/lib/supabase/client";
+import { MODELS } from "@/lib/ai/models";
+import type { RealtimeChannel } from "@supabase/supabase-js";
+
+// ============================================================================
+// Types
+// ============================================================================
+
+export interface AgentPosition {
+  id: string;
+  marketTicker: string;
+  marketTitle?: string;
+  side: "yes" | "no";
+  mint: string;
+  quantity: number;
+  // Enriched
+  modelId?: string;
+  modelName?: string;
+}
+
+interface UsePositionsOptions {
+  sessionId: string;
+  modelId?: string;
+}
+
+// ============================================================================
+// Hook
+// ============================================================================
+
+export function usePositions({ sessionId, modelId }: UsePositionsOptions) {
+  const [positions, setPositions] = useState<AgentPosition[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | undefined>();
+  const channelRef = useRef<RealtimeChannel | null>(null);
+
+  // Load initial positions
+  const loadPositions = useCallback(async () => {
+    const client = getSupabaseClient();
+    if (!client || !sessionId) return;
+
+    setIsLoading(true);
+    try {
+      let query = client
+        .from("agent_positions")
+        .select(`
+          *,
+          agent_sessions!inner(session_id, model_id, model_name)
+        `)
+        .eq("agent_sessions.session_id", sessionId)
+        .gt("quantity", 0)
+        .order("updated_at", { ascending: false });
+
+      if (modelId) {
+        query = query.eq("agent_sessions.model_id", modelId);
+      }
+
+      const { data, error: fetchError } = await query;
+
+      if (fetchError) throw fetchError;
+
+      setPositions((data || []).map(mapPositionRow));
+      setError(undefined);
+    } catch (err) {
+      console.error("[usePositions] Failed to fetch:", err);
+      setError(err instanceof Error ? err : new Error("Failed to fetch positions"));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [sessionId, modelId]);
+
+  // Initial load
+  useEffect(() => {
+    if (sessionId) loadPositions();
+  }, [sessionId, loadPositions]);
+
+  // Realtime subscription
+  useEffect(() => {
+    if (!sessionId) return;
+
+    const client = getSupabaseClient();
+    if (!client) return;
+
+    console.log(`[usePositions] Subscribing to positions for session: ${sessionId}`);
+
+    const channel = client
+      .channel(`positions:${sessionId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",  // INSERT, UPDATE, DELETE
+          schema: "public",
+          table: "agent_positions",
+        },
+        async (payload) => {
+          if (payload.eventType === "DELETE") {
+            // Remove deleted position
+            const oldId = (payload.old as { id: string }).id;
+            setPositions((prev) => prev.filter((p) => p.id !== oldId));
+            return;
+          }
+
+          // INSERT or UPDATE - fetch full record with agent info
+          const { data } = await client
+            .from("agent_positions")
+            .select(`
+              *,
+              agent_sessions!inner(session_id, model_id, model_name)
+            `)
+            .eq("id", payload.new.id)
+            .single();
+
+          if (data) {
+            const agentSession = data.agent_sessions as {
+              session_id: string;
+              model_id: string;
+              model_name: string;
+            };
+
+            // Only process if matches our session (and optionally model)
+            if (agentSession.session_id === sessionId) {
+              if (!modelId || agentSession.model_id === modelId) {
+                const position = mapPositionRow(data);
+
+                setPositions((prev) => {
+                  // Remove if quantity is 0
+                  if (position.quantity <= 0) {
+                    return prev.filter((p) => p.id !== position.id);
+                  }
+
+                  // Update existing or add new
+                  const exists = prev.some((p) => p.id === position.id);
+                  if (exists) {
+                    return prev.map((p) => (p.id === position.id ? position : p));
+                  }
+                  return [position, ...prev];
+                });
+              }
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    channelRef.current = channel;
+
+    return () => {
+      console.log(`[usePositions] Unsubscribing from session: ${sessionId}`);
+      channel.unsubscribe();
+      channelRef.current = null;
+    };
+  }, [sessionId, modelId]);
+
+  return {
+    positions,
+    isLoading,
+    error,
+    mutate: loadPositions,
+  };
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function mapPositionRow(row: Record<string, unknown>): AgentPosition {
+  const agentSession = row.agent_sessions as {
+    model_id: string;
+    model_name: string;
+  };
+  const model = MODELS.find((m) => m.id === agentSession.model_id);
+
+  return {
+    id: row.id as string,
+    marketTicker: row.market_ticker as string,
+    marketTitle: (row.market_title as string) ?? undefined,
+    side: row.side as "yes" | "no",
+    mint: row.mint as string,
+    quantity: row.quantity as number,
+    modelId: agentSession.model_id,
+    modelName: model?.name || agentSession.model_name,
+  };
+}
+
+// ============================================================================
+// Session Positions Hook
+// ============================================================================
+
+export function useSessionPositions(sessionId: string | null) {
+  const result = usePositions({ sessionId: sessionId ?? "" });
+
+  if (!sessionId) {
+    return {
+      positions: [] as AgentPosition[],
+      isLoading: false,
+      error: undefined,
+      mutate: () => Promise.resolve(),
+    };
+  }
+
+  return result;
 }
 ```
 
@@ -303,68 +880,74 @@ Update cron schedule to 5 minutes:
 
 ## Implementation Checklist
 
-### Phase 1: Position Query
-- [ ] Add `getAgentHeldTickers()` to `lib/supabase/agents.ts`
-- [ ] Add `getAgentsHoldingTicker()` to `lib/supabase/agents.ts`
-- [ ] Export new functions from module
+### Database
+- [ ] Create `agent_positions` table with migration
+- [ ] Create `upsert_agent_position` database function
+- [ ] Add `'redeem'` to `agent_trades.action` constraint
+- [ ] Enable realtime on `agent_positions` and `agent_trades`
 
-### Phase 2: Trigger Endpoint
-- [ ] Add `filterByPosition` flag to `TriggerRequest` interface
-- [ ] Add position filtering logic using `getAgentsHoldingTicker()`
-- [ ] Add active workflow check before spawning
-- [ ] Add imports for `getGlobalSession` and `getAgentsHoldingTicker`
-- [ ] Update response type to include optional `message` field
+### Backend - Supabase Layer
+- [ ] Add `AgentPosition` types to `lib/supabase/types.ts`
+- [ ] Add `upsertAgentPosition()` to `lib/supabase/agents.ts`
+- [ ] Add `getAgentPositions()` to `lib/supabase/agents.ts`
 
-### Phase 3: dflow-relay Updates
-- [ ] Update `SWING_THRESHOLD` to 0.10 (10%)
-- [ ] Update `VOLUME_SPIKE_MULTIPLIER` to 10
-- [ ] Disable `orderbook_imbalance` detection
-- [ ] Update `triggerAgents()` to pass `filterByPosition: true`
+### Backend - Workflow
+- [ ] Update `tradingAgent.ts` workflow:
+  - [ ] Remove `fetchPortfolioStep` (full portfolio fetch)
+  - [ ] Add `getUsdcBalanceStep` (USDC only)
+  - [ ] Update `recordResultsStep` to upsert positions
+  - [ ] Ensure trades include `mint` in result for position updates
 
-### Phase 4: Cron Schedule
-- [ ] Update `vercel.json` cron to `*/5 * * * *`
+### Frontend Hooks
+- [ ] Rewrite `hooks/trades/useTrades.ts`:
+  - [ ] Query Supabase directly (not API route)
+  - [ ] Add realtime subscription for `agent_trades`
+- [ ] Rewrite `hooks/positions/usePositions.ts`:
+  - [ ] Query Supabase directly (not RPC + dflow)
+  - [ ] Add realtime subscription for `agent_positions`
 
----
-
-## Signal Configuration Reference
-
-| Signal | Enabled | Threshold | Use Case |
-|--------|---------|-----------|----------|
-| `price_swing` | Yes | 10% change | Position P&L impact |
-| `volume_spike` | Yes | 10x average | Momentum/news indicator |
-| `orderbook_imbalance` | No | - | Too noisy |
+### NOT Changed (Keep Current Implementation)
+- [ ] `lib/ai/tools/retrievePosition.ts` - Continues using dflow API for on-chain truth
 
 ---
 
-## Architecture Flow
+## Key Design Decisions
 
-### Cron Trigger (Market Discovery)
-```
-Every 5 min
-  → /api/agents/cron
-  → All 7 agents (if not already running)
-  → buildPeriodicPrompt()
-  → discoverEvent + webSearch
-  → Agent decides to trade or hold
-```
+1. **Agent Tools vs UI Hooks**
+   - Agent's `retrievePosition` tool: Uses dflow API (on-chain truth for trading decisions)
+   - UI hooks: Use Supabase (recorded data for display)
 
-### Position Signal (Real-time)
-```
-dflow WebSocket
-  → price_swing or volume_spike detected
-  → POST /api/agents/trigger { signal, filterByPosition: true }
-  → Trigger endpoint filters to agents holding ticker
-  → Only those agents spawn workflows
-  → buildSignalPrompt() with signal context
-  → Agent decides to adjust position
-```
+2. **USDC Balance**: Fetched via single RPC call (not tracked in Supabase)
+   - Accurate, simple, fast (~100ms)
+   - Avoids complexity of tracking fees/slippage
+
+3. **Position Updates**: Delta-based with atomic upsert
+   - `quantity = current + bought - sold`
+   - Database function ensures atomicity
+
+4. **Redemptions**: Treated as `action: 'redeem'`
+   - Distinct from sell (market may be resolved)
+   - Position quantity decreases same as sell
+
+5. **No API Routes**: Direct Supabase client + realtime
+   - Consistent with existing `useChat` pattern
+   - Instant updates via Supabase Realtime
+   - Less code to maintain
 
 ---
 
-## Future Enhancements
+## Testing
 
-Once external data sources are added:
+1. **Workflow writes correctly**
+   - Run agent, verify `agent_trades` and `agent_positions` populated
+   - Check position quantity matches buy - sell totals
 
-1. **News-driven discovery**: Trigger discovery for specific categories when news breaks
-2. **Expiration alerts**: Notify agents when held positions approach expiration
-3. **Resolution detection**: Auto-trigger redeem workflow when markets resolve
+2. **Hooks read from Supabase**
+   - Verify `useTrades` shows trades from database
+   - Verify `usePositions` shows positions from database
+
+3. **Realtime updates**
+   - Trade executes → UI updates instantly without refresh
+
+4. **Redemption flow**
+   - Market resolves → agent redeems → position goes to 0

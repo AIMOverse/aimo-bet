@@ -1,10 +1,8 @@
 "use workflow";
 
-import { sleep } from "workflow";
 import {
   PredictionMarketAgent,
   type TradingResult,
-  type ExecutedTrade,
   type MarketSignal,
 } from "@/lib/ai/agents";
 import { getWalletPrivateKey, getModelName } from "@/lib/ai/models/catalog";
@@ -13,14 +11,11 @@ import {
   getOrCreateAgentSession,
   recordAgentDecision,
   recordAgentTrade,
+  upsertAgentPosition,
   updateAgentSessionValue,
 } from "@/lib/supabase/agents";
 import type { AgentSession, TriggerType } from "@/lib/supabase/types";
 import { getCurrencyBalance } from "@/lib/solana/client";
-import {
-  getPortfolioSnapshot,
-  type PortfolioSnapshot,
-} from "@/lib/solana/portfolio";
 
 // ============================================================================
 // Types
@@ -38,15 +33,6 @@ export interface TradingInput {
 export type { TradingResult, MarketSignal };
 
 // ============================================================================
-// Configuration
-// ============================================================================
-
-const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
-
-// Default USDC decimals for formatting
-const USDC_DECIMALS = 6;
-
-// ============================================================================
 // Trading Agent Workflow (Durable)
 // ============================================================================
 
@@ -59,13 +45,20 @@ const USDC_DECIMALS = 6;
  * - If agent fails mid-execution, the entire runAgentStep restarts
  * - Tools (especially placeOrder) fire once without retry to prevent duplicates
  *
- * Agents are STATELESS:
- * - No long-running listeners; each trigger starts a fresh workflow
- * - History (trades, decisions) is stored in Supabase
- * - Portfolio value (USDC + positions) is calculated after each run
+ * Data Flow:
+ * - Agent's retrievePosition tool: Uses dflow API (on-chain truth for trading decisions)
+ * - UI hooks: Use Supabase (recorded data for display)
+ * - USDC balance: Single RPC call (accurate, simple, fast)
+ *
+ * Recording:
+ * - All results written atomically to Supabase:
+ *   → agent_decisions
+ *   → agent_trades
+ *   → agent_positions (upsert)
+ *   → agent_sessions (update value)
  */
 export async function tradingAgentWorkflow(
-  input: TradingInput
+  input: TradingInput,
 ): Promise<TradingResult> {
   console.log(`[tradingAgent:${input.modelId}] Starting trading workflow`);
 
@@ -77,38 +70,25 @@ export async function tradingAgentWorkflow(
     const agentSession = await getAgentSessionStep(
       session.id,
       input.modelId,
-      input.walletAddress
+      input.walletAddress,
     );
 
-    // Step 3: Fetch portfolio snapshot (USDC + positions value)
-    const portfolioBefore = await fetchPortfolioStep(input.walletAddress);
-    const usdcBalance = portfolioBefore.usdcBalance;
+    // Step 3: Get USDC balance (single RPC call - needed for trading budget)
+    const usdcBalance = await getUsdcBalanceStep(input.walletAddress);
 
     // Step 4: Run AI agent (durable wrapper, agent inside is NOT durable)
+    // Agent's retrievePosition tool uses dflow API (on-chain truth)
     const result = await runAgentStep(input, usdcBalance);
 
-    // Step 5: Wait for order fills (durable - long-running polling)
-    if (result.trades.length > 0) {
-      await waitForFillsStep(result.trades);
-    }
-
-    // Step 6: Fetch updated portfolio value after trades settle
-    const portfolioAfter = await fetchPortfolioStep(input.walletAddress);
-
-    // Step 7: Record to database with accurate portfolio value
-    await recordResultsStep(agentSession, input, result, portfolioAfter);
+    // Step 5: Record all results atomically
+    // (decision + trades + positions + session value)
+    await recordResultsStep(agentSession, input, result, usdcBalance);
 
     console.log(
-      `[tradingAgent:${input.modelId}] Completed: ${result.decision}, ${
-        result.trades.length
-      } trades, portfolio: $${portfolioAfter.totalValue.toFixed(2)}`
+      `[tradingAgent:${input.modelId}] Completed: ${result.decision}, ${result.trades.length} trades`,
     );
 
-    // Return result with updated portfolio value
-    return {
-      ...result,
-      portfolioValue: portfolioAfter.totalValue,
-    };
+    return result;
   } catch (error) {
     console.error(`[tradingAgent:${input.modelId}] Error:`, error);
     throw error;
@@ -135,7 +115,7 @@ async function getSessionStep() {
 async function getAgentSessionStep(
   sessionId: string,
   modelId: string,
-  walletAddress: string
+  walletAddress: string,
 ): Promise<AgentSession> {
   "use step";
   const modelName = getModelName(modelId) || modelId;
@@ -143,33 +123,24 @@ async function getAgentSessionStep(
     sessionId,
     modelId,
     modelName,
-    walletAddress
+    walletAddress,
   );
 }
 
 /**
- * Fetch complete portfolio snapshot (USDC + positions).
+ * Get USDC balance only (single RPC call).
  * Durable: Safe to retry (read-only operation).
- * Returns total portfolio value including all prediction market positions.
  */
-async function fetchPortfolioStep(
-  walletAddress: string
-): Promise<PortfolioSnapshot> {
+async function getUsdcBalanceStep(walletAddress: string): Promise<number> {
   "use step";
-
   try {
-    return await getPortfolioSnapshot(walletAddress);
+    const balance = await getCurrencyBalance(walletAddress, "USDC");
+    if (!balance) return 0;
+    // Convert from bigint raw amount to number (formatted)
+    return parseFloat(balance.formatted);
   } catch (error) {
-    console.error("[tradingAgent] Failed to fetch portfolio:", error);
-    // Return empty snapshot on error
-    return {
-      wallet: walletAddress,
-      timestamp: new Date(),
-      usdcBalance: 0,
-      positionsValue: 0,
-      totalValue: 0,
-      positions: [],
-    };
+    console.error("[tradingAgent] Failed to fetch USDC balance:", error);
+    return 0;
   }
 }
 
@@ -178,12 +149,13 @@ async function fetchPortfolioStep(
  *
  * Durable wrapper: If this step fails, it restarts from the beginning.
  * Agent inside is NOT durable: Tools fire once without retry.
+ * Agent tools use dflow API for on-chain data (not Supabase).
  *
  * IMPORTANT: placeOrder tool executes once - retrying would create duplicate orders.
  */
 async function runAgentStep(
   input: TradingInput,
-  usdcBalance: number
+  usdcBalance: number,
 ): Promise<TradingResult> {
   "use step";
 
@@ -204,46 +176,16 @@ async function runAgentStep(
 }
 
 /**
- * Wait for order fills with exponential backoff.
- * Durable: Long-running polling that may take minutes.
- */
-async function waitForFillsStep(trades: ExecutedTrade[]): Promise<void> {
-  "use step";
-
-  for (const trade of trades) {
-    for (let attempt = 0; attempt < 10; attempt++) {
-      try {
-        const res = await fetch(`${BASE_URL}/api/dflow/order/${trade.id}`);
-        if (res.ok) {
-          const status = await res.json();
-          if (status.status === "filled" || status.status === "cancelled") {
-            console.log(
-              `[tradingAgent] Order ${trade.id} status: ${status.status}`
-            );
-            break;
-          }
-        }
-      } catch (error) {
-        console.error(`[tradingAgent] Error checking order status:`, error);
-      }
-
-      // Exponential backoff: 5s, 10s, 20s, 40s, 60s (capped)
-      const delay = Math.min(5 * Math.pow(2, attempt), 60);
-      await sleep(`${delay}s`);
-    }
-  }
-}
-
-/**
- * Record decision and trades to database.
+ * Record all results to database in one step.
+ * Updates: agent_decisions, agent_trades, agent_positions, agent_sessions
  * Durable: Database writes must complete for data integrity.
- * Triggers Supabase Realtime → chat feed updates.
+ * Triggers Supabase Realtime → UI updates.
  */
 async function recordResultsStep(
   agentSession: AgentSession,
   input: TradingInput,
   result: TradingResult,
-  portfolio: PortfolioSnapshot
+  usdcBalance: number,
 ): Promise<void> {
   "use step";
 
@@ -253,7 +195,7 @@ async function recordResultsStep(
     triggerType = input.signal.type;
   }
 
-  // Record the decision with accurate portfolio value
+  // 1. Record the decision
   const decision = await recordAgentDecision({
     agentSessionId: agentSession.id,
     triggerType,
@@ -263,15 +205,16 @@ async function recordResultsStep(
     decision: result.decision,
     reasoning: result.reasoning,
     confidence: result.confidence,
-    portfolioValueAfter: portfolio.totalValue,
+    portfolioValueAfter: result.portfolioValue || usdcBalance,
   });
 
   console.log(
-    `[tradingAgent:${input.modelId}] Recorded decision: ${result.decision} (id: ${decision.id})`
+    `[tradingAgent:${input.modelId}] Recorded decision: ${result.decision} (id: ${decision.id})`,
   );
 
-  // Record each trade
+  // 2. Record trades + update positions
   for (const trade of result.trades) {
+    // Record trade
     await recordAgentTrade({
       decisionId: decision.id,
       agentSessionId: agentSession.id,
@@ -284,13 +227,27 @@ async function recordResultsStep(
       notional: trade.notional,
       txSignature: trade.id,
     });
+
+    // Update position (delta-based)
+    // Buy increases quantity, sell/redeem decreases
+    const quantityDelta =
+      trade.action === "buy" ? trade.quantity : -trade.quantity;
+
+    await upsertAgentPosition({
+      agentSessionId: agentSession.id,
+      marketTicker: trade.marketTicker,
+      marketTitle: trade.marketTitle,
+      side: trade.side,
+      mint: trade.mint || "",
+      quantityDelta,
+      price: trade.price,
+    });
   }
 
-  // Update agent session's current value for leaderboard
-  // Uses total portfolio value (USDC + positions)
+  // 3. Update agent session value for leaderboard
   await updateAgentSessionValue(
     agentSession.id,
-    portfolio.totalValue,
-    portfolio.totalValue - agentSession.startingCapital
+    result.portfolioValue || usdcBalance,
+    (result.portfolioValue || usdcBalance) - agentSession.startingCapital,
   );
 }

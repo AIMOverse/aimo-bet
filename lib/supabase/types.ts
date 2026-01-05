@@ -176,7 +176,7 @@ export interface PortfolioState extends ModelPortfolio {
 // Trade Types
 // =============================================================================
 
-export type TradeAction = "buy" | "sell";
+export type TradeAction = "buy" | "sell" | "redeem";
 
 export interface Trade {
   id: string;
@@ -330,6 +330,22 @@ export interface AgentTrade {
   createdAt: Date;
 }
 
+/**
+ * Agent position - tracked positions per agent session
+ */
+export interface AgentPosition {
+  id: string;
+  agentSessionId: string;
+  marketTicker: string;
+  marketTitle?: string;
+  side: PositionSide;
+  mint: string;
+  quantity: number;
+  avgEntryPrice?: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 // =============================================================================
 // Agent Database Row Types (snake_case for DB)
 // =============================================================================
@@ -420,6 +436,30 @@ export interface DbAgentTradeInsert {
   pnl?: number | null;
 }
 
+export interface DbAgentPosition {
+  id: string;
+  agent_session_id: string;
+  market_ticker: string;
+  market_title: string | null;
+  side: PositionSide;
+  mint: string;
+  quantity: number;
+  avg_entry_price: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbAgentPositionInsert {
+  id?: string;
+  agent_session_id: string;
+  market_ticker: string;
+  market_title?: string | null;
+  side: PositionSide;
+  mint: string;
+  quantity: number;
+  avg_entry_price?: number | null;
+}
+
 // =============================================================================
 // Supabase Database Row Types (snake_case for DB)
 // =============================================================================
@@ -507,8 +547,26 @@ export interface Database {
         Update: Partial<DbAgentTradeInsert>;
         Relationships: GenericRelationship[];
       };
+      agent_positions: {
+        Row: DbAgentPosition;
+        Insert: DbAgentPositionInsert;
+        Update: Partial<DbAgentPositionInsert>;
+        Relationships: GenericRelationship[];
+      };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      upsert_agent_position: {
+        Args: {
+          p_agent_session_id: string;
+          p_market_ticker: string;
+          p_market_title: string | null;
+          p_side: string;
+          p_mint: string;
+          p_quantity_delta: number;
+        };
+        Returns: void;
+      };
+    };
   };
 }

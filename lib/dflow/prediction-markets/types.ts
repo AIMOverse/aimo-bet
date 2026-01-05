@@ -107,7 +107,8 @@ export interface Event {
 /** Response from the events endpoint */
 export interface EventsResponse {
   events: Event[];
-  cursor?: string;
+  /** Pagination offset - number of events to skip for next page */
+  cursor?: number;
 }
 
 /** A series (template) for prediction market events */

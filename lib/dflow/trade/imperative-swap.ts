@@ -12,11 +12,13 @@ import {
 } from "@/lib/solana/wallets";
 import {
   signAndSubmitTransaction,
+  signWithMultipleSignersAndSubmit,
   monitorTransactionConfirmation,
   getTransactionStatus as getSolanaTransactionStatus,
   type MonitorOptions as SolanaMonitorOptions,
   type ConfirmationResult,
 } from "@/lib/solana/transactions";
+import { getSponsorSigner, getSponsorAddress } from "@/lib/solana/sponsor";
 
 // ============================================================================
 // Types
@@ -199,6 +201,7 @@ export async function requestSwapTransaction(
     outputMint: request.quoteResponse.outputMint,
     inAmount: request.quoteResponse.inAmount,
     outAmount: request.quoteResponse.outAmount,
+    sponsor: request.sponsor ? request.sponsor.slice(0, 8) + "..." : undefined,
   });
 
   const response = await dflowQuoteFetch("/swap", {
@@ -306,6 +309,10 @@ export async function executeImperativeSwap(
   options: ExecuteSwapOptions,
 ): Promise<ImperativeSwapResult> {
   try {
+    // Get sponsor if available
+    const sponsorAddress = await getSponsorAddress();
+    const sponsorSigner = await getSponsorSigner();
+
     // Step 1: Request quote
     const quoteResponse = await requestQuote(quoteRequest);
 
@@ -322,13 +329,14 @@ export async function executeImperativeSwap(
       };
     }
 
-    // Step 2: Request swap transaction
+    // Step 2: Request swap transaction (with sponsor if available)
     const swapResponse = await requestSwapTransaction({
       quoteResponse,
       userPublicKey: options.userPublicKey,
       prioritizationFeeLamports: options.prioritizationFeeLamports ?? 150000,
       dynamicComputeUnitLimit: options.dynamicComputeUnitLimit ?? true,
       wrapAndUnwrapSol: options.wrapAndUnwrapSol ?? true,
+      sponsor: sponsorAddress ?? undefined,
     });
 
     if (!swapResponse.swapTransaction) {
@@ -345,10 +353,25 @@ export async function executeImperativeSwap(
     }
 
     // Step 3: Sign and submit transaction
-    const signature = await signAndSubmitSwapTransaction(
-      swapResponse.swapTransaction,
-      signer,
-    );
+    let signature: string;
+
+    if (sponsorSigner) {
+      // Dual signing: user + sponsor
+      signature = await signWithMultipleSignersAndSubmit(
+        swapResponse.swapTransaction,
+        [signer, sponsorSigner],
+      );
+      console.log(
+        "[imperative-swap] Sponsored transaction submitted:",
+        signature,
+      );
+    } else {
+      // Single signing: user pays fees
+      signature = await signAndSubmitSwapTransaction(
+        swapResponse.swapTransaction,
+        signer,
+      );
+    }
 
     // Step 4: Monitor transaction confirmation
     const confirmationResult = await monitorTransaction(

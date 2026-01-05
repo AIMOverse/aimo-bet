@@ -8,6 +8,7 @@ import type {
   AgentSession,
   AgentDecision,
   AgentTrade,
+  AgentPosition,
   DbAgentSessionInsert,
   DbAgentDecisionInsert,
   DbAgentTradeInsert,
@@ -523,4 +524,82 @@ export async function getChartData(
       portfolioValue: row.portfolio_value_after as number,
     };
   });
+}
+
+// ============================================================================
+// Agent Positions
+// ============================================================================
+
+export interface UpsertPositionInput {
+  agentSessionId: string;
+  marketTicker: string;
+  marketTitle?: string;
+  side: PositionSide;
+  mint: string;
+  quantityDelta: number; // Positive for buy, negative for sell
+  price?: number; // For avg price calculation (future use)
+}
+
+/**
+ * Upsert an agent position (delta-based update)
+ * Creates position if doesn't exist, updates quantity if exists
+ */
+export async function upsertAgentPosition(
+  input: UpsertPositionInput,
+): Promise<void> {
+  const client = createServerClient();
+  if (!client) throw new Error("Supabase not configured");
+
+  // Use type assertion for the RPC call since the function is defined in our migration
+  const { error } = await (client.rpc as CallableFunction)(
+    "upsert_agent_position",
+    {
+      p_agent_session_id: input.agentSessionId,
+      p_market_ticker: input.marketTicker,
+      p_market_title: input.marketTitle || null,
+      p_side: input.side,
+      p_mint: input.mint,
+      p_quantity_delta: input.quantityDelta,
+    },
+  );
+
+  if (error) {
+    console.error("[agents] Failed to upsert position:", error);
+    throw error;
+  }
+}
+
+/**
+ * Get all positions for an agent session
+ */
+export async function getAgentPositions(
+  agentSessionId: string,
+): Promise<AgentPosition[]> {
+  const client = createServerClient();
+  if (!client) return [];
+
+  const { data, error } = await client
+    .from("agent_positions")
+    .select("*")
+    .eq("agent_session_id", agentSessionId)
+    .gt("quantity", 0)
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    console.error("[agents] Failed to fetch positions:", error);
+    return [];
+  }
+
+  return (data || []).map((row: Record<string, unknown>) => ({
+    id: row.id as string,
+    agentSessionId: row.agent_session_id as string,
+    marketTicker: row.market_ticker as string,
+    marketTitle: (row.market_title as string) ?? undefined,
+    side: row.side as PositionSide,
+    mint: row.mint as string,
+    quantity: row.quantity as number,
+    avgEntryPrice: (row.avg_entry_price as number) ?? undefined,
+    createdAt: new Date(row.created_at as string),
+    updatedAt: new Date(row.updated_at as string),
+  }));
 }

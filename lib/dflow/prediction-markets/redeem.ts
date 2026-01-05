@@ -258,6 +258,7 @@ export async function requestRedemptionOrder(
   settlementMint: string,
   amount: number,
   userPublicKey: string,
+  sponsor?: string,
 ): Promise<RedemptionOrderResponse> {
   if (amount <= 0) {
     throw new Error("Amount must be positive");
@@ -268,12 +269,16 @@ export async function requestRedemptionOrder(
   queryParams.set("inputMint", outcomeMint);
   queryParams.set("outputMint", settlementMint);
   queryParams.set("amount", amount.toString());
+  if (sponsor) {
+    queryParams.set("sponsor", sponsor);
+  }
 
   console.log("[redeem] Requesting redemption order:", {
     outcomeMint,
     settlementMint,
     amount,
     userPublicKey,
+    sponsor: sponsor ? sponsor.slice(0, 8) + "..." : undefined,
   });
 
   const response = await dflowQuoteFetch(`/order?${queryParams.toString()}`);

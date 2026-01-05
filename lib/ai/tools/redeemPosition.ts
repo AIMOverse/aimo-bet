@@ -13,7 +13,11 @@ import {
 } from "@/lib/dflow/prediction-markets/redeem";
 import { getUserPositions } from "@/lib/dflow/prediction-markets/retrieve";
 import { resolveMints, getOutcomeMint } from "./utils/resolveMints";
-import { signAndSubmitTransaction } from "@/lib/solana/transactions";
+import {
+  signAndSubmitTransaction,
+  signWithMultipleSignersAndSubmit,
+} from "@/lib/solana/transactions";
+import { getSponsorSigner, getSponsorAddress } from "@/lib/solana/sponsor";
 
 // ============================================================================
 // Types
@@ -149,7 +153,11 @@ export function createRedeemPositionTool(
           redeemQuantity = matchingPosition.quantity;
         }
 
-        // Step 4: Request redemption order
+        // Step 4: Get sponsor if available
+        const sponsorAddress = await getSponsorAddress();
+        const sponsorSigner = await getSponsorSigner();
+
+        // Step 5: Request redemption order
         const scaledAmount = Math.floor(
           redeemQuantity * Math.pow(10, OUTCOME_DECIMALS),
         );
@@ -158,6 +166,9 @@ export function createRedeemPositionTool(
           outcomeMint: outcomeMint.slice(0, 8) + "...",
           settlementMint: resolved.settlement_mint.slice(0, 8) + "...",
           amount: scaledAmount,
+          sponsor: sponsorAddress
+            ? sponsorAddress.slice(0, 8) + "..."
+            : undefined,
         });
 
         const order = await requestRedemptionOrder(
@@ -165,17 +176,29 @@ export function createRedeemPositionTool(
           resolved.settlement_mint,
           scaledAmount,
           walletAddress,
+          sponsorAddress ?? undefined,
         );
 
-        // Step 5: Sign and submit the redemption transaction
-        const signature = await signAndSubmitTransaction(
-          order.transaction,
-          signer,
-        );
+        // Step 6: Sign and submit the redemption transaction
+        let signature: string;
 
-        console.log("[redeemPosition] Redemption submitted:", signature);
+        if (sponsorSigner) {
+          // Dual signing: user + sponsor
+          signature = await signWithMultipleSignersAndSubmit(
+            order.transaction,
+            [signer, sponsorSigner],
+          );
+          console.log(
+            "[redeemPosition] Sponsored redemption submitted:",
+            signature,
+          );
+        } else {
+          // Single signing: user pays fees
+          signature = await signAndSubmitTransaction(order.transaction, signer);
+          console.log("[redeemPosition] Redemption submitted:", signature);
+        }
 
-        // Step 6: Calculate results
+        // Step 7: Calculate results
         const inAmount =
           Number(order.inAmount) / Math.pow(10, OUTCOME_DECIMALS);
         const outAmount = Number(order.outAmount) / Math.pow(10, USDC_DECIMALS);

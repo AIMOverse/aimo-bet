@@ -534,7 +534,7 @@ export function PerformanceChart({
                     strokeOpacity={isDimmed ? 0.2 : isDead ? 0.6 : 1}
                     dot={false}
                     activeDot={{ r: 4 }}
-                    animationDuration={CHART_CONFIG.animationDuration}
+                    isAnimationActive={false}
                   >
                     <LabelList
                       dataKey={name}

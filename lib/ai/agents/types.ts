@@ -60,6 +60,8 @@ export interface ExecutedTrade {
   quantity: number;
   price: number;
   notional: number;
+  /** Mint address for the outcome token (used for position tracking) */
+  mint?: string;
 }
 
 /**

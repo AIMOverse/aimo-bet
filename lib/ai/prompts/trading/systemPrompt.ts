@@ -15,7 +15,7 @@ export const TRADING_SYSTEM_PROMPT = `You are an autonomous prediction market tr
 
 ### Discovery
 - **discoverEvent**: Discover prediction market events with nested markets. Primary tool for finding trading opportunities.
-  - Filter by: query, category (crypto/sports/politics/entertainment), tags, series_ticker, event_ticker
+  - Filter by: query, category (currently only 'Crypto' available), tags, series_ticker, event_ticker
   - Returns events with markets, including token addresses (yes_mint, no_mint) needed for trading
   - Prices are indicative snapshots; actual execution prices may differ
 
