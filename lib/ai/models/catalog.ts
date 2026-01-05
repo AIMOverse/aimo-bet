@@ -1,80 +1,136 @@
 import type { ModelDefinition } from "./types";
 
 // ============================================================================
-// Model Catalog
+// Model Catalog - Season 0
 // ============================================================================
 
 /**
- * OpenRouter models available for chat and arena trading.
+ * Arena models available for trading in Season 0.
+ * All models use the aimo-network provider.
  * Arena-specific fields (chartColor, walletAddress, enabled) configure trading behavior.
- * Wallet private keys are stored in environment variables (ARENA_WALLET_<MODEL_KEY>).
+ * Wallet private keys are stored in environment variables (WALLET_<SERIES>_PRIVATE).
  */
 export const MODELS: ModelDefinition[] = [
-  // GPT-5.2 - Default model
+  // OpenAI - GPT-5.2
   {
-    id: "openrouter/openai/gpt-5.2",
+    id: "openai/gpt-5.2",
     name: "GPT-5.2",
-    provider: "openrouter",
+    provider: "aimo-network",
     contextLength: 128000,
     pricing: { prompt: 1.75, completion: 14 },
     description: "OpenAI's most capable model",
     supportsVision: true,
     supportsFunctions: true,
-    // Arena config
     series: "openai",
     chartColor: "#10b981", // Emerald
-    walletAddress: process.env.WALLET_GPT_PUBLIC,
+    walletAddress: process.env.WALLET_OPENAI_PUBLIC,
     enabled: true,
   },
-  // Gemini 3 Pro Preview
+  // Claude - claude-sonnet-4.5
   {
-    id: "openrouter/google/gemini-3-pro-preview",
+    id: "anthropic/claude-sonnet-4.5",
+    name: "Claude Sonnet 4.5",
+    provider: "aimo-network",
+    contextLength: 200000,
+    pricing: { prompt: 3, completion: 15 },
+    description: "Anthropic's balanced model with strong reasoning",
+    supportsVision: true,
+    supportsFunctions: true,
+    series: "claude",
+    chartColor: "#f97316", // Orange
+    walletAddress: process.env.WALLET_CLAUDE_PUBLIC,
+    enabled: true,
+  },
+  // DeepSeek - deepseek-v3.2
+  {
+    id: "deepseek/deepseek-v3.2",
+    name: "DeepSeek V3.2",
+    provider: "aimo-network",
+    contextLength: 64000,
+    pricing: { prompt: 0.14, completion: 0.28 },
+    description:
+      "DeepSeek-V3.2 harmonizes high computational efficiency with strong reasoning",
+    supportsVision: false,
+    supportsFunctions: true,
+    series: "deepseek",
+    chartColor: "#a78bfa", // Light violet
+    walletAddress: process.env.WALLET_DEEPSEEK_PUBLIC,
+    enabled: true,
+  },
+  // GLM - glm-4.7
+  {
+    id: "z-ai/glm-4.7",
+    name: "GLM-4.7",
+    provider: "aimo-network",
+    contextLength: 128000,
+    pricing: { prompt: 0.5, completion: 1 },
+    description: "Zhipu AI's latest GLM model with strong multilingual support",
+    supportsVision: true,
+    supportsFunctions: true,
+    series: "glm",
+    chartColor: "#06b6d4", // Cyan
+    walletAddress: process.env.WALLET_GLM_PUBLIC,
+    enabled: true,
+  },
+  // Grok - grok-4
+  {
+    id: "x-ai/grok-4",
+    name: "Grok 4",
+    provider: "aimo-network",
+    contextLength: 256000,
+    pricing: { prompt: 3, completion: 15 },
+    description: "xAI's latest reasoning model with a 256k context window",
+    supportsVision: true,
+    supportsFunctions: true,
+    series: "grok",
+    chartColor: "#ef4444", // Red
+    walletAddress: process.env.WALLET_GROK_PUBLIC,
+    enabled: true,
+  },
+  // Qwen - qwen-3-max
+  {
+    id: "qwen/qwen3-max",
+    name: "Qwen 3 Max",
+    provider: "aimo-network",
+    contextLength: 128000,
+    pricing: { prompt: 0.4, completion: 1.2 },
+    description: "Alibaba's most capable Qwen model",
+    supportsVision: true,
+    supportsFunctions: true,
+    series: "qwen",
+    chartColor: "#8b5cf6", // Violet
+    walletAddress: process.env.WALLET_QWEN_PUBLIC,
+    enabled: true,
+  },
+  // Gemini - gemini-3-pro
+  {
+    id: "google/gemini-3-pro-preview",
     name: "Gemini 3 Pro",
-    provider: "openrouter",
+    provider: "aimo-network",
     contextLength: 1000000,
     pricing: { prompt: 4, completion: 18 },
     description:
-      "Gemini 3 Pro is Google's flagship frontier model for high-precision multimodal reasoning, combining strong performance across text, image, video, audio, and code with a 1M-token context window.",
+      "Google's flagship frontier model for high-precision multimodal reasoning",
     supportsVision: true,
     supportsFunctions: true,
-    // Arena config
     series: "gemini",
     chartColor: "#22c55e", // Green
     walletAddress: process.env.WALLET_GEMINI_PUBLIC,
     enabled: true,
   },
-  // Grok 4
+  // Kimi - kimi-k2-0905
   {
-    id: "openrouter/x-ai/grok-4",
-    name: "Grok 4",
-    provider: "openrouter",
-    contextLength: 256000,
-    pricing: { prompt: 3, completion: 15 },
-    description:
-      "Grok 4 is xAI's latest reasoning model with a 256k context window.",
+    id: "moonshotai/kimi-k2-0905",
+    name: "Kimi K2",
+    provider: "aimo-network",
+    contextLength: 128000,
+    pricing: { prompt: 0.6, completion: 1.8 },
+    description: "Moonshot AI's Kimi model with strong reasoning capabilities",
     supportsVision: true,
     supportsFunctions: true,
-    // Arena config
-    series: "grok",
-    chartColor: "#f97316", // Orange
-    walletAddress: process.env.WALLET_GROK_PUBLIC,
-    enabled: true,
-  },
-  // DeepSeek V3.2 (Test)
-  {
-    id: "openrouter/deepseek/deepseek-v3.2",
-    name: "DeepSeek V3.2",
-    provider: "openrouter",
-    contextLength: 64000,
-    pricing: { prompt: 0.14, completion: 0.28 },
-    description:
-      "DeepSeek-V3.2 is a large language model designed to harmonize high computational efficiency with strong reasoning and agentic tool-use performance.",
-    supportsVision: false,
-    supportsFunctions: true,
-    // Arena config
-    series: "deepseek",
-    chartColor: "#a78bfa", // Light violet
-    walletAddress: process.env.WALLET_DEEPSEEK_PUBLIC,
+    series: "kimi",
+    chartColor: "#ec4899", // Pink
+    walletAddress: process.env.WALLET_KIMI_PUBLIC,
     enabled: true,
   },
 ];
@@ -127,10 +183,10 @@ export function getArenaModel(id: string): ModelDefinition | undefined {
 }
 
 /**
- * Get a specific arena model by short ID (e.g., "gpt-4o" instead of "openrouter/gpt-4o")
+ * Get a specific arena model by short ID (e.g., "gpt-5.2" instead of "openai/gpt-5.2")
  */
 export function getArenaModelByShortId(
-  shortId: string
+  shortId: string,
 ): ModelDefinition | undefined {
   return MODELS.find((m) => m.id.endsWith(`/${shortId}`) || m.id === shortId);
 }
@@ -178,12 +234,10 @@ export function getSeriesLogoPath(modelName: string): string | undefined {
     claude: "claude-color.svg",
     gemini: "gemini-color.svg",
     deepseek: "deepseek-color.svg",
-    llama: "llama-color.svg",
-    mistral: "mistral-color.svg",
     qwen: "qwen-color.svg",
     grok: "grok.svg",
     kimi: "kimi-color.svg",
-    zai: "zai.svg",
+    glm: "zai.svg",
   };
 
   const filename = logoMap[series];
@@ -221,14 +275,14 @@ export function getModelsWithWallets(): ModelDefinition[] {
  * Maps model ID to corresponding private key env var.
  */
 const WALLET_PRIVATE_KEY_MAP: Record<string, string | undefined> = {
-  "openrouter/openai/gpt-5.2": process.env.WALLET_GPT_PRIVATE,
-  // "openrouter/gpt-4o-mini": process.env.WALLET_GPT4O_MINI_PRIVATE,
-  // "openrouter/claude-sonnet-4": process.env.WALLET_CLAUDE_SONNET_PRIVATE,
-  // "openrouter/claude-3.5-haiku": process.env.WALLET_CLAUDE_HAIKU_PRIVATE,
-  "openrouter/google/gemini-3-pro-preview": process.env.WALLET_GEMINI_PRIVATE,
-  // "openrouter/deepseek-chat": process.env.WALLET_DEEPSEEK_PRIVATE,
-  "openrouter/x-ai/grok-4": process.env.WALLET_GROK_PRIVATE,
-  "openrouter/deepseek/deepseek-v3.2": process.env.WALLET_DEEPSEEK_PRIVATE,
+  "openai/gpt-5.2": process.env.WALLET_OPENAI_PRIVATE,
+  "anthropic/claude-sonnet-4.5": process.env.WALLET_CLAUDE_PRIVATE,
+  "deepseek/deepseek-v3.2": process.env.WALLET_DEEPSEEK_PRIVATE,
+  "z-ai/glm-4.7": process.env.WALLET_GLM_PRIVATE,
+  "x-ai/grok-4": process.env.WALLET_GROK_PRIVATE,
+  "qwen/qwen3-max": process.env.WALLET_QWEN_PRIVATE,
+  "google/gemini-3-pro-preview": process.env.WALLET_GEMINI_PRIVATE,
+  "moonshotai/kimi-k2-0905": process.env.WALLET_KIMI_PRIVATE,
 };
 
 /**

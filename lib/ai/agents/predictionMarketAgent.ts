@@ -67,23 +67,23 @@ export class PredictionMarketAgent {
       discoverEvent: discoverEventTool,
       increasePosition: createIncreasePositionTool(
         this.config.walletAddress,
-        signer
+        signer,
       ),
       decreasePosition: createDecreasePositionTool(
         this.config.walletAddress,
-        signer
+        signer,
       ),
       retrievePosition: createRetrievePositionTool(this.config.walletAddress),
       redeemPosition: createRedeemPositionTool(
         this.config.walletAddress,
-        signer
+        signer,
       ),
       webSearch: webSearchTool,
     };
 
     // Create ToolLoopAgent for this run
     const agent = new ToolLoopAgent({
-      model: getModel(this.config.modelId),
+      model: await getModel(this.config.modelId),
       instructions: TRADING_SYSTEM_PROMPT,
       tools,
       stopWhen: stepCountIs(this.config.maxSteps ?? 10),
@@ -115,7 +115,7 @@ export class PredictionMarketAgent {
     }
 
     console.log(
-      `[PredictionMarketAgent:${this.config.modelId}] Starting agent run`
+      `[PredictionMarketAgent:${this.config.modelId}] Starting agent run`,
     );
 
     // Run the agent with ToolLoopAgent.generate()
@@ -123,7 +123,7 @@ export class PredictionMarketAgent {
     const result = await agent.generate({ prompt });
 
     console.log(
-      `[PredictionMarketAgent:${this.config.modelId}] Completed with ${result.steps.length} steps`
+      `[PredictionMarketAgent:${this.config.modelId}] Completed with ${result.steps.length} steps`,
     );
 
     // Extract trades from tool call results
@@ -159,7 +159,7 @@ export class PredictionMarketAgent {
         input: unknown;
       }>;
       toolResults?: Array<{ toolCallId: string; output?: unknown }>;
-    }>
+    }>,
   ): ExecutedTrade[] {
     const trades: ExecutedTrade[] = [];
 
@@ -170,7 +170,7 @@ export class PredictionMarketAgent {
         // Handle increasePosition tool
         if (call.toolName === "increasePosition") {
           const resultEntry = step.toolResults.find(
-            (r) => r.toolCallId === call.toolCallId
+            (r) => r.toolCallId === call.toolCallId,
           );
 
           const typedOutput = resultEntry?.output as
@@ -207,7 +207,7 @@ export class PredictionMarketAgent {
         // Handle decreasePosition tool
         if (call.toolName === "decreasePosition") {
           const resultEntry = step.toolResults.find(
-            (r) => r.toolCallId === call.toolCallId
+            (r) => r.toolCallId === call.toolCallId,
           );
 
           const typedOutput = resultEntry?.output as
@@ -250,7 +250,7 @@ export class PredictionMarketAgent {
    */
   private determineDecision(
     text: string | undefined,
-    trades: ExecutedTrade[]
+    trades: ExecutedTrade[],
   ): DecisionType {
     if (trades.length > 0) {
       return trades[0].action === "buy" ? "buy" : "sell";

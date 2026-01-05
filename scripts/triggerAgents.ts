@@ -10,6 +10,7 @@
  *   npx tsx scripts/triggerAgents.ts --cron       # Simulate cron trigger
  *   npx tsx scripts/triggerAgents.ts --market     # Simulate market signal
  *   npx tsx scripts/triggerAgents.ts --poll       # Poll until workflows complete
+ *   npx tsx scripts/triggerAgents.ts --test       # Force agents to buy $1-5 (test mode)
  *
  * Options:
  *   --model <id>      Only trigger a specific model
@@ -17,6 +18,7 @@
  *   --market          Use market trigger type with mock signal
  *   --check           Just check endpoint status, don't trigger
  *   --poll            Wait for workflows to complete (polls status)
+ *   --test            Force agents to execute a $1-5 trade (test mode)
  *   --base-url <url>  Override API base URL (default: http://localhost:3000)
  *
  * Environment:
@@ -39,6 +41,7 @@ interface TriggerRequest {
     data: Record<string, unknown>;
   };
   triggerType: "market" | "cron" | "manual";
+  testMode?: boolean;
 }
 
 interface SpawnedWorkflow {
@@ -90,6 +93,7 @@ function parseArgs(): {
   triggerType: "market" | "cron" | "manual";
   check: boolean;
   poll: boolean;
+  testMode: boolean;
   baseUrl?: string;
 } {
   const args = process.argv.slice(2);
@@ -97,6 +101,7 @@ function parseArgs(): {
   let triggerType: "market" | "cron" | "manual" = "manual";
   let check = false;
   let poll = false;
+  let testMode = false;
   let baseUrl: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
@@ -113,10 +118,12 @@ function parseArgs(): {
       check = true;
     } else if (arg === "--poll") {
       poll = true;
+    } else if (arg === "--test") {
+      testMode = true;
     }
   }
 
-  return { modelId, triggerType, check, poll, baseUrl };
+  return { modelId, triggerType, check, poll, testMode, baseUrl };
 }
 
 async function checkEndpoint(): Promise<void> {
@@ -150,7 +157,7 @@ async function pollStatus(runIds: string[]): Promise<StatusResponse> {
       headers: {
         Authorization: `Bearer ${WEBHOOK_SECRET}`,
       },
-    }
+    },
   );
   return (await response.json()) as StatusResponse;
 }
@@ -177,7 +184,7 @@ async function waitForCompletion(workflows: SpawnedWorkflow[]): Promise<void> {
 
     // Show progress
     process.stdout.write(
-      `\r   Running: ${summary.running} | Completed: ${summary.completed} | Failed: ${summary.failed}    `
+      `\r   Running: ${summary.running} | Completed: ${summary.completed} | Failed: ${summary.failed}    `,
     );
 
     // Check if all done
@@ -191,7 +198,7 @@ async function waitForCompletion(workflows: SpawnedWorkflow[]): Promise<void> {
           console.log(
             `  ✅ ${modelId}: ${workflow.result?.decision} (${
               workflow.result?.trades
-            } trades, $${workflow.result?.portfolioValue?.toFixed(2)})`
+            } trades, $${workflow.result?.portfolioValue?.toFixed(2)})`,
           );
         } else if (workflow.status === "failed") {
           console.log(`  ❌ ${modelId}: ${workflow.result?.error}`);
@@ -209,13 +216,14 @@ async function waitForCompletion(workflows: SpawnedWorkflow[]): Promise<void> {
 async function triggerAgents(
   modelId: string | undefined,
   triggerType: "market" | "cron" | "manual",
-  poll: boolean
+  poll: boolean,
+  testMode: boolean,
 ): Promise<void> {
   if (!WEBHOOK_SECRET) {
     console.error("❌ WEBHOOK_SECRET environment variable is required");
     console.log("\nSet it in your .env file or run with:");
     console.log(
-      "  WEBHOOK_SECRET=your-secret npx tsx scripts/triggerAgents.ts"
+      "  WEBHOOK_SECRET=your-secret npx tsx scripts/triggerAgents.ts",
     );
     process.exit(1);
   }
@@ -223,11 +231,13 @@ async function triggerAgents(
   console.log(`🚀 Triggering agents...`);
   console.log(`   Type: ${triggerType}`);
   console.log(`   Model: ${modelId || "all"}`);
+  console.log(`   Test mode: ${testMode ? "YES (forcing $1-5 trade)" : "no"}`);
   console.log(`   URL: ${BASE_URL}/api/agents/trigger\n`);
 
   const body: TriggerRequest = {
     triggerType,
     modelId,
+    testMode,
   };
 
   // Add mock market signal if market trigger
@@ -278,12 +288,12 @@ async function triggerAgents(
         await waitForCompletion(data.workflows);
       } else {
         console.log(
-          "\n💡 Run with --poll to wait for completion, or check status with:"
+          "\n💡 Run with --poll to wait for completion, or check status with:",
         );
         console.log(
           `   curl -H "Authorization: Bearer $WEBHOOK_SECRET" "${BASE_URL}/api/agents/status?runIds=${data.workflows
             .map((w) => w.runId)
-            .join(",")}"`
+            .join(",")}"`,
         );
       }
     }
@@ -300,7 +310,7 @@ async function triggerAgents(
 }
 
 async function main(): Promise<void> {
-  const { modelId, triggerType, check, poll, baseUrl } = parseArgs();
+  const { modelId, triggerType, check, poll, testMode, baseUrl } = parseArgs();
 
   // Override BASE_URL if provided via command line
   if (baseUrl) {
@@ -311,7 +321,7 @@ async function main(): Promise<void> {
     if (check) {
       await checkEndpoint();
     } else {
-      await triggerAgents(modelId, triggerType, poll);
+      await triggerAgents(modelId, triggerType, poll, testMode);
     }
   } catch (error) {
     if (error instanceof Error && error.message.includes("ECONNREFUSED")) {

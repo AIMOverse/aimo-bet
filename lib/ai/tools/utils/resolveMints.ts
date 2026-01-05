@@ -84,7 +84,9 @@ function setCache(ticker: string, data: ResolvedMints): void {
  * @returns Resolved mint addresses and market info
  * @throws Error if market not found
  */
-export async function resolveMints(marketTicker: string): Promise<ResolvedMints> {
+export async function resolveMints(
+  marketTicker: string,
+): Promise<ResolvedMints> {
   // Check cache first
   const cached = getCached(marketTicker);
   if (cached) {
@@ -95,7 +97,7 @@ export async function resolveMints(marketTicker: string): Promise<ResolvedMints>
   console.log("[resolveMints] Fetching market:", marketTicker);
 
   const response = await dflowMetadataFetch(
-    `/market/by-ticker/${encodeURIComponent(marketTicker)}`
+    `/market/${encodeURIComponent(marketTicker)}`,
   );
 
   if (!response.ok) {
@@ -103,7 +105,9 @@ export async function resolveMints(marketTicker: string): Promise<ResolvedMints>
       throw new Error(`Market '${marketTicker}' not found`);
     }
     const errorText = await response.text();
-    throw new Error(`Failed to fetch market: ${response.status} - ${errorText}`);
+    throw new Error(
+      `Failed to fetch market: ${response.status} - ${errorText}`,
+    );
   }
 
   const market: MarketByTickerResponse = await response.json();
@@ -162,7 +166,7 @@ export async function resolveMints(marketTicker: string): Promise<ResolvedMints>
  */
 export function getTradeMintsForBuy(
   resolved: ResolvedMints,
-  side: "yes" | "no"
+  side: "yes" | "no",
 ): { inputMint: string; outputMint: string } {
   return {
     inputMint: resolved.settlement_mint,
@@ -176,7 +180,7 @@ export function getTradeMintsForBuy(
  */
 export function getTradeMintsForSell(
   resolved: ResolvedMints,
-  side: "yes" | "no"
+  side: "yes" | "no",
 ): { inputMint: string; outputMint: string } {
   return {
     inputMint: side === "yes" ? resolved.yes_mint : resolved.no_mint,
@@ -189,7 +193,7 @@ export function getTradeMintsForSell(
  */
 export function getOutcomeMint(
   resolved: ResolvedMints,
-  side: "yes" | "no"
+  side: "yes" | "no",
 ): string {
   return side === "yes" ? resolved.yes_mint : resolved.no_mint;
 }

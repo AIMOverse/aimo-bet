@@ -35,7 +35,6 @@ interface PerformanceChartProps {
 // Color for dead/muted models
 const DEAD_MODEL_COLOR = "hsl(var(--muted-foreground))";
 
-type TimeRange = "24H" | "72H" | "ALL";
 type ValueDisplay = "dollar" | "percent";
 
 // Format timestamp for display
@@ -358,7 +357,6 @@ export function PerformanceChart({
   leaderboard,
   deadModels,
 }: PerformanceChartProps) {
-  const [timeRange, setTimeRange] = useState<TimeRange>("ALL");
   const [valueDisplay, setValueDisplay] = useState<ValueDisplay>("dollar");
   const [hoveredModel, setHoveredModel] = useState<string | null>(null);
 
@@ -379,40 +377,36 @@ export function PerformanceChart({
     return map;
   }, []);
 
-  // Filter data based on time range
-  const filteredData = useMemo(() => {
-    if (timeRange === "ALL" || data.length === 0) return data;
-
-    const now = new Date();
-    const hoursBack = timeRange === "24H" ? 24 : 72;
-    const cutoff = new Date(now.getTime() - hoursBack * 60 * 60 * 1000);
-
-    return data.filter((point) => new Date(point.timestamp) >= cutoff);
-  }, [data, timeRange]);
-
-  // Convert values to percentages if needed
+  // Convert values to percentages if needed and add numeric timestamp for X-axis domain
   const chartData = useMemo(() => {
-    if (valueDisplay === "dollar") return filteredData;
-
-    return filteredData.map((point) => {
-      const converted: ChartDataPoint = { timestamp: point.timestamp };
+    return data.map((point) => {
+      const converted: ChartDataPoint & { _ts: number } = {
+        timestamp: point.timestamp,
+        _ts: new Date(point.timestamp).getTime(),
+      };
       modelNames.forEach((name) => {
         const value = point[name] as number;
         converted[name] =
-          ((value - DEFAULT_STARTING_CAPITAL) / DEFAULT_STARTING_CAPITAL) * 100;
+          valueDisplay === "percent"
+            ? ((value - DEFAULT_STARTING_CAPITAL) / DEFAULT_STARTING_CAPITAL) *
+              100
+            : value;
       });
       return converted;
     });
-  }, [filteredData, valueDisplay, modelNames]);
+  }, [data, valueDisplay, modelNames]);
 
   // Calculate Y-axis domain
   const yDomain = useMemo(() => {
+    // Keys to exclude from Y-axis domain calculation
+    const excludeKeys = new Set(["timestamp", "_ts"]);
+
     if (valueDisplay === "percent") {
       let min = 0;
       let max = 0;
       chartData.forEach((point) => {
         Object.entries(point).forEach(([key, value]) => {
-          if (key !== "timestamp" && typeof value === "number") {
+          if (!excludeKeys.has(key) && typeof value === "number") {
             min = Math.min(min, value);
             max = Math.max(max, value);
           }
@@ -426,7 +420,7 @@ export function PerformanceChart({
     let max = DEFAULT_STARTING_CAPITAL;
     chartData.forEach((point) => {
       Object.entries(point).forEach(([key, value]) => {
-        if (key !== "timestamp" && typeof value === "number") {
+        if (!excludeKeys.has(key) && typeof value === "number") {
           min = Math.min(min, value);
           max = Math.max(max, value);
         }
@@ -436,47 +430,49 @@ export function PerformanceChart({
     return [Math.floor(min - padding), Math.ceil(max + padding)];
   }, [chartData, valueDisplay]);
 
+  // Calculate X-axis domain to extend one interval beyond last data point
+  const xDomain = useMemo((): [number, number] | undefined => {
+    if (chartData.length < 2) return undefined;
+
+    const timestamps = chartData.map((p) => p._ts as number);
+
+    // Calculate intervals between points
+    const intervals: number[] = [];
+    for (let i = 1; i < timestamps.length; i++) {
+      intervals.push(timestamps[i] - timestamps[i - 1]);
+    }
+
+    // Use median interval (more robust than average)
+    intervals.sort((a, b) => a - b);
+    const medianInterval =
+      intervals[Math.floor(intervals.length / 2)] || 5 * 60 * 1000;
+
+    // Extend to one interval beyond last point
+    const lastTimestamp = timestamps[timestamps.length - 1];
+    const futureTimestamp = lastTimestamp + medianInterval;
+
+    return [timestamps[0], futureTimestamp];
+  }, [chartData]);
+
   return (
     <Card className="flex-1">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-lg">{title}</CardTitle>
-          <div className="flex items-center gap-2">
-            {/* Time Range Toggle */}
-            <ToggleGroup
-              type="single"
-              value={timeRange}
-              onValueChange={(val) => val && setTimeRange(val as TimeRange)}
-              size="sm"
-            >
-              <ToggleGroupItem value="24H" className="text-xs px-2">
-                24H
-              </ToggleGroupItem>
-              <ToggleGroupItem value="72H" className="text-xs px-2">
-                72H
-              </ToggleGroupItem>
-              <ToggleGroupItem value="ALL" className="text-xs px-2">
-                ALL
-              </ToggleGroupItem>
-            </ToggleGroup>
-
-            {/* Value Display Toggle */}
-            <ToggleGroup
-              type="single"
-              value={valueDisplay}
-              onValueChange={(val) =>
-                val && setValueDisplay(val as ValueDisplay)
-              }
-              size="sm"
-            >
-              <ToggleGroupItem value="dollar" className="text-xs px-2">
-                $
-              </ToggleGroupItem>
-              <ToggleGroupItem value="percent" className="text-xs px-2">
-                %
-              </ToggleGroupItem>
-            </ToggleGroup>
-          </div>
+          {/* Value Display Toggle */}
+          <ToggleGroup
+            type="single"
+            value={valueDisplay}
+            onValueChange={(val) => val && setValueDisplay(val as ValueDisplay)}
+            size="sm"
+          >
+            <ToggleGroupItem value="dollar" className="text-xs px-2">
+              $
+            </ToggleGroupItem>
+            <ToggleGroupItem value="percent" className="text-xs px-2">
+              %
+            </ToggleGroupItem>
+          </ToggleGroup>
         </div>
       </CardHeader>
       <CardContent>
@@ -488,8 +484,13 @@ export function PerformanceChart({
             >
               <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
               <XAxis
-                dataKey="timestamp"
-                tickFormatter={formatTime}
+                dataKey="_ts"
+                type="number"
+                scale="time"
+                domain={xDomain}
+                tickFormatter={(ts: number) =>
+                  formatTime(new Date(ts).toISOString())
+                }
                 className="text-xs"
                 tick={{ fill: "hsl(var(--muted-foreground))" }}
                 tickLine={{ stroke: "hsl(var(--muted))" }}
@@ -499,7 +500,7 @@ export function PerformanceChart({
                 domain={yDomain}
                 tickFormatter={(value) =>
                   valueDisplay === "dollar"
-                    ? `$${(value / 1000).toFixed(1)}k`
+                    ? `$${value.toFixed(0)}`
                     : `${value.toFixed(0)}%`
                 }
                 className="text-xs"

@@ -2,10 +2,16 @@
 
 import { useMemo } from "react";
 import { Briefcase } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import type { DflowPosition } from "@/hooks/positions/usePositions";
 import { cn } from "@/lib/utils";
+import {
+  getSeriesLogoPath,
+  getModelColor,
+  DEFAULT_CHART_COLOR,
+} from "@/lib/ai/models/catalog";
 
 interface PositionsTableProps {
   positions: DflowPosition[];
@@ -14,9 +20,40 @@ interface PositionsTableProps {
 
 function PositionRow({ position }: { position: DflowPosition }) {
   const isYes = position.outcome === "yes";
+  const modelName = position.modelName ?? "Model";
+  const logoPath = getSeriesLogoPath(modelName);
+  const chartColor = position.modelName
+    ? getModelColor(position.modelName)
+    : DEFAULT_CHART_COLOR;
+  const initial = modelName.charAt(0).toUpperCase();
 
   return (
     <div className="p-4 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+      {/* Model avatar and name */}
+      {position.modelName && (
+        <div className="flex items-center gap-2 mb-2">
+          <Avatar
+            className="size-5 ring-[1.5px] ring-offset-0 bg-background shrink-0"
+            style={{ ["--tw-ring-color" as string]: chartColor }}
+          >
+            {logoPath ? (
+              <AvatarImage
+                src={logoPath}
+                alt={`${modelName} logo`}
+                className="p-0.5"
+              />
+            ) : null}
+            <AvatarFallback
+              className="text-[10px] font-semibold text-foreground"
+              style={{ backgroundColor: `${chartColor}20` }}
+            >
+              {initial}
+            </AvatarFallback>
+          </Avatar>
+          <span className="font-medium text-sm">{modelName}</span>
+        </div>
+      )}
+
       {/* Market ticker and side badge */}
       <div className="flex items-start justify-between gap-2 mb-2">
         <p className="text-sm font-medium font-mono line-clamp-2 flex-1">
@@ -40,12 +77,6 @@ function PositionRow({ position }: { position: DflowPosition }) {
           <span className="text-muted-foreground">Quantity</span>
           <p className="font-medium">{position.quantity.toLocaleString()}</p>
         </div>
-        {position.modelName && (
-          <div>
-            <span className="text-muted-foreground">Model</span>
-            <p className="font-medium">{position.modelName}</p>
-          </div>
-        )}
       </div>
 
       {/* Mint address (truncated) */}

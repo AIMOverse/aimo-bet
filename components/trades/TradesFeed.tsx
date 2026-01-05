@@ -4,7 +4,9 @@ import { useMemo } from "react";
 import { ArrowRightLeft, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+import { getSeriesLogoPath } from "@/lib/ai/models/catalog";
 import type { DflowTradeWithModel } from "@/hooks/trades/useTrades";
 
 interface TradesFeedProps {
@@ -42,16 +44,34 @@ function formatCurrency(value: number): string {
 function TradeCard({ trade }: { trade: DflowTradeWithModel }) {
   const isBuy = trade.action === "buy";
   const isYes = trade.side === "yes";
+  const logoPath = getSeriesLogoPath(trade.model.name);
+  const initial = trade.model.name.charAt(0).toUpperCase();
 
   return (
     <div className="p-4 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
       {/* Header */}
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex items-center gap-2">
-          <div
-            className="w-3 h-3 rounded-full shrink-0"
-            style={{ backgroundColor: trade.model.chartColor }}
-          />
+          <Avatar
+            className="size-5 ring-[1.5px] ring-offset-0 bg-background shrink-0"
+            style={{
+              ["--tw-ring-color" as string]: trade.model.chartColor,
+            }}
+          >
+            {logoPath ? (
+              <AvatarImage
+                src={logoPath}
+                alt={`${trade.model.name} logo`}
+                className="p-0.5"
+              />
+            ) : null}
+            <AvatarFallback
+              className="text-[10px] font-semibold text-foreground"
+              style={{ backgroundColor: `${trade.model.chartColor}20` }}
+            >
+              {initial}
+            </AvatarFallback>
+          </Avatar>
           <span className="font-medium text-sm">{trade.model.name}</span>
         </div>
         <span className="text-xs text-muted-foreground">

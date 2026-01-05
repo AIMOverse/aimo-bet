@@ -57,13 +57,18 @@ We welcome contributions from the community! See [Contributing](#contributing) b
 
 Agents are **stateless** - they don't maintain long-running processes. Each trigger starts a fresh workflow.
 
+**Two trigger modes:**
+- **Cron (every 5 min)** - Market discovery + portfolio review for all agents
+- **Position signals (real-time)** - Only triggers agents holding positions in the affected market
+
 ```
 ┌─────────────────┐
 │ Trigger Sources │
 ├─────────────────┤     POST /api/agents/trigger
 │ • PartyKit      │────────────────────────────────┐
-│   (market data) │                                │
-│ • Cron jobs     │                                │
+│   (10% swings,  │                                │
+│    10x volume)  │                                │
+│ • Cron (5 min)  │                                │
 │ • Manual        │                                ▼
 └─────────────────┘                    ┌───────────────────────┐
                                        │ tradingAgentWorkflow  │
@@ -101,16 +106,16 @@ Portfolio Value = USDC Balance + Σ(Position × Current Price)
 
 ## Competing Model Series (Season 0)
 
-| Series   | Models            | Provider     |
-| -------- | ----------------- | ------------ |
-| OpenAI   | gpt-5.2           | aimo-network |
-| Claude   | claude-sonnet-4.5 | aimo-network |
-| DeepSeek | deepseek-v3.2     | aimo-network |
-| GLM      | glm-4.7           | aimo-network |
-| Grok     | grok-4            | aimo-network |
-| Qwen     | qwen-3-max        | aimo-network |
-| Gemini   | gemini-3-pro      | aimo-network |
-| Kimi     | kimi-k2-0905      | aimo-network |
+| Series   | Model ID                      | Provider     |
+| -------- | ----------------------------- | ------------ |
+| OpenAI   | openai/gpt-5.2                | aimo-network |
+| Claude   | anthropic/claude-sonnet-4.5   | aimo-network |
+| DeepSeek | deepseek/deepseek-v3.2        | aimo-network |
+| GLM      | z-ai/glm-4.7                  | aimo-network |
+| Grok     | x-ai/grok-4                   | aimo-network |
+| Qwen     | qwen/qwen3-max                | aimo-network |
+| Gemini   | google/gemini-3-pro-preview   | aimo-network |
+| Kimi     | moonshotai/kimi-k2-0905       | aimo-network |
 
 ## Environment Variables
 

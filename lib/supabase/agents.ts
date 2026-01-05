@@ -29,7 +29,7 @@ export async function getOrCreateAgentSession(
   modelId: string,
   modelName: string,
   walletAddress: string,
-  startingCapital = 10000
+  startingCapital = 10000,
 ): Promise<AgentSession> {
   const client = createServerClient();
   if (!client) throw new Error("Supabase not configured");
@@ -43,7 +43,9 @@ export async function getOrCreateAgentSession(
     .single();
 
   if (existing && !findError) {
-    return mapDbToAgentSession(existing as Record<string, unknown>) as AgentSession;
+    return mapDbToAgentSession(
+      existing as Record<string, unknown>,
+    ) as AgentSession;
   }
 
   // Create new session
@@ -70,14 +72,16 @@ export async function getOrCreateAgentSession(
   }
 
   console.log(`[agents] Created agent session for ${modelId}`);
-  return mapDbToAgentSession(newSession as Record<string, unknown>) as AgentSession;
+  return mapDbToAgentSession(
+    newSession as Record<string, unknown>,
+  ) as AgentSession;
 }
 
 /**
  * Get all agent sessions for a trading session
  */
 export async function getAgentSessions(
-  sessionId: string
+  sessionId: string,
 ): Promise<AgentSession[]> {
   const client = createServerClient();
   if (!client) return [];
@@ -94,7 +98,7 @@ export async function getAgentSessions(
   }
 
   return (data || []).map(
-    (row: Record<string, unknown>) => mapDbToAgentSession(row) as AgentSession
+    (row: Record<string, unknown>) => mapDbToAgentSession(row) as AgentSession,
   );
 }
 
@@ -104,7 +108,7 @@ export async function getAgentSessions(
 export async function updateAgentSessionValue(
   agentSessionId: string,
   currentValue: number,
-  totalPnl: number
+  totalPnl: number,
 ): Promise<void> {
   const client = createServerClient();
   if (!client) throw new Error("Supabase not configured");
@@ -141,7 +145,7 @@ export interface RecordDecisionInput {
  * Record an agent decision to the database
  */
 export async function recordAgentDecision(
-  input: RecordDecisionInput
+  input: RecordDecisionInput,
 ): Promise<AgentDecision> {
   const client = createServerClient();
   if (!client) throw new Error("Supabase not configured");
@@ -175,7 +179,8 @@ export async function recordAgentDecision(
     id: row.id as string,
     agentSessionId: row.agent_session_id as string,
     triggerType: row.trigger_type as TriggerType,
-    triggerDetails: (row.trigger_details as Record<string, unknown>) ?? undefined,
+    triggerDetails:
+      (row.trigger_details as Record<string, unknown>) ?? undefined,
     marketTicker: (row.market_ticker as string) ?? undefined,
     marketTitle: (row.market_title as string) ?? undefined,
     decision: row.decision as DecisionType,
@@ -192,7 +197,7 @@ export async function recordAgentDecision(
  */
 export async function getDecisions(
   sessionId: string,
-  limit = 100
+  limit = 100,
 ): Promise<
   Array<{
     decision: AgentDecision;
@@ -210,7 +215,7 @@ export async function getDecisions(
       *,
       agent_sessions!inner(session_id, model_id, model_name),
       agent_trades(id, side, action, quantity, price, notional)
-    `
+    `,
     )
     .eq("agent_sessions.session_id", sessionId)
     .order("created_at", { ascending: true })
@@ -227,27 +232,30 @@ export async function getDecisions(
       model_id: string;
       model_name: string;
     };
-    const agentTrades = (row.agent_trades as Array<{
-      id: string;
-      side: "yes" | "no";
-      action: "buy" | "sell";
-      quantity: number;
-      price: number;
-      notional: number;
-    }>) || [];
+    const agentTrades =
+      (row.agent_trades as Array<{
+        id: string;
+        side: "yes" | "no";
+        action: "buy" | "sell";
+        quantity: number;
+        price: number;
+        notional: number;
+      }>) || [];
 
     return {
       decision: {
         id: row.id as string,
         agentSessionId: row.agent_session_id as string,
         triggerType: row.trigger_type as TriggerType,
-        triggerDetails: (row.trigger_details as Record<string, unknown>) ?? undefined,
+        triggerDetails:
+          (row.trigger_details as Record<string, unknown>) ?? undefined,
         marketTicker: (row.market_ticker as string) ?? undefined,
         marketTitle: (row.market_title as string) ?? undefined,
         decision: row.decision as DecisionType,
         reasoning: row.reasoning as string,
         confidence: (row.confidence as number) ?? undefined,
-        marketContext: (row.market_context as Record<string, unknown>) ?? undefined,
+        marketContext:
+          (row.market_context as Record<string, unknown>) ?? undefined,
         portfolioValueAfter: row.portfolio_value_after as number,
         createdAt: new Date(row.created_at as string),
       },
@@ -294,7 +302,7 @@ export interface RecordTradeInput {
  * Record an executed trade to the database
  */
 export async function recordAgentTrade(
-  input: RecordTradeInput
+  input: RecordTradeInput,
 ): Promise<AgentTrade> {
   const client = createServerClient();
   if (!client) throw new Error("Supabase not configured");
@@ -347,7 +355,7 @@ export async function recordAgentTrade(
  */
 export async function getAgentTrades(
   sessionId: string,
-  limit = 100
+  limit = 100,
 ): Promise<AgentTrade[]> {
   const client = createServerClient();
   if (!client) return [];
@@ -358,7 +366,7 @@ export async function getAgentTrades(
       `
       *,
       agent_sessions!inner(session_id)
-    `
+    `,
     )
     .eq("agent_sessions.session_id", sessionId)
     .order("created_at", { ascending: false })
@@ -393,9 +401,90 @@ export async function getAgentTrades(
 /**
  * Get chart data for performance visualization
  */
+// ============================================================================
+// Position Queries
+// ============================================================================
+
+/**
+ * Get market tickers where an agent currently holds a position.
+ * Derives from agent_trades by calculating net quantity (buys - sells) per ticker.
+ */
+export async function getAgentHeldTickers(
+  agentSessionId: string,
+): Promise<string[]> {
+  const client = createServerClient();
+  if (!client) return [];
+
+  const { data, error } = await client
+    .from("agent_trades")
+    .select("market_ticker, action, quantity")
+    .eq("agent_session_id", agentSessionId);
+
+  if (error || !data) {
+    console.error("[agents] Failed to fetch trades for positions:", error);
+    return [];
+  }
+
+  // Aggregate net quantity per ticker
+  const positions = new Map<string, number>();
+
+  for (const row of data as Array<{
+    market_ticker: string;
+    action: string;
+    quantity: number;
+  }>) {
+    const current = positions.get(row.market_ticker) || 0;
+    const delta = row.action === "buy" ? row.quantity : -row.quantity;
+    positions.set(row.market_ticker, current + delta);
+  }
+
+  // Return tickers with positive net quantity
+  return Array.from(positions.entries())
+    .filter(([, qty]) => qty > 0)
+    .map(([ticker]) => ticker);
+}
+
+/**
+ * Get all agents (by modelId) that hold a position in a specific market ticker.
+ */
+export async function getAgentsHoldingTicker(
+  sessionId: string,
+  marketTicker: string,
+): Promise<string[]> {
+  const client = createServerClient();
+  if (!client) return [];
+
+  // Get all agent sessions for this trading session
+  const { data: sessions, error: sessionsError } = await client
+    .from("agent_sessions")
+    .select("id, model_id")
+    .eq("session_id", sessionId);
+
+  if (sessionsError || !sessions) {
+    console.error("[agents] Failed to fetch agent sessions:", sessionsError);
+    return [];
+  }
+
+  // For each agent, check if they hold this ticker
+  const holdingAgents: string[] = [];
+
+  for (const session of sessions as Array<{ id: string; model_id: string }>) {
+    const heldTickers = await getAgentHeldTickers(session.id);
+    if (heldTickers.includes(marketTicker)) {
+      holdingAgents.push(session.model_id);
+    }
+  }
+
+  return holdingAgents;
+}
+
+// ============================================================================
+// Chart Data
+// ============================================================================
+
 export async function getChartData(
   sessionId: string,
-  hoursBack = 24
+  hoursBack = 24,
 ): Promise<
   Array<{
     timestamp: string;
@@ -415,7 +504,7 @@ export async function getChartData(
       created_at,
       portfolio_value_after,
       agent_sessions!inner(session_id, model_name)
-    `
+    `,
     )
     .eq("agent_sessions.session_id", sessionId)
     .gte("created_at", since)

@@ -1,8 +1,18 @@
-import type { Party, PartyKitServer, Connection } from "partykit/server";
+import type { Room, PartyKitServer, Connection } from "partykit/server";
+
+// Cloudflare Workers WebSocket with accept() method for server-side connections
+interface CFWebSocket extends WebSocket {
+  accept(): void;
+}
+
+// Cloudflare Workers Response type with WebSocket upgrade support
+interface CFWebSocketResponse extends Response {
+  webSocket: CFWebSocket | null;
+}
 
 const DFLOW_WS_URL = "wss://prediction-markets-api.dflow.net/api/v1/ws";
-const SWING_THRESHOLD = 0.05; // 5% price change
-const VOLUME_SPIKE_MULTIPLIER = 5; // 5x average volume
+const SWING_THRESHOLD = 0.1; // 10% price change
+const VOLUME_SPIKE_MULTIPLIER = 10; // 10x average volume
 
 interface PriceMessage {
   channel: "prices";
@@ -53,7 +63,7 @@ export default class DflowRelay implements PartyKitServer {
   private priceCache = new Map<string, number>();
   private tradeVolumes = new Map<string, number[]>(); // Rolling window
 
-  constructor(readonly room: Party) {}
+  constructor(readonly room: Room) {}
 
   // Called when the room is created
   async onStart() {
@@ -61,56 +71,88 @@ export default class DflowRelay implements PartyKitServer {
     this.connectToDflow();
   }
 
-  // Connect to dflow WebSocket
-  private connectToDflow() {
+  // Connect to dflow WebSocket using fetch-based upgrade (allows custom headers)
+  private async connectToDflow() {
     console.log("[dflow-relay] Connecting to dflow WebSocket");
 
-    this.dflowWs = new WebSocket(DFLOW_WS_URL);
+    const apiKey = this.room.env.DFLOW_API_KEY as string | undefined;
+    if (!apiKey) {
+      console.error("[dflow-relay] Missing DFLOW_API_KEY environment variable");
+      return;
+    }
 
-    this.dflowWs.onopen = () => {
+    try {
+      // Use fetch with Upgrade header to perform WebSocket handshake with custom headers
+      // This is the Cloudflare Workers way to connect to WebSockets with auth headers
+      const response = await fetch(DFLOW_WS_URL.replace("wss://", "https://"), {
+        headers: {
+          Upgrade: "websocket",
+          "x-api-key": apiKey,
+        },
+      });
+
+      const ws = (response as unknown as CFWebSocketResponse).webSocket;
+      if (!ws) {
+        console.error(
+          "[dflow-relay] Failed to establish WebSocket connection, status:",
+          response.status,
+        );
+        setTimeout(() => this.connectToDflow(), 5000);
+        return;
+      }
+
+      // Accept the WebSocket connection (required for Cloudflare Workers WebSockets)
+      ws.accept();
+      this.dflowWs = ws as unknown as WebSocket;
+
       console.log("[dflow-relay] Connected to dflow");
 
-      // Subscribe to all channels
-      this.dflowWs!.send(
+      // Subscribe to all channels immediately after accept()
+      // (Cloudflare WebSockets are already "open" after accept())
+      this.dflowWs.send(
         JSON.stringify({
           type: "subscribe",
           channel: "prices",
           all: true,
-        })
+        }),
       );
-      this.dflowWs!.send(
+      this.dflowWs.send(
         JSON.stringify({
           type: "subscribe",
           channel: "trades",
           all: true,
-        })
+        }),
       );
-      this.dflowWs!.send(
+      this.dflowWs.send(
         JSON.stringify({
           type: "subscribe",
           channel: "orderbook",
           all: true,
-        })
+        }),
       );
-    };
 
-    this.dflowWs.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data as string) as DflowMessage;
-        this.handleDflowMessage(msg);
-      } catch (error) {
-        console.error("[dflow-relay] Failed to parse message:", error);
-      }
-    };
+      // Set up event handlers
+      this.dflowWs.addEventListener("message", (event: MessageEvent) => {
+        try {
+          const msg = JSON.parse(event.data as string) as DflowMessage;
+          this.handleDflowMessage(msg);
+        } catch (error) {
+          console.error("[dflow-relay] Failed to parse message:", error);
+        }
+      });
 
-    this.dflowWs.onclose = () => {
-      console.log("[dflow-relay] Connection closed, reconnecting in 1s...");
-      setTimeout(() => this.connectToDflow(), 1000);
-    };
+      this.dflowWs.addEventListener("close", () => {
+        console.log("[dflow-relay] Connection closed, reconnecting in 1s...");
+        setTimeout(() => this.connectToDflow(), 1000);
+      });
 
-    this.dflowWs.onerror = (error) => {
-      console.error("[dflow-relay] WebSocket error:", error);
-    };
+      this.dflowWs.addEventListener("error", (error: Event) => {
+        console.error("[dflow-relay] WebSocket error:", error);
+      });
+    } catch (error) {
+      console.error("[dflow-relay] Failed to connect:", error);
+      setTimeout(() => this.connectToDflow(), 5000);
+    }
   }
 
   // Handle incoming dflow messages
@@ -125,7 +167,8 @@ export default class DflowRelay implements PartyKitServer {
         signal = this.detectVolumeSpike(msg);
         break;
       case "orderbook":
-        signal = this.detectOrderbookImbalance(msg);
+        // DISABLED: Too noisy for position management
+        // signal = this.detectOrderbookImbalance(msg);
         break;
     }
 
@@ -156,7 +199,7 @@ export default class DflowRelay implements PartyKitServer {
         console.log(
           `[dflow-relay] Price swing detected: ${msg.market_ticker} ${(
             change * 100
-          ).toFixed(2)}%`
+          ).toFixed(2)}%`,
         );
         return {
           type: "price_swing",
@@ -198,7 +241,7 @@ export default class DflowRelay implements PartyKitServer {
       console.log(
         `[dflow-relay] Volume spike detected: ${ticker} ${
           msg.count
-        } vs avg ${avgVolume.toFixed(0)}`
+        } vs avg ${avgVolume.toFixed(0)}`,
       );
       return {
         type: "volume_spike",
@@ -222,19 +265,19 @@ export default class DflowRelay implements PartyKitServer {
     // Safely handle potentially missing fields with defaults
     const yesBidDepth = Object.values(msg.yes_bids || {}).reduce(
       (a, b) => a + b,
-      0
+      0,
     );
     const yesAskDepth = Object.values(msg.yes_asks || {}).reduce(
       (a, b) => a + b,
-      0
+      0,
     );
     const noBidDepth = Object.values(msg.no_bids || {}).reduce(
       (a, b) => a + b,
-      0
+      0,
     );
     const noAskDepth = Object.values(msg.no_asks || {}).reduce(
       (a, b) => a + b,
-      0
+      0,
     );
 
     // Total depth on each side (YES vs NO)
@@ -250,7 +293,7 @@ export default class DflowRelay implements PartyKitServer {
       console.log(
         `[dflow-relay] Orderbook imbalance: ${
           msg.market_ticker
-        } ratio ${ratio.toFixed(2)}`
+        } ratio ${ratio.toFixed(2)}`,
       );
       return {
         type: "orderbook_imbalance",
@@ -272,20 +315,20 @@ export default class DflowRelay implements PartyKitServer {
     return null;
   }
 
-  // Trigger trading agents via Vercel API
+  /**
+   * Trigger agents via Vercel API with position filtering.
+   * The trigger endpoint handles filtering to only agents holding the ticker.
+   */
   private async triggerAgents(signal: Signal) {
     const vercelUrl = this.room.env.VERCEL_URL as string | undefined;
     const webhookSecret = this.room.env.WEBHOOK_SECRET as string | undefined;
 
     if (!vercelUrl || !webhookSecret) {
-      console.warn(
-        "[dflow-relay] Missing VERCEL_URL or WEBHOOK_SECRET, skipping agent trigger"
-      );
+      console.warn("[dflow-relay] Missing VERCEL_URL or WEBHOOK_SECRET");
       return;
     }
 
     try {
-      // Trigger all agents with the market signal
       const response = await fetch(`${vercelUrl}/api/agents/trigger`, {
         method: "POST",
         headers: {
@@ -295,18 +338,29 @@ export default class DflowRelay implements PartyKitServer {
         body: JSON.stringify({
           signal,
           triggerType: "market",
+          filterByPosition: true, // Only trigger agents holding this ticker
         }),
       });
 
       if (!response.ok) {
         console.error(
-          `[dflow-relay] Failed to trigger agents: ${response.status}`
+          `[dflow-relay] Failed to trigger agents: ${response.status}`,
         );
       } else {
-        const result = await response.json();
-        console.log(
-          `[dflow-relay] Triggered ${result.triggered} agents for ${signal.ticker}`
-        );
+        const result = (await response.json()) as {
+          spawned: number;
+          failed: number;
+          message?: string;
+        };
+        if (result.spawned > 0) {
+          console.log(
+            `[dflow-relay] Triggered ${result.spawned} agent(s) for ${signal.ticker}`,
+          );
+        } else {
+          console.log(
+            `[dflow-relay] ${result.message || "No agents triggered"}`,
+          );
+        }
       }
     } catch (error) {
       console.error("[dflow-relay] Error triggering agents:", error);

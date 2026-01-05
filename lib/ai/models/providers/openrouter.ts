@@ -1,43 +1,14 @@
-import { createOpenAI } from "@ai-sdk/openai";
-import { customProvider } from "ai";
-import { MODELS } from "../catalog";
-
-const REDPILL_BASE_URL = "https://api.redpill.ai/v1";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 
 /**
- * Base OpenRouter client using OpenAI-compatible API
- */
-const openrouterBase = createOpenAI({
-  baseURL: REDPILL_BASE_URL,
-  apiKey: process.env.REDPILL_API_KEY ?? "",
-});
-
-/**
- * Generate language models from the catalog.
- * Maps model IDs like "openrouter/gpt-4o" to short names like "gpt-4o".
- */
-const languageModels = Object.fromEntries(
-  MODELS.filter((m) => m.provider === "openrouter").map((model) => {
-    // Extract short name from ID (e.g., "openrouter/gpt-4o" -> "gpt-4o")
-    const shortName = model.id.replace("openrouter/", "");
-    return [shortName, openrouterBase.chat(shortName)];
-  })
-);
-
-/**
- * OpenRouter custom provider with models generated from catalog.
+ * OpenRouter provider using the official AI SDK provider.
  *
- * Available models (from catalog):
- * - gpt-4o, gpt-4o-mini
- * - claude-sonnet-4, claude-3.5-haiku
- * - gemini-2.0-flash
- * - deepseek-chat
- * - llama-3.3-70b
- * - mistral-large
+ * Supports any OpenRouter model ID (e.g., "openai/gpt-4o", "anthropic/claude-3.5-sonnet").
  *
- * Also supports any OpenRouter model ID via fallback.
+ * Usage:
+ *   import { openrouter } from "@/lib/ai/models";
+ *   const model = openrouter.chat("openai/gpt-4o");
  */
-export const openrouter = customProvider({
-  languageModels,
-  fallbackProvider: openrouterBase,
+export const openrouter = createOpenRouter({
+  apiKey: process.env.OPENROUTER_API_KEY ?? "",
 });

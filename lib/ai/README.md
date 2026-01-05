@@ -71,7 +71,7 @@ import { tradingAgentWorkflow } from "@/lib/ai/workflows";
 
 // Workflow is triggered via POST /api/chat
 const input = {
-  modelId: "openrouter/gpt-4o",
+  modelId: "openai/gpt-5.2",
   walletAddress: "...",
   signal: { type: "price_swing", ticker: "BTC", ... }  // Optional
 };
@@ -105,12 +105,14 @@ interface AgentRunInput {
 
 ```typescript
 interface MarketSignal {
-  type: "price_swing" | "volume_spike" | "orderbook_imbalance";
+  type: "price_swing" | "volume_spike";
   ticker: string;
   data: Record<string, unknown>;
   timestamp: number;
 }
 ```
+
+**Note**: `orderbook_imbalance` was disabled as it's too noisy for position management.
 
 ## Tools
 
@@ -437,16 +439,77 @@ CRON_SECRET=...
 ## Data Flow
 
 ```
-Signal (PartyKit) → POST /api/chat → tradingAgentWorkflow
-                                          │
-                    ┌─────────────────────┼─────────────────────┐
-                    ▼                     ▼                     ▼
-              fetchBalanceStep      runAgentStep         recordResultsStep
-                    │                     │                     │
-                    ▼                     ▼                     ▼
-              USDC balance          Agent uses tools       Supabase write
-                                    (discoverEvent,        (agent_decisions)
-                                     increasePosition,          │
-                                     retrievePosition)          ▼
-                                                          Realtime update
+Signal (PartyKit) → POST /api/agents/trigger → tradingAgentWorkflow
+                                                     │
+                    ┌────────────────────────────────┼────────────────────────┐
+                    ▼                                ▼                        ▼
+              fetchBalanceStep                 runAgentStep           recordResultsStep
+                    │                                │                        │
+                    ▼                                ▼                        ▼
+              USDC balance                     Agent uses tools          Supabase write
+                                               (discoverEvent,           (agent_decisions)
+                                                increasePosition,             │
+                                                retrievePosition)             ▼
+                                                                        Realtime update
+```
+
+## Agent Trigger Architecture
+
+The trigger system separates **position management** (real-time, filtered) from **market discovery** (periodic cron).
+
+### Trigger Types
+
+| Trigger Type       | Purpose                       | Frequency      | Which Agents                           |
+| ------------------ | ----------------------------- | -------------- | -------------------------------------- |
+| **Cron**           | Market discovery + portfolio  | Every 5 min    | All agents                             |
+| **Position Signal**| React to held position moves  | Real-time      | Only agents holding that ticker        |
+
+### Signal Detection (dflow-relay)
+
+The PartyKit relay (`party/dflow-relay.ts`) monitors dflow WebSocket and detects:
+
+| Signal         | Threshold   | Use Case                    |
+| -------------- | ----------- | --------------------------- |
+| `price_swing`  | 10% change  | Position P&L impact         |
+| `volume_spike` | 10x average | Momentum/news indicator     |
+
+### Position Filtering
+
+When `filterByPosition: true` is passed to the trigger endpoint:
+
+1. Query `agent_trades` to derive net positions per agent
+2. Filter to only agents with positive holdings in the signaled ticker
+3. Skip agents that already have an active workflow running
+
+```typescript
+// lib/supabase/agents.ts
+getAgentHeldTickers(agentSessionId)   // → ["BTC-100K", "ETH-5K"]
+getAgentsHoldingTicker(sessionId, ticker) // → ["openai/gpt-5.2", "anthropic/claude-sonnet-4.5"]
+```
+
+### Key Constraints
+
+1. **One workflow per agent at a time** - Skip triggers if agent already has active workflow
+2. **Derive positions from `agent_trades`** - No new table, calculate net quantity on demand
+3. **Filtered signals** - Only `price_swing` (10%) and `volume_spike` (10x) for positions
+
+### Architecture Flow
+
+**Cron Trigger (Market Discovery)**
+```
+Every 5 min
+  → /api/agents/cron
+  → All agents (if not already running)
+  → buildPeriodicPrompt()
+  → Agent discovers markets + reviews portfolio
+```
+
+**Position Signal (Real-time)**
+```
+dflow WebSocket
+  → price_swing or volume_spike detected
+  → POST /api/agents/trigger { signal, filterByPosition: true }
+  → Trigger endpoint filters to agents holding ticker
+  → Only those agents spawn workflows
+  → buildSignalPrompt() with signal context
 ```

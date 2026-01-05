@@ -4,7 +4,9 @@ import { useMemo, useEffect, useRef } from "react";
 import { MessageSquare, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { useChat } from "@/hooks/chat/useChat";
+import { getSeriesLogoPath } from "@/lib/ai/models/catalog";
 import type {
   ArenaModel,
   ChatMessage as ChatMessageType,
@@ -38,15 +40,25 @@ function MessageBubble({
   const createdAt = message.metadata?.createdAt ?? 0;
   const name = modelInfo?.name ?? "Model";
   const color = modelInfo?.color ?? "#6366f1";
+  const logoPath = getSeriesLogoPath(name);
+  const initial = name.charAt(0).toUpperCase();
 
   return (
     <div className="flex gap-3 p-3 rounded-lg bg-muted/30">
-      <div
-        className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
-        style={{ backgroundColor: color }}
+      <Avatar
+        className="size-7 ring-[1.5px] ring-offset-0 bg-background shrink-0"
+        style={{ ["--tw-ring-color" as string]: color }}
       >
-        {name.charAt(0).toUpperCase()}
-      </div>
+        {logoPath ? (
+          <AvatarImage src={logoPath} alt={`${name} logo`} className="p-0.5" />
+        ) : null}
+        <AvatarFallback
+          className="text-[10px] font-semibold text-foreground"
+          style={{ backgroundColor: `${color}20` }}
+        >
+          {initial}
+        </AvatarFallback>
+      </Avatar>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
           <span className="font-medium text-sm">{name}</span>

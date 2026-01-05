@@ -1,92 +1,94 @@
-import { createOpenAI } from "@ai-sdk/openai";
-import {
-  customProvider,
-  wrapLanguageModel,
-  defaultSettingsMiddleware,
-} from "ai";
-import { MODELS } from "../catalog";
+import { aimoNetwork } from "@aimo.network/provider";
+import { SvmClientSigner, SOLANA_MAINNET_CHAIN_ID } from "@aimo.network/svm";
+import { createKeyPairSignerFromBytes, getBase58Encoder } from "@solana/kit";
 
-const AIMO_BASE_URL = "https://api.aimo.ai/v1";
+const AIMO_BASE_URL = "https://beta.aimo.network";
 
 /**
- * Base AiMo OpenAI-compatible client
+ * Wallet private key mapping by model series.
  */
-const aimoBase = createOpenAI({
-  baseURL: AIMO_BASE_URL,
-  apiKey: process.env.AIMO_API_KEY ?? "",
-});
+const WALLET_PRIVATE_KEYS: Record<string, string | undefined> = {
+  openai: process.env.WALLET_OPENAI_PRIVATE,
+  claude: process.env.WALLET_CLAUDE_PRIVATE,
+  deepseek: process.env.WALLET_DEEPSEEK_PRIVATE,
+  glm: process.env.WALLET_GLM_PRIVATE,
+  grok: process.env.WALLET_GROK_PRIVATE,
+  qwen: process.env.WALLET_QWEN_PRIVATE,
+  gemini: process.env.WALLET_GEMINI_PRIVATE,
+  kimi: process.env.WALLET_KIMI_PRIVATE,
+};
 
 /**
- * Generate language models from the catalog.
- * AiMo shares the same model catalog as OpenRouter.
- * Maps model IDs like "openrouter/gpt-4o" to short names like "gpt-4o".
+ * Cache of initialized providers per series.
  */
-const catalogModels = Object.fromEntries(
-  MODELS.filter((m) => m.provider === "openrouter").map((model) => {
-    // Extract short name from ID (e.g., "openrouter/gpt-4o" -> "gpt-4o")
-    const shortName = model.id.replace("openrouter/", "");
-    return [shortName, aimoBase.chat(shortName)];
-  })
-);
-
-// Default model for aliases (first model in catalog)
-const defaultModelId =
-  MODELS.find((m) => m.provider === "openrouter")?.id.replace(
-    "openrouter/",
-    ""
-  ) ?? "openai/gpt-5.2";
+const providerCache = new Map<string, ReturnType<typeof aimoNetwork>>();
 
 /**
- * AiMo custom provider with models generated from catalog.
+ * Create an AiMo Network provider with the specified wallet.
+ */
+async function createProviderWithWallet(privateKeyBase58: string) {
+  const encoder = getBase58Encoder();
+  const secretKeyBytes = encoder.encode(privateKeyBase58);
+  const keypairSigner = await createKeyPairSignerFromBytes(secretKeyBytes);
+
+  const signer = new SvmClientSigner({
+    signer: keypairSigner,
+    chainId: SOLANA_MAINNET_CHAIN_ID,
+  });
+
+  return aimoNetwork({
+    signer,
+    baseURL: AIMO_BASE_URL,
+  });
+}
+
+/**
+ * Get series from model ID.
+ * e.g., "openai/gpt-5.2" -> "openai"
+ */
+function getSeriesFromModelId(modelId: string): string {
+  return modelId.split("/")[0];
+}
+
+/**
+ * Get an AiMo provider for a specific model.
+ * Each model uses its own wallet for API payments.
  *
- * Shares the same model catalog as OpenRouter, plus provides
- * convenience aliases for common use cases:
- * - fast: Lower temperature for quick responses
- * - creative: Higher temperature for creative writing
- * - precise: Very low temperature for accurate responses
+ * @param modelId - Model ID (e.g., "openai/gpt-5.2")
+ * @returns AiMo provider configured with the model's wallet
  */
-export const aimo = customProvider({
-  languageModels: {
-    ...catalogModels,
+export async function getAimoProvider(modelId: string) {
+  const series = getSeriesFromModelId(modelId);
 
-    // Alias: fast responses with lower temperature
-    fast: wrapLanguageModel({
-      model: aimoBase.chat(defaultModelId),
-      middleware: [
-        defaultSettingsMiddleware({
-          settings: {
-            temperature: 0.7,
-            maxOutputTokens: 1000,
-          },
-        }),
-      ],
-    }),
+  // Return cached provider if available
+  const cached = providerCache.get(series);
+  if (cached) {
+    return cached;
+  }
 
-    // Alias: creative writing with higher temperature
-    creative: wrapLanguageModel({
-      model: aimoBase.chat(defaultModelId),
-      middleware: [
-        defaultSettingsMiddleware({
-          settings: {
-            temperature: 1.0,
-          },
-        }),
-      ],
-    }),
+  // Get wallet for this series
+  const privateKey = WALLET_PRIVATE_KEYS[series];
+  if (!privateKey) {
+    throw new Error(
+      `No wallet configured for model series "${series}". Set WALLET_${series.toUpperCase()}_PRIVATE environment variable.`,
+    );
+  }
 
-    // Alias: precise responses with low temperature
-    precise: wrapLanguageModel({
-      model: aimoBase.chat(defaultModelId),
-      middleware: [
-        defaultSettingsMiddleware({
-          settings: {
-            temperature: 0.3,
-          },
-        }),
-      ],
-    }),
-  },
+  // Create and cache the provider
+  const provider = await createProviderWithWallet(privateKey);
+  providerCache.set(series, provider);
 
-  // Allow other model IDs to pass through
-  fallbackProvider: aimoBase,
-});
+  return provider;
+}
+
+/**
+ * Get a language model from AiMo Network.
+ * Uses the model's own wallet for API payments.
+ *
+ * @param modelId - Model ID (e.g., "openai/gpt-5.2")
+ * @returns Language model instance
+ */
+export async function getAimoModel(modelId: string) {
+  const provider = await getAimoProvider(modelId);
+  return provider.chat(modelId);
+}

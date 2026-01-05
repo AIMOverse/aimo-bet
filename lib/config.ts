@@ -35,9 +35,9 @@ export const PROVIDERS: ProviderConfig[] = [
   },
   {
     id: "aimo",
-    name: "AiMo",
-    baseUrl: "https://api.aimo.ai/v1",
-    envKey: "AIMO_API_KEY",
+    name: "AiMo Network",
+    baseUrl: "https://beta.aimo.network",
+    envKey: "AIMO_SIGNER_PRIVATE_KEY",
   },
 ];
 
@@ -97,7 +97,7 @@ export const DFLOW_METADATA_API_URL =
 // =============================================================================
 
 /** Default starting capital for new sessions */
-export const DEFAULT_STARTING_CAPITAL = 10000;
+export const DEFAULT_STARTING_CAPITAL = 100;
 
 /** Polling intervals in milliseconds */
 export const POLLING_INTERVALS = {

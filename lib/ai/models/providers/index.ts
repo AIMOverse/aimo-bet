@@ -3,4 +3,4 @@
 // ============================================================================
 
 export { openrouter } from "./openrouter";
-export { aimo } from "./aimo";
+export { getAimoProvider, getAimoModel } from "./aimo";

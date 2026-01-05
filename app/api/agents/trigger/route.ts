@@ -7,6 +7,8 @@ import {
   type MarketSignal,
 } from "@/lib/ai/workflows/tradingAgent";
 import { activeWorkflowsMap } from "@/app/api/agents/status/route";
+import { getGlobalSession } from "@/lib/supabase/db";
+import { getAgentsHoldingTicker } from "@/lib/supabase/agents";
 
 // ============================================================================
 // Agent Trigger Endpoint (Workflow-based)
@@ -31,6 +33,8 @@ interface TriggerRequest {
   triggerType: TriggerType;
   /** When true, uses test prompt that forces a $1-5 trade */
   testMode?: boolean;
+  /** When true, only trigger agents holding a position in signal.ticker */
+  filterByPosition?: boolean;
 }
 
 interface SpawnedWorkflow {
@@ -46,6 +50,7 @@ interface TriggerResponse {
   failed: number;
   workflows: SpawnedWorkflow[];
   errors: Array<{ modelId: string; error: string }>;
+  message?: string;
 }
 
 /**
@@ -66,12 +71,18 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = (await req.json()) as TriggerRequest;
-    const { modelId, signal, triggerType = "manual", testMode = false } = body;
+    const {
+      modelId,
+      signal,
+      triggerType = "manual",
+      testMode = false,
+      filterByPosition = false,
+    } = body;
 
     console.log(
       `[agents/trigger] Received trigger: type=${triggerType}, modelId=${
         modelId || "all"
-      }, signal=${signal?.type || "none"}`
+      }, signal=${signal?.type || "none"}, filterByPosition=${filterByPosition}`,
     );
 
     // Get models to trigger
@@ -96,13 +107,58 @@ export async function POST(req: NextRequest) {
     if (modelsToTrigger.length === 0) {
       return NextResponse.json(
         { error: `Model not found: ${modelId}` },
-        { status: 404 }
+        { status: 404 },
       );
+    }
+
+    // Filter to only agents holding the signaled ticker (for position-based triggers)
+    let filteredModels = modelsToTrigger;
+
+    if (filterByPosition && signal?.ticker) {
+      const session = await getGlobalSession();
+      const holdingModelIds = await getAgentsHoldingTicker(
+        session.id,
+        signal.ticker,
+      );
+
+      filteredModels = modelsToTrigger.filter((m) =>
+        holdingModelIds.includes(m.id),
+      );
+
+      console.log(
+        `[agents/trigger] Position filter: ${holdingModelIds.length} agents hold ${signal.ticker}, ` +
+          `triggering ${filteredModels.length} of ${modelsToTrigger.length}`,
+      );
+
+      if (filteredModels.length === 0) {
+        return NextResponse.json({
+          success: true,
+          triggerType,
+          signal: { type: signal.type, ticker: signal.ticker },
+          spawned: 0,
+          failed: 0,
+          workflows: [],
+          errors: [],
+          message: `No agents hold position in ${signal.ticker}`,
+        } satisfies TriggerResponse);
+      }
     }
 
     // Spawn workflows for all models in parallel
     const results = await Promise.allSettled(
-      modelsToTrigger.map(async (model): Promise<SpawnedWorkflow> => {
+      filteredModels.map(async (model): Promise<SpawnedWorkflow> => {
+        // Check if agent already has active workflow (one workflow per agent at a time)
+        const existingRun = Array.from(activeWorkflowsMap.entries()).find(
+          ([, meta]) => meta.modelId === model.id,
+        );
+
+        if (existingRun) {
+          console.log(
+            `[agents/trigger] Skipping ${model.id}, workflow already running: ${existingRun[0]}`,
+          );
+          throw new Error("Workflow already running");
+        }
+
         const input: TradingInput = {
           modelId: model.id,
           walletAddress: model.walletAddress!,
@@ -120,14 +176,14 @@ export async function POST(req: NextRequest) {
         });
 
         console.log(
-          `[agents/trigger] Spawned workflow for ${model.id}: ${run.runId}`
+          `[agents/trigger] Spawned workflow for ${model.id}: ${run.runId}`,
         );
 
         return {
           modelId: model.id,
           runId: run.runId,
         };
-      })
+      }),
     );
 
     // Collect results
@@ -135,7 +191,7 @@ export async function POST(req: NextRequest) {
     const errors: Array<{ modelId: string; error: string }> = [];
 
     results.forEach((result, index) => {
-      const model = modelsToTrigger[index];
+      const model = filteredModels[index];
       if (result.status === "fulfilled") {
         workflows.push(result.value);
       } else {
@@ -150,7 +206,7 @@ export async function POST(req: NextRequest) {
     });
 
     console.log(
-      `[agents/trigger] Spawned ${workflows.length} workflows, ${errors.length} failed`
+      `[agents/trigger] Spawned ${workflows.length} workflows, ${errors.length} failed`,
     );
 
     return NextResponse.json({
@@ -169,7 +225,7 @@ export async function POST(req: NextRequest) {
         error: "Internal server error",
         details: error instanceof Error ? error.message : "Unknown error",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

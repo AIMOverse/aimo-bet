@@ -28,7 +28,7 @@ export {
 } from "@/lib/config";
 
 // Provider instances
-export { openrouter, aimo } from "./providers";
+export { openrouter, getAimoProvider, getAimoModel } from "./providers";
 
-// Registry and model access
-export { registry, getModel } from "./registry";
+// Model access
+export { getModel } from "./registry";

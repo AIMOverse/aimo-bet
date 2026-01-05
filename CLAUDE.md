@@ -1,266 +1,370 @@
-# "Dead" Model State for PerformanceChart
+# Agent Trigger Architecture Refactor
 
-Add visual indication when an LLM model's portfolio value drops to 0 or below ("dies"). Dead models display with muted grey styling across all UI elements.
+Refactor the agent workflow trigger system to separate **position management** (real-time, filtered) from **market discovery** (periodic cron).
 
 ---
 
 ## Overview
 
-When a model's `latestValue <= 0`, apply a "dead" state that persists for the session:
-- **Line**: Solid grey color
-- **Avatar/Logo**: CSS grayscale filter  
-- **Value number**: Grey/muted color
-- **Legend entry**: Grey/muted styling
+### Current Problem
+
+The `dflow-relay.ts` subscribes to ALL markets and triggers ALL agents on every signal. This causes:
+- 100+ triggers per minute during active markets
+- 7 agents × N signals = workflow explosion
+- Agents wake up for markets they don't hold
+
+### New Architecture
+
+| Trigger Type | Purpose | Frequency | Which Agents |
+|--------------|---------|-----------|--------------|
+| **Cron (periodic)** | Market discovery + portfolio review | Every 5 minutes | All agents |
+| **Position signal** | React to held position movements | Real-time (filtered) | Only agents holding that ticker |
+
+### Key Constraints
+
+1. **One workflow per agent at a time** - Skip triggers if agent already has active workflow
+2. **Derive positions from `agent_trades`** - No new table, calculate on demand
+3. **Filtered signals** - Only `price_swing` (10%) and `volume_spike` (10x) for positions
+4. **Exclude `orderbook_imbalance`** - Too noisy, fires constantly
 
 ---
 
-## Files to Modify
+## Implementation Guide
 
-### 1. `hooks/index/usePerformanceChart.ts`
+### Phase 1: Add Position Query Function
 
-**Changes:**
-- Add `deadModels: Set<string>` to track which models have died
-- Once a model's value `<= 0`, add to `deadModels` set (never removed)
-- Return `deadModels` from the hook
+**File:** `lib/supabase/agents.ts`
 
-**Updated Return Type:**
+Add function to derive held tickers from trade history:
 
 ```typescript
-interface UsePerformanceChartReturn {
-  chartData: ChartDataPoint[];
-  latestValues: Map<string, number>;
-  deadModels: Set<string>;  // NEW
-  loading: boolean;
-  error: Error | null;
-}
-```
+/**
+ * Get market tickers where an agent currently holds a position.
+ * Derives from agent_trades by calculating net quantity (buys - sells) per ticker.
+ */
+export async function getAgentHeldTickers(
+  agentSessionId: string
+): Promise<string[]> {
+  const client = createServerClient();
+  if (!client) return [];
 
-**Implementation Details:**
+  const { data, error } = await client
+    .from("agent_trades")
+    .select("market_ticker, action, quantity")
+    .eq("agent_session_id", agentSessionId);
 
-1. Add state: `const [deadModels, setDeadModels] = useState<Set<string>>(new Set());`
-
-2. In initial fetch, after setting `latestValues`, check each value:
-```typescript
-const dead = new Set<string>();
-for (const [modelName, value] of latest) {
-  if (value <= 0) {
-    dead.add(modelName);
+  if (error || !data) {
+    console.error("[agents] Failed to fetch trades for positions:", error);
+    return [];
   }
+
+  // Aggregate net quantity per ticker
+  const positions = new Map<string, number>();
+  
+  for (const trade of data) {
+    const current = positions.get(trade.market_ticker) || 0;
+    const delta = trade.action === "buy" ? trade.quantity : -trade.quantity;
+    positions.set(trade.market_ticker, current + delta);
+  }
+
+  // Return tickers with positive net quantity
+  return Array.from(positions.entries())
+    .filter(([_, qty]) => qty > 0)
+    .map(([ticker, _]) => ticker);
 }
-if (dead.size > 0) {
-  setDeadModels(dead);
+
+/**
+ * Get all agents (by modelId) that hold a position in a specific market ticker.
+ */
+export async function getAgentsHoldingTicker(
+  sessionId: string,
+  marketTicker: string
+): Promise<string[]> {
+  const client = createServerClient();
+  if (!client) return [];
+
+  // Get all agent sessions for this trading session
+  const { data: sessions, error: sessionsError } = await client
+    .from("agent_sessions")
+    .select("id, model_id")
+    .eq("session_id", sessionId);
+
+  if (sessionsError || !sessions) {
+    console.error("[agents] Failed to fetch agent sessions:", sessionsError);
+    return [];
+  }
+
+  // For each agent, check if they hold this ticker
+  const holdingAgents: string[] = [];
+
+  for (const session of sessions) {
+    const heldTickers = await getAgentHeldTickers(session.id);
+    if (heldTickers.includes(marketTicker)) {
+      holdingAgents.push(session.model_id);
+    }
+  }
+
+  return holdingAgents;
 }
 ```
-
-3. In realtime subscription handler, after updating `latestValues`:
-```typescript
-if (newPoint.portfolio_value_after <= 0) {
-  setDeadModels((prev) => new Set(prev).add(newPoint.model_name));
-}
-```
-
-4. Return `deadModels` in the hook return object
 
 ---
 
-### 2. `components/index/PerformanceChart.tsx`
+### Phase 2: Update Trigger Endpoint
 
-**Changes:**
+**File:** `app/api/agents/trigger/route.ts`
 
-#### Props Update
-Add `deadModels` to component props:
+#### 2.1 Add `filterByPosition` flag to request type
+
 ```typescript
-interface PerformanceChartProps {
-  data: ChartDataPoint[];
-  title?: string;
-  latestValues?: Map<string, number>;
-  leaderboard?: LeaderboardEntry[];
-  deadModels?: Set<string>;  // NEW
+interface TriggerRequest {
+  /** Specific model to trigger (omit to trigger all enabled models) */
+  modelId?: string;
+  /** Market signal data (for market-triggered runs) */
+  signal?: MarketSignal;
+  /** What initiated this trigger */
+  triggerType: TriggerType;
+  /** When true, uses test prompt that forces a $1-5 trade */
+  testMode?: boolean;
+  /** When true, only trigger agents holding a position in signal.ticker */
+  filterByPosition?: boolean;  // NEW
 }
 ```
 
-#### Constants
-Define the dead/muted grey color at the top:
-```typescript
-const DEAD_MODEL_COLOR = "hsl(var(--muted-foreground))"; // ~oklch(0.551 0.027 264.364) in dark mode
-```
+#### 2.2 Add position filtering logic
 
-#### Line Styling (in `modelNames.map()`)
-```typescript
-const isDead = deadModels?.has(name) ?? false;
-const lineColor = isDead ? DEAD_MODEL_COLOR : color;
-
-<Line
-  key={name}
-  type="monotone"
-  dataKey={name}
-  stroke={lineColor}  // Use grey if dead
-  strokeWidth={isHovered ? 3 : 2}
-  strokeOpacity={isDimmed ? 0.2 : (isDead ? 0.6 : 1)}  // Slightly faded if dead
-  // ... rest unchanged
->
-```
-
-#### LineEndLabel Component
-Add `isDead` prop and apply styles:
+After getting `modelsToTrigger`, add filtering:
 
 ```typescript
-interface LineEndLabelProps {
-  // ... existing props
-  isDead: boolean;  // NEW
-}
+const { modelId, signal, triggerType = "manual", testMode = false, filterByPosition = false } = body;
 
-function LineEndLabel({ /* ... */, isDead }: LineEndLabelProps) {
-  // Avatar with grayscale filter when dead
-  <Avatar
-    className={cn(
-      "size-5 ring-[1.5px] ring-offset-0 bg-background shrink-0",
-      isHovered && "ring-2",
-      isDead && "grayscale opacity-60"  // NEW: grayscale + muted
-    )}
-    style={{
-      ["--tw-ring-color" as string]: isDead ? DEAD_MODEL_COLOR : color,
-    }}
-  >
+// ... existing code to get modelsToTrigger ...
+
+// NEW: Filter to only agents holding the signaled ticker
+let filteredModels = modelsToTrigger;
+
+if (filterByPosition && signal?.ticker) {
+  const session = await getGlobalSession();
+  const holdingModelIds = await getAgentsHoldingTicker(session.id, signal.ticker);
   
-  // Value text color when dead
-  <span
-    className={cn(
-      "text-[11px] font-semibold whitespace-nowrap tabular-nums",
-      isDead && "text-muted-foreground",  // Grey when dead
-      !isDead && valueDisplay === "percent" && (isPositive ? "text-green-500" : "text-red-500"),
-    )}
-    style={{
-      color: isDead ? undefined : (valueDisplay === "dollar" ? color : undefined),
-    }}
-  >
-```
-
-Pass `isDead` when rendering LineEndLabel:
-```typescript
-<LineEndLabel
-  {...props}
-  dataLength={chartData.length}
-  modelName={name}
-  color={lineColor}
-  isHovered={isHovered}
-  isDimmed={isDimmed}
-  isDead={isDead}  // NEW
-  onHover={setHoveredModel}
-  latestValue={latestValues?.get(name) ?? DEFAULT_STARTING_CAPITAL}
-  valueDisplay={valueDisplay}
-/>
-```
-
-#### CustomLegend Component
-Add `deadModels` prop and apply styles:
-
-```typescript
-interface CustomLegendProps {
-  // ... existing props
-  deadModels?: Set<string>;  // NEW
-}
-
-function CustomLegend({ /* ... */, deadModels }: CustomLegendProps) {
-  // In the map function:
-  const isDead = deadModels?.has(model.name) ?? false;
+  filteredModels = modelsToTrigger.filter(m => holdingModelIds.includes(m.id));
   
-  return (
-    <div
-      key={model.name}
-      className={cn(
-        "flex items-center gap-1 px-1 rounded transition-opacity cursor-default text-xs",
-        "hover:bg-muted/50",
-        isDimmed && "opacity-30",
-        isDead && "opacity-60"  // Muted when dead
-      )}
-      // ...
-    >
-      <div
-        className="w-2 h-2 rounded-full shrink-0"
-        style={{ backgroundColor: isDead ? DEAD_MODEL_COLOR : model.color }}
-      />
-      <span className={cn("font-medium", isDead && "text-muted-foreground")}>
-        {model.name}
-      </span>
-      <span
-        className={cn(
-          "font-medium",
-          isDead ? "text-muted-foreground" : (isPositive ? "text-green-500" : "text-red-500")
-        )}
-      >
-        {/* ... percent display */}
-      </span>
-    </div>
+  console.log(
+    `[agents/trigger] Position filter: ${holdingModelIds.length} agents hold ${signal.ticker}, ` +
+    `triggering ${filteredModels.length} of ${modelsToTrigger.length}`
   );
+  
+  if (filteredModels.length === 0) {
+    return NextResponse.json({
+      success: true,
+      triggerType,
+      signal: { type: signal.type, ticker: signal.ticker },
+      spawned: 0,
+      failed: 0,
+      workflows: [],
+      errors: [],
+      message: `No agents hold position in ${signal.ticker}`,
+    } satisfies TriggerResponse);
+  }
 }
 ```
 
-Pass `deadModels` to CustomLegend:
+#### 2.3 Add active workflow check before spawning
+
 ```typescript
-<Legend
-  content={
-    <CustomLegend
-      latestValues={latestValues}
-      leaderboard={leaderboard}
-      hoveredModel={hoveredModel}
-      onModelHover={setHoveredModel}
-      deadModels={deadModels}  // NEW
-    />
-  }
-  verticalAlign="bottom"
-/>
+const results = await Promise.allSettled(
+  filteredModels.map(async (model): Promise<SpawnedWorkflow> => {
+    // NEW: Check if agent already has active workflow
+    const existingRun = Array.from(activeWorkflowsMap.entries())
+      .find(([_, meta]) => meta.modelId === model.id);
+
+    if (existingRun) {
+      console.log(`[agents/trigger] Skipping ${model.id}, workflow already running: ${existingRun[0]}`);
+      throw new Error("Workflow already running");
+    }
+
+    // ... rest of existing code
+  })
+);
+```
+
+#### 2.4 Add required imports
+
+```typescript
+import { getGlobalSession } from "@/lib/supabase/db";
+import { getAgentsHoldingTicker } from "@/lib/supabase/agents";
 ```
 
 ---
 
-## Styling Reference (from globals.css)
+### Phase 3: Update dflow-relay Signal Detection
 
-Using existing CSS variables for consistent theming:
-- `--muted-foreground`: `oklch(0.551 0.027 264.364)` (light) / `oklch(0.707 0.022 261.325)` (dark)
-- Access via: `hsl(var(--muted-foreground))` or Tailwind class `text-muted-foreground`
+**File:** `party/dflow-relay.ts`
+
+#### 3.1 Update Thresholds
+
+```typescript
+const SWING_THRESHOLD = 0.10; // 10% price change (was 0.05)
+const VOLUME_SPIKE_MULTIPLIER = 10; // 10x average volume (was 5)
+```
+
+#### 3.2 Disable Orderbook Imbalance Triggers
+
+```typescript
+// In handleDflowMessage(), comment out or remove orderbook signal:
+private async handleDflowMessage(msg: DflowMessage) {
+  let signal: Signal | null = null;
+
+  switch (msg.channel) {
+    case "prices":
+      signal = this.detectPriceSwing(msg);
+      break;
+    case "trades":
+      signal = this.detectVolumeSpike(msg);
+      break;
+    case "orderbook":
+      // DISABLED: Too noisy for position management
+      // signal = this.detectOrderbookImbalance(msg);
+      break;
+  }
+
+  // ... rest unchanged
+}
+```
+
+#### 3.3 Simplify triggerAgents() with filterByPosition flag
+
+Replace `triggerAgents()` with simplified version that uses the new flag:
+
+```typescript
+/**
+ * Trigger agents via Vercel API with position filtering.
+ * The trigger endpoint handles filtering to only agents holding the ticker.
+ */
+private async triggerAgents(signal: Signal) {
+  const vercelUrl = this.room.env.VERCEL_URL as string | undefined;
+  const webhookSecret = this.room.env.WEBHOOK_SECRET as string | undefined;
+
+  if (!vercelUrl || !webhookSecret) {
+    console.warn("[dflow-relay] Missing VERCEL_URL or WEBHOOK_SECRET");
+    return;
+  }
+
+  try {
+    const response = await fetch(`${vercelUrl}/api/agents/trigger`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${webhookSecret}`,
+      },
+      body: JSON.stringify({
+        signal,
+        triggerType: "market",
+        filterByPosition: true,  // NEW: Only trigger agents holding this ticker
+      }),
+    });
+
+    if (!response.ok) {
+      console.error(`[dflow-relay] Failed to trigger agents: ${response.status}`);
+    } else {
+      const result = await response.json() as { spawned: number; failed: number; message?: string };
+      if (result.spawned > 0) {
+        console.log(`[dflow-relay] Triggered ${result.spawned} agent(s) for ${signal.ticker}`);
+      } else {
+        console.log(`[dflow-relay] ${result.message || "No agents triggered"}`);
+      }
+    }
+  } catch (error) {
+    console.error("[dflow-relay] Error triggering agents:", error);
+  }
+}
+```
+
+---
+
+### Phase 4: Update Cron Schedule
+
+**File:** `vercel.json`
+
+Update cron schedule to 5 minutes:
+
+```json
+{
+  "crons": [
+    {
+      "path": "/api/agents/cron",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}
+```
 
 ---
 
 ## Implementation Checklist
 
-- [ ] `hooks/index/usePerformanceChart.ts`:
-  - [ ] Add `deadModels` state as `Set<string>`
-  - [ ] Check for dead models on initial fetch (`value <= 0`)
-  - [ ] Check for dead models on realtime update
-  - [ ] Return `deadModels` from hook
+### Phase 1: Position Query
+- [ ] Add `getAgentHeldTickers()` to `lib/supabase/agents.ts`
+- [ ] Add `getAgentsHoldingTicker()` to `lib/supabase/agents.ts`
+- [ ] Export new functions from module
 
-- [ ] `components/index/PerformanceChart.tsx`:
-  - [ ] Add `deadModels` to `PerformanceChartProps`
-  - [ ] Define `DEAD_MODEL_COLOR` constant
-  - [ ] Update Line stroke to use grey when dead
-  - [ ] Add `isDead` prop to `LineEndLabelProps`
-  - [ ] Apply `grayscale opacity-60` to Avatar when dead
-  - [ ] Apply `text-muted-foreground` to value text when dead
-  - [ ] Add `deadModels` prop to `CustomLegendProps`
-  - [ ] Apply grey styling to legend entries for dead models
+### Phase 2: Trigger Endpoint
+- [ ] Add `filterByPosition` flag to `TriggerRequest` interface
+- [ ] Add position filtering logic using `getAgentsHoldingTicker()`
+- [ ] Add active workflow check before spawning
+- [ ] Add imports for `getGlobalSession` and `getAgentsHoldingTicker`
+- [ ] Update response type to include optional `message` field
 
-- [ ] Update parent component (where `usePerformanceChart` is called):
-  - [ ] Pass `deadModels` to `PerformanceChart` component
+### Phase 3: dflow-relay Updates
+- [ ] Update `SWING_THRESHOLD` to 0.10 (10%)
+- [ ] Update `VOLUME_SPIKE_MULTIPLIER` to 10
+- [ ] Disable `orderbook_imbalance` detection
+- [ ] Update `triggerAgents()` to pass `filterByPosition: true`
 
----
-
-## Visual Summary
-
-| Element | Normal State | Dead State |
-|---------|--------------|------------|
-| Line | Model's `chartColor` | `hsl(var(--muted-foreground))` solid grey |
-| Avatar | Full color | `grayscale opacity-60` |
-| Ring | Model's `chartColor` | `hsl(var(--muted-foreground))` |
-| Value Number | Green/red or model color | `text-muted-foreground` |
-| Legend Dot | Model's `chartColor` | `hsl(var(--muted-foreground))` |
-| Legend Text | Normal + green/red % | `text-muted-foreground` |
+### Phase 4: Cron Schedule
+- [ ] Update `vercel.json` cron to `*/5 * * * *`
 
 ---
 
-## Notes
+## Signal Configuration Reference
 
-- **Threshold**: `<= 0` to handle floating point edge cases
-- **Persistence**: Once dead, always dead for the session (Set never removes items)
-- **Hover still works**: Dead models can still be hovered/highlighted, just with grey styling
-- **Consistent theming**: Uses existing `--muted-foreground` CSS variable for proper light/dark mode support
+| Signal | Enabled | Threshold | Use Case |
+|--------|---------|-----------|----------|
+| `price_swing` | Yes | 10% change | Position P&L impact |
+| `volume_spike` | Yes | 10x average | Momentum/news indicator |
+| `orderbook_imbalance` | No | - | Too noisy |
+
+---
+
+## Architecture Flow
+
+### Cron Trigger (Market Discovery)
+```
+Every 5 min
+  → /api/agents/cron
+  → All 7 agents (if not already running)
+  → buildPeriodicPrompt()
+  → discoverEvent + webSearch
+  → Agent decides to trade or hold
+```
+
+### Position Signal (Real-time)
+```
+dflow WebSocket
+  → price_swing or volume_spike detected
+  → POST /api/agents/trigger { signal, filterByPosition: true }
+  → Trigger endpoint filters to agents holding ticker
+  → Only those agents spawn workflows
+  → buildSignalPrompt() with signal context
+  → Agent decides to adjust position
+```
+
+---
+
+## Future Enhancements
+
+Once external data sources are added:
+
+1. **News-driven discovery**: Trigger discovery for specific categories when news breaks
+2. **Expiration alerts**: Notify agents when held positions approach expiration
+3. **Resolution detection**: Auto-trigger redeem workflow when markets resolve

@@ -224,6 +224,7 @@ export function createIncreasePositionTool(
         };
       } catch (error) {
         console.error("[increasePosition] Error:", error);
+
         return {
           success: false,
           market_ticker,

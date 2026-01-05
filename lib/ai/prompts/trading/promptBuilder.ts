@@ -126,8 +126,8 @@ Available USDC: $${usdcBalance.toFixed(2)}
 
 ## Instructions
 
-1. Use \`discoverEvent\` to find any active prediction market
-2. Pick the first available market with reasonable liquidity
+1. Use \`discoverEvent\` with category "crypto" to find active prediction markets
+2. Pick a market with a ticker starting with "KX" (e.g., KXBTC, KXETH, KXSOL)
 3. **Execute a trade between $1 and $5 USDC** - this is mandatory for testing
 4. Use \`increasePosition\` to buy either YES or NO tokens
 5. Report the trade details
@@ -137,5 +137,7 @@ Available USDC: $${usdcBalance.toFixed(2)}
 - This is a TEST - do not skip trading
 - Trade size: between $1 and $5 USDC (pick any amount in this range)
 - Pick any side (YES or NO) - the goal is to verify the trading pipeline works
-- If discoverEvent returns markets, you MUST trade one of them`;
+- **If a trade fails with "market not found", try a DIFFERENT market** - some markets in the listing may not be tradeable yet
+- Keep trying different markets until one succeeds (try at least 3 markets before giving up)
+- Prefer crypto markets (BTC, ETH, SOL) as they tend to be more reliable`;
 }

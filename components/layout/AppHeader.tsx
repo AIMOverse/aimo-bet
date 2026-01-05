@@ -2,6 +2,7 @@
 
 import { Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "../ui/badge";
 import { useTheme } from "next-themes";
 import Link from "next/link";
 
@@ -13,6 +14,7 @@ export function AppHeader() {
       {/* Left: Title + Status */}
       <div className="flex items-center gap-3">
         <h1 className="text-xl font-bold">AImoBET</h1>
+        <Badge variant="secondary">Season 0</Badge>
       </div>
 
       {/* Right: Links + Theme toggle */}
