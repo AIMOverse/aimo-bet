@@ -61,7 +61,7 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: false,
     supportsFunctions: true,
     providerIds: {
-      aimo: "deepseek/deepseek-v3.2",
+      aimo: "deepseek/deepseek-v3.2-exp",
       openrouter: "deepseek/deepseek-v3.2",
     },
     series: "deepseek",
@@ -71,7 +71,7 @@ export const MODELS: ModelDefinition[] = [
   },
   // GLM - glm-4.7
   {
-    id: "z-ai/glm-4.7",
+    id: "z-ai/glm-4.6",
     name: "GLM-4.7",
     provider: "aimo-network",
     contextLength: 128000,
@@ -80,8 +80,8 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: true,
     supportsFunctions: true,
     providerIds: {
-      aimo: "z-ai/glm-4.7",
-      openrouter: "z-ai/glm-4.7",
+      aimo: "z-ai/glm-4.6",
+      openrouter: "z-ai/glm-4.6",
     },
     series: "glm",
     chartColor: "#06b6d4", // Cyan
@@ -118,7 +118,7 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: true,
     supportsFunctions: true,
     providerIds: {
-      aimo: "qwen/qwen3-235b-a22b",
+      aimo: "alibaba/qwen3-235b-a22b",
       openrouter: "qwen/qwen3-max",
     },
     series: "qwen",
@@ -157,7 +157,7 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: true,
     supportsFunctions: true,
     providerIds: {
-      aimo: "moonshotai/kimi-k2",
+      aimo: "moonshot/kimi-k2",
       openrouter: "moonshotai/kimi-k2-0905",
     },
     series: "kimi",
