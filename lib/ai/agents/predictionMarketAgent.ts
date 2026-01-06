@@ -108,11 +108,14 @@ export class PredictionMarketAgent {
     }
 
     // Create ToolLoopAgent for this run
+    // - maxSteps: Limits LLM roundtrips (default 5, hard cap at 10)
+    // - maxOutputTokens: Limits verbose reasoning (saves inference cost)
     const agent = new ToolLoopAgent({
       model,
       instructions: TRADING_SYSTEM_PROMPT,
       tools,
-      stopWhen: stepCountIs(this.config.maxSteps ?? 10),
+      stopWhen: stepCountIs(Math.min(this.config.maxSteps ?? 5, 10)),
+      maxOutputTokens: 1024,
     });
 
     // Static prompt for KV cache optimization
@@ -171,8 +174,11 @@ export class PredictionMarketAgent {
     // Extract balance from getBalance tool result if available
     const portfolioValue = this.extractBalanceFromSteps(result.steps);
 
+    // Extract reasoning: use result.text or gather text from steps
+    const reasoning = this.extractReasoning(result.text, result.steps);
+
     return {
-      reasoning: result.text || "No reasoning provided.",
+      reasoning,
       trades,
       decision,
       steps: result.steps.length,
@@ -180,6 +186,32 @@ export class PredictionMarketAgent {
       marketTicker,
       marketTitle,
     };
+  }
+
+  /**
+   * Extract reasoning from agent result.
+   * Uses result.text if available, otherwise collects text from individual steps.
+   */
+  private extractReasoning(
+    finalText: string | undefined,
+    steps: Array<{ text?: string }>
+  ): string {
+    // If we have final text, use it
+    if (finalText && finalText.trim()) {
+      return finalText;
+    }
+
+    // Gather text from all steps
+    const stepTexts = steps
+      .map((s) => s.text)
+      .filter((t): t is string => !!t && t.trim() !== "")
+      .join("\n\n");
+
+    if (stepTexts) {
+      return stepTexts;
+    }
+
+    return "Agent completed without generating reasoning.";
   }
 
   /**

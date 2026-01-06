@@ -93,6 +93,9 @@ const KNOWN_CATEGORIES = [
 const PRICE_NOTE =
   "Prices are indicative snapshots. Actual execution prices may differ.";
 
+// dflow API limit for seriesTickers parameter
+const MAX_SERIES_TICKERS = 25;
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -141,7 +144,7 @@ function filterByQuery(events: Event[], query: string): Event[] {
         event.markets?.filter(
           (m) =>
             m.title.toLowerCase().includes(queryLower) ||
-            m.subtitle?.toLowerCase().includes(queryLower),
+            m.subtitle?.toLowerCase().includes(queryLower)
         ) ?? [];
 
       // Include event if event matches OR has matching markets
@@ -160,7 +163,7 @@ function filterByQuery(events: Event[], query: string): Event[] {
  */
 function transformEvent(
   event: Event,
-  seriesMap: Map<string, Series>,
+  seriesMap: Map<string, Series>
 ): EventOutput {
   const series = seriesMap.get(event.seriesTicker);
 
@@ -219,7 +222,7 @@ function filterMarketsByStatus(events: Event[], status: MarketStatus): Event[] {
 
 export const discoverEventTool = tool({
   description:
-    "Discover prediction market events with nested markets. Primary discovery tool for finding trading opportunities. Returns events with their associated markets, including token addresses needed for trading.",
+    "Discover crypto prediction market events with nested markets. Returns events with their associated markets, including token addresses needed for trading. Defaults to Crypto category (BTC/ETH price predictions). Use category parameter to explore other markets.",
   inputSchema: z.object({
     query: z
       .string()
@@ -228,7 +231,7 @@ export const discoverEventTool = tool({
     category: z
       .string()
       .optional()
-      .describe("Filter by category. Currently only 'Crypto' is available."),
+      .describe("Filter by category. Defaults to 'Crypto' if not specified."),
     tags: z
       .array(z.string())
       .optional()
@@ -260,7 +263,7 @@ export const discoverEventTool = tool({
       .optional()
       .describe(
         "Pagination offset - number of events to skip. Use 0 or omit to start from beginning. " +
-          "Only use values returned in previous response's 'cursor' field.",
+          "Only use values returned in previous response's 'cursor' field."
       ),
   }),
   execute: async ({
@@ -381,7 +384,10 @@ export const discoverEventTool = tool({
           title: s.title,
         }));
 
-        const seriesTickers = seriesResponse.series.map((s) => s.ticker);
+        // Limit to MAX_SERIES_TICKERS (API constraint)
+        const seriesTickers = seriesResponse.series
+          .map((s) => s.ticker)
+          .slice(0, MAX_SERIES_TICKERS);
         const eventsResponse = await fetchEventsBySeries(seriesTickers, {
           withNestedMarkets: true,
           limit,
@@ -408,7 +414,9 @@ export const discoverEventTool = tool({
             filters_applied: filtersApplied,
             has_more: false,
             price_note: PRICE_NOTE,
-            suggestion: `No markets found with tags [${tags.join(", ")}]. Try different tags or browse without filters.`,
+            suggestion: `No markets found with tags [${tags.join(
+              ", "
+            )}]. Try different tags or browse without filters.`,
             available_categories: availableCategories,
           };
         }
@@ -419,7 +427,10 @@ export const discoverEventTool = tool({
           title: s.title,
         }));
 
-        const seriesTickers = seriesResponse.series.map((s) => s.ticker);
+        // Limit to MAX_SERIES_TICKERS (API constraint)
+        const seriesTickers = seriesResponse.series
+          .map((s) => s.ticker)
+          .slice(0, MAX_SERIES_TICKERS);
         const eventsResponse = await fetchEventsBySeries(seriesTickers, {
           withNestedMarkets: true,
           limit,
@@ -457,18 +468,47 @@ export const discoverEventTool = tool({
           };
         }
       } else {
-        // Browse mode - fetch active events
+        // Browse mode - fetch active crypto events by default
+        // Agents should focus on crypto markets for predictable outcomes
         filtersApplied.status = status;
+        filtersApplied.category = "Crypto";
 
-        const eventsResponse =
-          status === "active"
-            ? await fetchActiveEvents({ limit, cursor })
-            : await fetchEvents({
-                withNestedMarkets: true,
-                status: status as MarketStatus,
-                limit,
-                cursor,
-              });
+        // Fetch Crypto series first, then get events
+        const seriesResponse = await fetchSeriesByCategory("Crypto", {
+          status: status as MarketStatus,
+        });
+
+        if (!seriesResponse.series || seriesResponse.series.length === 0) {
+          return {
+            success: true,
+            events: [],
+            total_events: 0,
+            total_markets: 0,
+            filters_applied: filtersApplied,
+            has_more: false,
+            price_note: PRICE_NOTE,
+            suggestion: "No crypto markets available. Try again later.",
+            available_categories: availableCategories,
+          };
+        }
+
+        // Store series for enrichment
+        seriesResponse.series.forEach((s) => seriesMap.set(s.ticker, s));
+        availableSeries = seriesResponse.series.map((s) => ({
+          ticker: s.ticker,
+          title: s.title,
+        }));
+
+        // Limit to MAX_SERIES_TICKERS (API constraint)
+        const seriesTickers = seriesResponse.series
+          .map((s) => s.ticker)
+          .slice(0, MAX_SERIES_TICKERS);
+        const eventsResponse = await fetchEventsBySeries(seriesTickers, {
+          withNestedMarkets: true,
+          limit,
+          cursor,
+          status: status as MarketStatus,
+        });
 
         events = eventsResponse.events;
         responseCursor = eventsResponse.cursor;
@@ -496,7 +536,7 @@ export const discoverEventTool = tool({
       // Calculate totals
       const totalMarkets = outputEvents.reduce(
         (sum, e) => sum + e.market_count,
-        0,
+        0
       );
 
       // Build available_series from events if not already set
@@ -508,7 +548,7 @@ export const discoverEventTool = tool({
           }
         });
         availableSeries = Array.from(seriesSet.entries()).map(
-          ([ticker, title]) => ({ ticker, title }),
+          ([ticker, title]) => ({ ticker, title })
         );
       }
 
@@ -520,7 +560,7 @@ export const discoverEventTool = tool({
       // Debug: Log all market tickers returned to verify what the agent receives
       console.log(
         "[discoverEvent] Market tickers returned:",
-        outputEvents.flatMap((e) => e.markets.map((m) => m.market_ticker)),
+        outputEvents.flatMap((e) => e.markets.map((m) => m.market_ticker))
       );
 
       return {
@@ -569,7 +609,9 @@ export const discoverEventTool = tool({
         filters_applied: filtersApplied,
         has_more: false,
         price_note: PRICE_NOTE,
-        error: `dflow API error: ${error instanceof Error ? error.message : "Unknown error"}`,
+        error: `dflow API error: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`,
         available_categories: availableCategories,
       };
     }

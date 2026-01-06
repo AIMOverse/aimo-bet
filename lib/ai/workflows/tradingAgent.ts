@@ -55,7 +55,7 @@ export type { TradingResult };
  *   → agent_sessions (update value)
  */
 export async function tradingAgentWorkflow(
-  input: TradingInput,
+  input: TradingInput
 ): Promise<TradingResult> {
   console.log(`[tradingAgent:${input.modelId}] Starting trading workflow`);
 
@@ -67,7 +67,7 @@ export async function tradingAgentWorkflow(
     const agentSession = await getAgentSessionStep(
       session.id,
       input.modelId,
-      input.walletAddress,
+      input.walletAddress
     );
 
     // Step 3: Run AI agent (durable wrapper, agent inside is NOT durable)
@@ -80,7 +80,7 @@ export async function tradingAgentWorkflow(
     await recordResultsStep(agentSession, result);
 
     console.log(
-      `[tradingAgent:${input.modelId}] Completed: ${result.decision}, ${result.trades.length} trades`,
+      `[tradingAgent:${input.modelId}] Completed: ${result.decision}, ${result.trades.length} trades`
     );
 
     return result;
@@ -110,7 +110,7 @@ async function getSessionStep() {
 async function getAgentSessionStep(
   sessionId: string,
   modelId: string,
-  walletAddress: string,
+  walletAddress: string
 ): Promise<AgentSession> {
   "use step";
   const modelName = getModelName(modelId) || modelId;
@@ -118,7 +118,7 @@ async function getAgentSessionStep(
     sessionId,
     modelId,
     modelName,
-    walletAddress,
+    walletAddress
   );
 }
 
@@ -139,6 +139,7 @@ async function runAgentStep(input: TradingInput): Promise<TradingResult> {
   "use step";
 
   // Create agent with wallet context
+  // maxSteps: 5 limits LLM roundtrips (each step = 1 LLM call + tool executions)
   const agent = new PredictionMarketAgent({
     modelId: input.modelId,
     walletAddress: input.walletAddress,
@@ -159,7 +160,7 @@ async function runAgentStep(input: TradingInput): Promise<TradingResult> {
  */
 async function recordResultsStep(
   agentSession: AgentSession,
-  result: TradingResult,
+  result: TradingResult
 ): Promise<void> {
   "use step";
 
@@ -177,7 +178,7 @@ async function recordResultsStep(
   });
 
   console.log(
-    `[tradingAgent] Recorded decision: ${result.decision} (id: ${decision.id})`,
+    `[tradingAgent] Recorded decision: ${result.decision} (id: ${decision.id})`
   );
 
   // 2. Record trades + update positions
@@ -217,6 +218,6 @@ async function recordResultsStep(
   await updateAgentSessionValue(
     agentSession.id,
     portfolioValue,
-    portfolioValue - agentSession.startingCapital,
+    portfolioValue - agentSession.startingCapital
   );
 }

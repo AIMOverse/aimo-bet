@@ -6,10 +6,8 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { useChat } from "@/hooks/chat/useChat";
-import type {
-  ArenaModel,
-  ChatMessage as ChatMessageType,
-} from "@/lib/supabase/types";
+import { MODELS } from "@/lib/ai/models";
+import type { ChatMessage as ChatMessageType } from "@/lib/supabase/types";
 
 // Map series to logo filename
 const SERIES_LOGO_MAP: Record<string, string> = {
@@ -94,38 +92,38 @@ function MessageBubble({
 interface ChatInterfaceProps {
   sessionId: string | null;
   selectedModelId?: string | null;
-  models?: ArenaModel[];
 }
 
 export function ChatInterface({
   sessionId,
   selectedModelId = null,
-  models = [],
 }: ChatInterfaceProps) {
   const { messages, isLoading, error } = useChat({ sessionId });
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Model info lookup map (includes logoPath derived from series)
+  // Model info lookup map from catalog (includes logoPath derived from series)
   const modelInfoMap = useMemo(() => {
     const map = new Map<
       string,
       { name: string; color: string; logoPath?: string }
     >();
-    for (const model of models) {
-      map.set(model.id, {
-        name: model.name,
-        color: model.chartColor,
-        logoPath: getLogoPathFromSeries(model.series),
-      });
+    for (const model of MODELS) {
+      if (model.chartColor) {
+        map.set(model.id, {
+          name: model.name,
+          color: model.chartColor,
+          logoPath: getLogoPathFromSeries(model.series),
+        });
+      }
     }
     return map;
-  }, [models]);
+  }, []);
 
   // Filter by selected model
   const filteredMessages = useMemo(() => {
     if (!selectedModelId) return messages;
     return messages.filter(
-      (msg: ChatMessageType) => msg.metadata?.authorId === selectedModelId,
+      (msg: ChatMessageType) => msg.metadata?.authorId === selectedModelId
     );
   }, [messages, selectedModelId]);
 

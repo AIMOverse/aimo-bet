@@ -8,7 +8,7 @@ VALUES (
   '00000000-0000-0000-0000-000000000001',
   'Global Arena',
   'running',
-  10000,
+  100,
   NOW()
 )
 ON CONFLICT (id) DO NOTHING;
