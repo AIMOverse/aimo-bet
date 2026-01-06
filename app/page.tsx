@@ -12,10 +12,8 @@ import { usePerformanceChart } from "@/hooks/chart/usePerformanceChart";
 import { useSessionTrades } from "@/hooks/trades/useTrades";
 import { useSessionPositions } from "@/hooks/positions/usePositions";
 import { useLivePrices } from "@/hooks/index/useLivePrices";
+import { useGlobalSession } from "@/hooks/useGlobalSession";
 import type { ArenaTab } from "@/lib/supabase/types";
-
-// Session ID for the arena (in production, this would come from routing/state)
-const SESSION_ID = "00000000-0000-0000-0000-000000000001";
 
 /**
  * Home page - renders the Alpha Arena trading dashboard.
@@ -24,16 +22,19 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<ArenaTab>("trades");
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
 
+  // Fetch the global session ID dynamically
+  const { sessionId } = useGlobalSession();
+
   // Fetch real data from hooks
   const {
     chartData,
     latestValues,
     deadModels,
     loading: performanceLoading,
-  } = usePerformanceChart({ sessionId: SESSION_ID });
-  const { trades, isLoading: tradesLoading } = useSessionTrades(SESSION_ID);
+  } = usePerformanceChart({ sessionId });
+  const { trades, isLoading: tradesLoading } = useSessionTrades(sessionId);
   const { positions, isLoading: positionsLoading } =
-    useSessionPositions(SESSION_ID);
+    useSessionPositions(sessionId);
   const livePrices = useLivePrices();
 
   // Render the right panel content based on active tab
@@ -44,7 +45,7 @@ export default function Home() {
       case "chat":
         return (
           <ChatInterface
-            sessionId={SESSION_ID}
+            sessionId={sessionId}
             selectedModelId={selectedModelId}
           />
         );

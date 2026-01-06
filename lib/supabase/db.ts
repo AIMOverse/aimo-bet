@@ -6,7 +6,7 @@ import type {
   ChatMetadata,
   ChatMessage,
 } from "./types";
-import { DEFAULT_STARTING_CAPITAL } from "@/lib/config";
+import { DEFAULT_STARTING_CAPITAL, GLOBAL_SESSION_ID } from "@/lib/config";
 import type { DbTradingSessionInsert, DbArenaChatMessageInsert } from "./types";
 
 // ============================================================================
@@ -20,51 +20,28 @@ const GLOBAL_SESSION_NAME = "Global Arena";
 // ============================================================================
 
 /**
- * Get or create the global "Global Arena" session.
- * This session always exists and is used when no specific sessionId is provided.
+ * Get the global "Global Arena" session.
+ * Uses a fixed UUID that is created by migration 007.
+ * This session always exists - if it doesn't, something is wrong with the DB setup.
  */
 export async function getGlobalSession(): Promise<TradingSession> {
   const client = createServerClient();
   if (!client) throw new Error("Supabase not configured");
 
-  // Try to find existing running global session
-  const { data: existing, error: findError } = await client
+  const { data, error } = await client
     .from("trading_sessions")
     .select("*")
-    .eq("name", GLOBAL_SESSION_NAME)
-    .eq("status", "running")
+    .eq("id", GLOBAL_SESSION_ID)
     .single();
 
-  if (existing && !findError) {
-    return mapTradingSession(existing);
+  if (error || !data) {
+    console.error("Global session not found:", error);
+    throw new Error(
+      `Global Arena session (${GLOBAL_SESSION_ID}) not found. Run migrations.`
+    );
   }
 
-  // If no running session found (or error finding), create a new one
-  if (findError && findError.code !== "PGRST116") {
-    console.error("Error finding global session:", findError);
-  }
-
-  const insertData: DbTradingSessionInsert = {
-    name: GLOBAL_SESSION_NAME,
-    starting_capital: DEFAULT_STARTING_CAPITAL,
-    status: "running",
-    started_at: new Date().toISOString(),
-  };
-
-  const { data: newSession, error: createError } = await client
-    .from("trading_sessions")
-    .insert(insertData as never)
-    .select()
-    .single();
-
-  if (createError || !newSession) {
-    console.error("Failed to create global session:", createError);
-    throw createError ?? new Error("Failed to create global session");
-  }
-
-  const session = newSession as Record<string, unknown>;
-  console.log("[arena] Created new Global Arena session:", session.id);
-  return mapTradingSession(session);
+  return mapTradingSession(data);
 }
 
 // ============================================================================
@@ -89,7 +66,7 @@ export async function getTradingSessions(): Promise<TradingSession[]> {
 }
 
 export async function getTradingSession(
-  id: string,
+  id: string
 ): Promise<TradingSession | null> {
   const client = createServerClient();
   if (!client) return null;
@@ -132,7 +109,7 @@ export async function getActiveSession(): Promise<TradingSession | null> {
 
 export async function createTradingSession(
   name?: string,
-  startingCapital = DEFAULT_STARTING_CAPITAL,
+  startingCapital = DEFAULT_STARTING_CAPITAL
 ): Promise<TradingSession> {
   const client = createServerClient();
   if (!client) throw new Error("Supabase not configured");
@@ -159,7 +136,7 @@ export async function createTradingSession(
 
 export async function updateSessionStatus(
   id: string,
-  status: SessionStatus,
+  status: SessionStatus
 ): Promise<void> {
   const client = createServerClient();
   if (!client) throw new Error("Supabase not configured");
@@ -192,7 +169,7 @@ export async function updateSessionStatus(
 
 export async function getChatMessages(
   sessionId: string,
-  limit = 100,
+  limit = 100
 ): Promise<ChatMessage[]> {
   const client = createServerClient();
   if (!client) return [];

@@ -19,8 +19,14 @@ export const DFLOW_METADATA_API_URL =
 // Arena Configuration
 // =============================================================================
 
+/**
+ * Global Arena Session ID - Fixed UUID for the single global session.
+ * All agent data is linked to this session.
+ */
+export const GLOBAL_SESSION_ID = "00000000-0000-0000-0000-000000000001";
+
 /** Default starting capital for new sessions */
-export const DEFAULT_STARTING_CAPITAL = 100;
+export const DEFAULT_STARTING_CAPITAL = 10000;
 
 /** Chart configuration */
 export const CHART_CONFIG = {
