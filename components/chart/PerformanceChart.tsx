@@ -181,7 +181,7 @@ function LineEndLabel({
           className={cn(
             "size-5 ring-[1.5px] ring-offset-0 bg-background shrink-0",
             isHovered && "ring-2",
-            isDead && "grayscale opacity-60",
+            isDead && "grayscale opacity-60"
           )}
           style={{
             ["--tw-ring-color" as string]: isDead ? DEAD_MODEL_COLOR : color,
@@ -207,14 +207,14 @@ function LineEndLabel({
             isDead && "text-muted-foreground",
             !isDead &&
               valueDisplay === "percent" &&
-              (isPositive ? "text-green-500" : "text-red-500"),
+              (isPositive ? "text-green-500" : "text-red-500")
           )}
           style={{
             color: isDead
               ? undefined
               : valueDisplay === "dollar"
-                ? color
-                : undefined,
+              ? color
+              : undefined,
           }}
         >
           {valueDisplay === "dollar" ? (
@@ -281,7 +281,7 @@ function CustomLegend({
   const modelsWithData = payload.map((entry, index) => {
     const value = latestValues?.get(entry.value) || DEFAULT_STARTING_CAPITAL;
     const leaderboardEntry = leaderboard?.find(
-      (e) => e.model.name === entry.value,
+      (e) => e.model.name === entry.value
     );
     return {
       name: entry.value,
@@ -314,7 +314,7 @@ function CustomLegend({
               "flex items-center gap-1 px-1 rounded transition-opacity cursor-default text-xs",
               "hover:bg-muted/50",
               isDimmed && "opacity-30",
-              isDead && "opacity-60",
+              isDead && "opacity-60"
             )}
             onMouseEnter={() => onModelHover(model.name)}
             onMouseLeave={() => onModelHover(null)}
@@ -336,8 +336,8 @@ function CustomLegend({
                 isDead
                   ? "text-muted-foreground"
                   : isPositive
-                    ? "text-green-500"
-                    : "text-red-500",
+                  ? "text-green-500"
+                  : "text-red-500"
               )}
             >
               {changePercent >= 0 ? "+" : ""}
@@ -407,45 +407,66 @@ export function PerformanceChart({
     });
   }, [data, valueDisplay, modelNames]);
 
-  // Calculate Y-axis domain: start from 0, max at least 2x starting capital
+  // Calculate Y-axis domain: auto-scale based on data with padding
   const yDomain = useMemo(() => {
     const excludeKeys = new Set(["timestamp", "_ts"]);
-    const defaultMax = DEFAULT_STARTING_CAPITAL * 2; // $200 for $100 starting
 
-    if (valueDisplay === "percent") {
-      // Percent mode: 0% to +100% minimum
-      const defaultMaxPercent = 100; // +100% = 2x starting capital
+    // Find actual min and max values from data
+    let actualMin = Infinity;
+    let actualMax = -Infinity;
 
-      let actualMax = 0;
-      chartData.forEach((point) => {
-        Object.entries(point).forEach(([key, value]) => {
-          if (!excludeKeys.has(key) && typeof value === "number") {
-            actualMax = Math.max(actualMax, value);
-          }
-        });
-      });
-
-      // Use default or actual max (with 10% padding if exceeding default)
-      const maxY =
-        actualMax > defaultMaxPercent ? actualMax * 1.1 : defaultMaxPercent;
-
-      return [0, Math.ceil(maxY)];
-    }
-
-    // Dollar mode: $0 to 2x starting capital minimum
-    let actualMax = 0;
     chartData.forEach((point) => {
       Object.entries(point).forEach(([key, value]) => {
         if (!excludeKeys.has(key) && typeof value === "number") {
+          actualMin = Math.min(actualMin, value);
           actualMax = Math.max(actualMax, value);
         }
       });
     });
 
-    // Use default or actual max (with 10% padding if exceeding default)
-    const maxY = actualMax > defaultMax ? actualMax * 1.1 : defaultMax;
+    // Handle empty data case
+    if (!isFinite(actualMin) || !isFinite(actualMax)) {
+      if (valueDisplay === "percent") {
+        return [-10, 10]; // -10% to +10%
+      }
+      return [DEFAULT_STARTING_CAPITAL * 0.9, DEFAULT_STARTING_CAPITAL * 1.1];
+    }
 
-    return [0, Math.ceil(maxY)];
+    // Calculate range and add padding (10% on each side)
+    const range = actualMax - actualMin;
+    const padding = Math.max(
+      range * 0.1,
+      valueDisplay === "percent" ? 2 : DEFAULT_STARTING_CAPITAL * 0.02
+    );
+
+    let minY = actualMin - padding;
+    let maxY = actualMax + padding;
+
+    // Round to nice values
+    if (valueDisplay === "percent") {
+      // Round to nearest 5% for percent mode
+      minY = Math.floor(minY / 5) * 5;
+      maxY = Math.ceil(maxY / 5) * 5;
+      // Ensure at least -5% to +5% range
+      if (maxY - minY < 10) {
+        const mid = (minY + maxY) / 2;
+        minY = mid - 5;
+        maxY = mid + 5;
+      }
+    } else {
+      // Round to nice dollar values
+      const step = range > 1000 ? 500 : range > 100 ? 50 : 10;
+      minY = Math.floor(minY / step) * step;
+      maxY = Math.ceil(maxY / step) * step;
+      // Ensure minimum range
+      if (maxY - minY < step * 2) {
+        const mid = (minY + maxY) / 2;
+        minY = mid - step;
+        maxY = mid + step;
+      }
+    }
+
+    return [minY, maxY];
   }, [chartData, valueDisplay]);
 
   // Calculate X-axis domain: first data point to now + 1 hour
@@ -505,14 +526,17 @@ export function PerformanceChart({
                 domain={yDomain}
                 tickFormatter={(value) =>
                   valueDisplay === "dollar"
-                    ? `$${value.toFixed(0)}`
-                    : `${value.toFixed(0)}%`
+                    ? value >= 1000
+                      ? `$${(value / 1000).toFixed(1)}k`
+                      : `$${value.toFixed(0)}`
+                    : `${value >= 0 ? "+" : ""}${value.toFixed(0)}%`
                 }
                 className="text-xs"
                 tick={{ fill: "hsl(var(--muted-foreground))" }}
                 tickLine={{ stroke: "hsl(var(--muted))" }}
                 axisLine={{ stroke: "hsl(var(--muted))" }}
                 width={60}
+                allowDataOverflow={false}
               />
               <Tooltip
                 content={<CustomTooltip valueDisplay={valueDisplay} />}
