@@ -13,6 +13,7 @@ const AIMO_BASE_URL = "https://beta.aimo.network";
  */
 const WALLET_PRIVATE_KEYS: Record<string, string | undefined> = {
   openai: process.env.WALLET_GPT_PRIVATE,
+  gpt: process.env.WALLET_GPT_PRIVATE,
   claude: process.env.WALLET_CLAUDE_PRIVATE,
   deepseek: process.env.WALLET_DEEPSEEK_PRIVATE,
   glm: process.env.WALLET_GLM_PRIVATE,
@@ -112,6 +113,11 @@ export async function getAimoModel(
   modelId: string,
   canonicalId: string = modelId
 ) {
-  const provider = await getAimoProvider(modelId, canonicalId);
-  return provider.chat(modelId);
+  // Resolve the actual provider model ID from the catalog if available
+  // This handles mapping internal IDs (e.g. "qwen/qwen3-max") to provider IDs (e.g. "qwen/qwen3-235b-a22b")
+  const model = getModelById(canonicalId);
+  const providerModelId = model?.providerIds?.aimo || modelId;
+
+  const provider = await getAimoProvider(providerModelId, canonicalId);
+  return provider.chat(providerModelId);
 }
