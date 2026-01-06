@@ -5,8 +5,13 @@
  *
  * Architecture:
  * - Agents are STATELESS - no long-running listeners
- * - tradingAgentWorkflow: Triggered by market signals or cron jobs
+ * - tradingAgentWorkflow: Triggered by cron jobs or manual triggers
  * - Each trigger starts a fresh workflow run
+ *
+ * KV Cache Optimization:
+ * - Static system prompt (cacheable across runs)
+ * - Agent fetches balance via getBalance tool (appends to cache)
+ * - No dynamic user prompt with balance/signals
  *
  * Durability:
  * - Workflow steps are durable (crash recovery, state persistence)
@@ -14,7 +19,6 @@
  * - Tools (especially placeOrder) fire once without retry
  *
  * Trigger Sources:
- * - Market signals from PartyKit (price swings, volume spikes, etc.)
  * - Cron jobs for periodic analysis
  * - Manual triggers via /api/agents/trigger
  */
@@ -23,5 +27,4 @@ export {
   tradingAgentWorkflow,
   type TradingInput,
   type TradingResult,
-  type MarketSignal,
 } from "./tradingAgent";

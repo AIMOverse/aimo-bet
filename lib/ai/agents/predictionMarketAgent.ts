@@ -6,6 +6,11 @@
  *
  * This agent is designed to be wrapped in a durable step in the workflow layer,
  * but the agent internals (LLM calls, tool executions) are NOT durable.
+ *
+ * KV Cache Optimization:
+ * - Static system prompt (cacheable across runs)
+ * - Agent fetches balance via getBalance tool (appends to cache, doesn't invalidate)
+ * - No dynamic user prompt with balance/signals
  */
 
 import { ToolLoopAgent, stepCountIs } from "ai";
@@ -13,12 +18,10 @@ import { nanoid } from "nanoid";
 import { type KeyPairSigner } from "@solana/kit";
 import { getModel } from "@/lib/ai/models";
 import { createSignerFromBase58SecretKey } from "@/lib/solana/wallets";
-import { TRADING_SYSTEM_PROMPT } from "@/lib/ai/prompts/trading/systemPrompt";
 import {
-  buildTradingPrompt,
-  buildTestPrompt,
-  type TradingPromptInput,
-} from "@/lib/ai/prompts/trading/promptBuilder";
+  TRADING_SYSTEM_PROMPT,
+  TEST_MODE_INSTRUCTION,
+} from "@/lib/ai/prompts/systemPrompt";
 
 // Direct tool imports
 import { discoverEventTool } from "@/lib/ai/tools/discoverEvent";
@@ -26,6 +29,7 @@ import { createIncreasePositionTool } from "@/lib/ai/tools/increasePosition";
 import { createDecreasePositionTool } from "@/lib/ai/tools/decreasePosition";
 import { createRetrievePositionTool } from "@/lib/ai/tools/retrievePosition";
 import { createRedeemPositionTool } from "@/lib/ai/tools/redeemPosition";
+import { createGetBalanceTool } from "@/lib/ai/tools/getBalance";
 import { webSearchTool } from "@/lib/ai/tools/webSearch";
 
 import type {
@@ -54,6 +58,11 @@ export class PredictionMarketAgent {
    * - placeOrder is fire-once to prevent duplicate orders
    * - If agent fails mid-execution, the entire run should be restarted
    *   (handled by the durable workflow wrapper)
+   *
+   * KV Cache Optimization:
+   * - Static system prompt (TRADING_SYSTEM_PROMPT) is cacheable
+   * - Agent fetches balance via getBalance tool (appends to cache)
+   * - User prompt is static ("Analyze markets...") or test mode instruction
    */
   async run(input: AgentRunInput): Promise<TradingResult> {
     // Create signer from private key if available
@@ -64,6 +73,7 @@ export class PredictionMarketAgent {
 
     // Create tools directly with wallet context
     const tools = {
+      getBalance: createGetBalanceTool(this.config.walletAddress),
       discoverEvent: discoverEventTool,
       increasePosition: createIncreasePositionTool(
         this.config.walletAddress,
@@ -89,30 +99,11 @@ export class PredictionMarketAgent {
       stopWhen: stepCountIs(this.config.maxSteps ?? 10),
     });
 
-    // Build prompt based on mode
-    let prompt: string;
-
-    if (input.testMode) {
-      // Test mode: force a small trade
-      prompt = buildTestPrompt(input.usdcBalance);
-    } else {
-      // Normal mode: signal-based or periodic
-      const promptInput: TradingPromptInput = {
-        signal: input.signal
-          ? {
-              type: input.signal.type as
-                | "price_swing"
-                | "volume_spike"
-                | "orderbook_imbalance",
-              ticker: input.signal.ticker,
-              data: input.signal.data,
-              timestamp: input.signal.timestamp,
-            }
-          : undefined,
-        usdcBalance: input.usdcBalance,
-      };
-      prompt = buildTradingPrompt(promptInput);
-    }
+    // Static prompt for KV cache optimization
+    // Agent will call getBalance tool to get current balance
+    const prompt = input.testMode
+      ? TEST_MODE_INSTRUCTION
+      : "Analyze prediction markets and execute trades if you find opportunities with >70% confidence.";
 
     console.log(
       `[PredictionMarketAgent:${this.config.modelId}] Starting agent run`,
@@ -132,16 +123,19 @@ export class PredictionMarketAgent {
     // Determine decision type from results
     const decision = this.determineDecision(result.text, trades);
 
-    // Get market info from trades or signal
-    const marketTicker = input.signal?.ticker || trades[0]?.marketTicker;
+    // Get market info from trades
+    const marketTicker = trades[0]?.marketTicker;
     const marketTitle = trades[0]?.marketTitle;
+
+    // Extract balance from getBalance tool result if available
+    const portfolioValue = this.extractBalanceFromSteps(result.steps);
 
     return {
       reasoning: result.text || "No reasoning provided.",
       trades,
       decision,
       steps: result.steps.length,
-      portfolioValue: input.usdcBalance,
+      portfolioValue,
       marketTicker,
       marketTitle,
     };
@@ -266,5 +260,42 @@ export class PredictionMarketAgent {
     }
 
     return "hold";
+  }
+
+  /**
+   * Extract USDC balance from getBalance tool result in agent steps.
+   * Returns 0 if not found.
+   */
+  private extractBalanceFromSteps(
+    steps: Array<{
+      toolCalls?: Array<{
+        toolName: string;
+        toolCallId: string;
+        input: unknown;
+      }>;
+      toolResults?: Array<{ toolCallId: string; output?: unknown }>;
+    }>,
+  ): number {
+    for (const step of steps) {
+      if (!step.toolCalls || !step.toolResults) continue;
+
+      for (const call of step.toolCalls) {
+        if (call.toolName === "getBalance") {
+          const resultEntry = step.toolResults.find(
+            (r) => r.toolCallId === call.toolCallId,
+          );
+
+          const typedOutput = resultEntry?.output as
+            | { success?: boolean; balance?: number }
+            | undefined;
+
+          if (typedOutput?.success && typeof typedOutput.balance === "number") {
+            return typedOutput.balance;
+          }
+        }
+      }
+    }
+
+    return 0;
   }
 }

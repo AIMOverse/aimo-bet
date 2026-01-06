@@ -12,11 +12,8 @@ lib/ai/
 │   └── index.ts                   # Agent exports
 ├── prompts/                   # System prompts
 │   ├── index.ts                   # Prompt exports
-│   ├── trading/
-│   │   ├── systemPrompt.ts        # Trading agent identity
-│   │   └── promptBuilder.ts       # Lean prompt builder (signal + balance)
-│   └── chat/
-│       └── assistantPrompt.ts     # Chat assistant prompt
+│   └── trading/
+│       └── systemPrompt.ts        # Trading agent identity + workflow hints
 ├── guardrails/                # Risk control & validation
 │   ├── index.ts                   # Guardrails exports
 │   ├── types.ts                   # RiskLimits, TradingMiddlewareConfig
@@ -24,6 +21,7 @@ lib/ai/
 │   └── middleware.ts              # LLM-level limits (maxTokens, maxToolCalls)
 ├── tools/                     # AI SDK tools for agent capabilities
 │   ├── index.ts                   # Direct tool exports (no factory)
+│   ├── getBalance.ts              # Get USDC balance (KV cache friendly)
 │   ├── discoverEvent.ts           # Event-centric market discovery
 │   ├── increasePosition.ts        # Buy YES/NO tokens
 │   ├── decreasePosition.ts        # Sell YES/NO tokens
@@ -39,7 +37,6 @@ lib/ai/
 │   └── aimo.ts                    # AIMO provider instance
 └── workflows/                 # Durable workflows (main entry point)
     ├── index.ts                   # Workflow exports
-    ├── signalListener.ts          # Long-running signal listener
     └── tradingAgent.ts            # Durable trading workflow
 
 party/
@@ -52,24 +49,45 @@ party/
 | ----------------- | ------------------------------- | --------------------------------------- |
 | Tool creation     | Direct imports in agent         | Clearer dependencies, simpler code      |
 | Context injection | Signer passed at agent level    | Only signer needed for trading tools    |
-| Prompt strategy   | Lean context (signal + balance) | Agent discovers via tools, fresher data |
+| **Prompt strategy** | **Static prompt + getBalance tool** | **KV cache optimization**            |
 | Market fetching   | Agent uses discoverEvent        | No stale pre-fetched data               |
 | Agent tools       | dflow API (on-chain truth)      | Trading decisions need real-time data   |
 | UI hooks          | Supabase (recorded data)        | Display uses single source of truth     |
 
+## KV Cache Optimization
+
+The agent uses a **static system prompt** for KV cache efficiency:
+
+```
+Before (cache-unfriendly):
+  Workflow → fetch balance → build dynamic prompt with balance → Agent
+
+After (cache-optimized):
+  Workflow → Agent (static prompt) → Agent calls getBalance tool → proceeds
+```
+
+**Benefits:**
+- System prompt is fully cacheable across runs
+- Balance comes in as tool result (appends to cache, doesn't invalidate prefix)
+- Reduces inference costs and latency
+
+**Implementation:**
+- `TRADING_SYSTEM_PROMPT` is static (no dynamic values)
+- Agent calls `getBalance` tool as first step to get current USDC balance
+- Signals are used for triggering/filtering only, NOT passed to LLM prompt
+
 ## Trading Workflow
 
-The trading system uses a durable workflow with 5 steps:
+The trading system uses a durable workflow with 4 steps:
 
 1. **Get session** - Fetch global trading session
 2. **Get agent session** - Get or create agent session for this model
-3. **Get USDC balance** - Single RPC call for available trading capital
-4. **Run agent** - Agent discovers markets via tools, executes trades
-   - Trade tools (`increasePosition`, `decreasePosition`) wait for confirmation
+3. **Run agent** - Agent discovers markets and balance via tools, executes trades
+   - `getBalance` tool fetches USDC balance (KV cache friendly)
+   - `discoverEvent` discovers active markets
    - `retrievePosition` uses dflow API for on-chain truth
-   - Sync trades: confirmed via RPC `getSignatureStatuses`
-   - Async trades: polled via dflow `/order-status` endpoint
-5. **Record results** - Atomically write to Supabase:
+   - Trade tools (`increasePosition`, `decreasePosition`) wait for confirmation
+4. **Record results** - Atomically write to Supabase:
    - `agent_decisions` - Decision record (triggers Realtime for chat)
    - `agent_trades` - Trade records (triggers Realtime for trades feed)
    - `agent_positions` - Delta-based position upserts (triggers Realtime for positions)
@@ -86,7 +104,7 @@ The trading system uses a durable workflow with 5 steps:
          ┌────────────────────┼────────────────────┐
          ▼                    ▼                    ▼
    Agent Tools          Record Results        UI Hooks
-   (dflow API)          (Supabase)            (Supabase)
+   (dflow API + RPC)    (Supabase)            (Supabase)
          │                    │                    │
          ▼                    ▼                    ▼
    On-chain truth       Single writer         Realtime updates
@@ -98,14 +116,14 @@ The trading system uses a durable workflow with 5 steps:
 ```typescript
 import { tradingAgentWorkflow } from "@/lib/ai/workflows";
 
-// Workflow is triggered via POST /api/chat
+// Workflow is triggered via POST /api/agents/trigger
 const input = {
   modelId: "openai/gpt-5.2",
   walletAddress: "...",
-  signal: { type: "price_swing", ticker: "BTC", ... }  // Optional
+  testMode: false,  // Optional: force small trade for testing
 };
 
-// Returns streaming response with x-workflow-run-id header
+// Returns TradingResult with reasoning, trades, decision
 ```
 
 ## Agent Types
@@ -121,15 +139,15 @@ interface AgentConfig {
 }
 ```
 
-### AgentRunInput (Lean Context)
+### AgentRunInput (Minimal for KV Cache)
 
 ```typescript
 interface AgentRunInput {
-  signal?: MarketSignal; // Optional signal from PartyKit
-  usdcBalance: number; // Current USDC balance
   testMode?: boolean; // Force small trade for testing
 }
 ```
+
+**Note:** Balance and signals are NOT passed in input. Agent fetches balance via `getBalance` tool.
 
 ### ExecutedTrade
 
@@ -147,18 +165,20 @@ interface ExecutedTrade {
 }
 ```
 
-### MarketSignal
+### MarketSignal (Trigger Only)
 
 ```typescript
+// Defined in app/api/agents/trigger/route.ts
+// Used for triggering agents, NOT passed to LLM prompt
 interface MarketSignal {
-  type: "price_swing" | "volume_spike";
+  type: "price_swing" | "volume_spike" | "orderbook_imbalance";
   ticker: string;
   data: Record<string, unknown>;
   timestamp: number;
 }
 ```
 
-**Note**: `orderbook_imbalance` was disabled as it's too noisy for position management.
+**Note:** Signals are used to decide *when* to trigger agents and filter by position. They are NOT passed to the LLM prompt (for KV cache optimization).
 
 ## Tools
 
@@ -168,6 +188,9 @@ Tools are imported directly in the agent - no factory pattern.
 
 ```typescript
 // lib/ai/tools/index.ts
+
+// Balance Check (KV cache friendly)
+export { createGetBalanceTool } from "./getBalance";
 
 // Market Discovery
 export { discoverEventTool } from "./discoverEvent";
@@ -190,13 +213,31 @@ export {
 
 | Tool               | Purpose                      | Input                            | Output                     |
 | ------------------ | ---------------------------- | -------------------------------- | -------------------------- |
+| `getBalance`       | Get USDC balance             | currency (default: USDC)         | balance, wallet, timestamp |
 | `discoverEvent`    | Discover events with markets | query, category, event_ticker    | events[], markets[]        |
 | `increasePosition` | Buy YES/NO tokens            | market_ticker, side, usdc_amount | filled_quantity, signature |
 | `decreasePosition` | Sell YES/NO tokens           | market_ticker, side, quantity    | sold_quantity, signature   |
 | `retrievePosition` | Get current positions        | market_ticker (optional)         | positions[], summary       |
 | `redeemPosition`   | Redeem winning tokens        | market_ticker, side              | payout_amount, signature   |
 
-**Note**: `retrievePosition` uses dflow API (on-chain truth) for trading decisions. UI uses Supabase `agent_positions` table for display.
+**Note:** `retrievePosition` uses dflow API (on-chain truth) for trading decisions. UI uses Supabase `agent_positions` table for display.
+
+### getBalance
+
+Get USDC balance for trading decisions. This is the first tool the agent calls.
+
+```typescript
+const result = await getBalance({});
+
+// Response
+{
+  success: true,
+  wallet: "...",
+  balance: 95.50,
+  currency: "USDC",
+  timestamp: "2024-01-15T10:30:00Z"
+}
+```
 
 ### discoverEvent
 
@@ -301,42 +342,52 @@ const result = await redeemPosition({
 }
 ```
 
-## Prompt Builder
+## System Prompt
 
-The lean prompt builder provides minimal context - agent discovers details via tools.
+The system prompt is static for KV cache optimization. Agent workflow hints guide tool usage.
 
 ```typescript
-import { buildTradingPrompt } from "@/lib/ai/prompts/trading/promptBuilder";
+// lib/ai/prompts/trading/systemPrompt.ts
 
-// Signal-triggered prompt
-const prompt = buildTradingPrompt({
-  signal: {
-    type: "price_swing",
-    ticker: "BTC-100K-2024",
-    data: { previousPrice: 0.45, currentPrice: 0.52, changePercent: 0.155 },
-    timestamp: Date.now(),
-  },
-  usdcBalance: 100.0,
-});
+export const TRADING_SYSTEM_PROMPT = `You are an autonomous prediction market trader...
 
-// Periodic scan prompt (no signal)
-const prompt = buildTradingPrompt({
-  usdcBalance: 100.0,
-});
+## Tools Available
+
+- **getBalance** - Check your USDC balance for trading
+- **discoverEvent** - Browse active prediction markets
+- **retrievePosition** - Check your current positions
+- **increasePosition** - Buy YES/NO tokens
+- **decreasePosition** - Sell YES/NO tokens
+- **redeemPosition** - Redeem winning positions after market resolution
+- **webSearch** - Research market topics
+
+## Workflow
+
+1. Check your balance with getBalance
+2. Review your positions with retrievePosition
+3. Discover markets with discoverEvent
+4. Research with webSearch if needed
+5. Trade if you have >70% confidence
+
+## Trading Rules
+...`;
+
+// Test mode instruction (appended for testing)
+export const TEST_MODE_INSTRUCTION = `## TEST MODE - Execute Trade
+...`;
 ```
 
 ## Agent Implementation
 
-The agent uses direct tool imports - no factory.
+The agent uses direct tool imports and static prompts.
 
 ```typescript
 // lib/ai/agents/predictionMarketAgent.ts
 
+import { createGetBalanceTool } from "@/lib/ai/tools/getBalance";
 import { discoverEventTool } from "@/lib/ai/tools/discoverEvent";
 import { createIncreasePositionTool } from "@/lib/ai/tools/increasePosition";
-import { createDecreasePositionTool } from "@/lib/ai/tools/decreasePosition";
-import { createRetrievePositionTool } from "@/lib/ai/tools/retrievePosition";
-import { createRedeemPositionTool } from "@/lib/ai/tools/redeemPosition";
+// ... other tool imports
 
 async run(input: AgentRunInput): Promise<TradingResult> {
   // Create signer
@@ -344,28 +395,35 @@ async run(input: AgentRunInput): Promise<TradingResult> {
     ? await createSignerFromBase58PrivateKey(this.config.privateKey)
     : undefined;
 
-  // Create tools directly
+  // Create tools directly (including getBalance for KV cache optimization)
   const tools = {
+    getBalance: createGetBalanceTool(this.config.walletAddress),
     discoverEvent: discoverEventTool,
     increasePosition: createIncreasePositionTool(this.config.walletAddress, signer),
     decreasePosition: createDecreasePositionTool(this.config.walletAddress, signer),
     retrievePosition: createRetrievePositionTool(this.config.walletAddress),
     redeemPosition: createRedeemPositionTool(this.config.walletAddress, signer),
+    webSearch: webSearchTool,
   };
 
-  // Build lean prompt
-  const prompt = buildTradingPrompt({
-    signal: input.signal,
-    usdcBalance: input.usdcBalance,
-  });
+  // Static prompt for KV cache optimization
+  const prompt = input.testMode
+    ? TEST_MODE_INSTRUCTION
+    : "Analyze prediction markets and execute trades if you find opportunities with >70% confidence.";
 
-  // Run agent...
+  // Run agent - it will call getBalance tool to fetch balance
+  const result = await agent.generate({ prompt });
+  
+  // Extract portfolio value from getBalance tool result
+  const portfolioValue = this.extractBalanceFromSteps(result.steps);
+  
+  // ...
 }
 ```
 
 ## Workflow Implementation
 
-The workflow fetches only USDC balance - agent discovers markets via tools.
+The workflow is simplified - no balance fetching step. Agent fetches via tool.
 
 ```typescript
 // lib/ai/workflows/tradingAgent.ts
@@ -373,19 +431,31 @@ The workflow fetches only USDC balance - agent discovers markets via tools.
 interface TradingInput {
   modelId: string;
   walletAddress: string;
-  signal?: MarketSignal;
   testMode?: boolean;
 }
 
-// Get USDC balance (single RPC call)
-async function getUsdcBalanceStep(walletAddress: string): Promise<number> {
+// Step 3: Run agent (fetches balance via getBalance tool)
+async function runAgentStep(input: TradingInput): Promise<TradingResult> {
   "use step";
-  const balance = await getCurrencyBalance(walletAddress, "USDC");
-  return balance ? parseFloat(balance.formatted) : 0;
+
+  const agent = new PredictionMarketAgent({
+    modelId: input.modelId,
+    walletAddress: input.walletAddress,
+    privateKey: getWalletPrivateKey(input.modelId),
+    maxSteps: 10,
+  });
+
+  // Agent will call getBalance tool to fetch current balance
+  return await agent.run({
+    testMode: input.testMode,
+  });
 }
 
-// Record all results atomically
-async function recordResultsStep(...): Promise<void> {
+// Step 4: Record all results atomically
+async function recordResultsStep(
+  agentSession: AgentSession,
+  result: TradingResult,
+): Promise<void> {
   "use step";
   
   // 1. Record decision
@@ -464,18 +534,19 @@ Signal (PartyKit) → POST /api/agents/trigger → tradingAgentWorkflow
                                                      │
                     ┌────────────────────────────────┼────────────────────────┐
                     ▼                                ▼                        ▼
-              getUsdcBalanceStep               runAgentStep           recordResultsStep
+              getSessionStep                   runAgentStep           recordResultsStep
                     │                                │                        │
                     ▼                                ▼                        ▼
-              Single RPC call              Agent uses tools           Supabase writes:
-              (USDC balance)               (discoverEvent,            • agent_decisions
-                                            increasePosition,          • agent_trades
-                                            retrievePosition)          • agent_positions
-                                                     │                 • agent_sessions
-                                                     ▼                        │
-                                               Trade execution                ▼
-                                               (waits for               Realtime updates
-                                                confirmation)           to UI hooks
+              Supabase                      Agent uses tools           Supabase writes:
+              (session)                     • getBalance (RPC)         • agent_decisions
+                                            • discoverEvent            • agent_trades
+                                            • increasePosition         • agent_positions
+                                            • retrievePosition         • agent_sessions
+                                                     │                        │
+                                                     ▼                        ▼
+                                               Trade execution          Realtime updates
+                                               (waits for               to UI hooks
+                                                confirmation)
 ```
 
 ## Agent Trigger Architecture
@@ -488,6 +559,8 @@ The trigger system separates **position management** (real-time, filtered) from 
 | ------------------ | ----------------------------- | -------------- | -------------------------------------- |
 | **Cron**           | Market discovery + portfolio  | Every 5 min    | All agents                             |
 | **Position Signal**| React to held position moves  | Real-time      | Only agents holding that ticker        |
+
+**Note:** Signals are used for triggering/filtering only. They are NOT passed to the LLM prompt (for KV cache optimization).
 
 ### Signal Detection (dflow-relay)
 
@@ -517,3 +590,4 @@ getAgentsHoldingTicker(sessionId, ticker) // → ["openai/gpt-5.2", "anthropic/c
 1. **One workflow per agent at a time** - Skip triggers if agent already has active workflow
 2. **Positions tracked in `agent_positions`** - Delta-based updates from trades
 3. **Filtered signals** - Only `price_swing` (10%) and `volume_spike` (10x) for positions
+4. **KV cache optimization** - Signals NOT passed to LLM prompt

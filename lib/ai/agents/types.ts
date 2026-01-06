@@ -34,12 +34,10 @@ export interface MarketSignal {
 }
 
 /**
- * Lean input for agent run - only signal + balance
- * Agent discovers market details via tools for fresher data
+ * Lean input for agent run - minimal context for KV cache optimization
+ * Agent discovers balance and market details via tools for fresher data
  */
 export interface AgentRunInput {
-  signal?: MarketSignal;
-  usdcBalance: number;
   /** When true, uses test prompt that forces a $1-5 trade */
   testMode?: boolean;
 }

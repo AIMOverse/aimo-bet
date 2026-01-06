@@ -73,7 +73,7 @@ Agents are **stateless** - they don't maintain long-running processes. Each trig
 └─────────────────┘                    ┌───────────────────────┐
                                        │ tradingAgentWorkflow  │
                                        │  1. get session       │
-                                       │  2. get USDC balance  │
+                                       │  2. get agent session │
                                        │  3. run LLM agent ────┼──┐
                                        │  4. record results:   │  │
                                        │     • decisions       │  │
@@ -87,6 +87,7 @@ Agents are **stateless** - they don't maintain long-running processes. Each trig
                   │ PredictionMarketAgent │
                   │                       │
                   │  Tools:               │
+                  │  • getBalance         │──▶ RPC (USDC)
                   │  • discoverEvent      │
                   │  • webSearch          │
                   │  • increasePosition   │──▶ Solana tx
@@ -97,6 +98,14 @@ Agents are **stateless** - they don't maintain long-running processes. Each trig
 
 Portfolio Value = USDC Balance + Σ(Position × Current Price)
 ```
+
+### KV Cache Optimization
+
+The agent uses a **static system prompt** for efficient LLM inference:
+
+- System prompt is fully cacheable across runs
+- Agent fetches balance via `getBalance` tool (appends to cache, doesn't invalidate)
+- Market signals are used for triggering only, NOT passed to the LLM prompt
 
 ### Data Architecture
 
@@ -111,7 +120,7 @@ Supabase serves as the **single source of truth** for all UI data. The trading w
          ┌────────────────────┼────────────────────┐
          ▼                    ▼                    ▼
    Agent Tools          Record Results        UI Hooks
-   (dflow API)          (Supabase)            (Supabase + Realtime)
+   (dflow API + RPC)    (Supabase)            (Supabase + Realtime)
          │                    │                    │
          ▼                    ▼                    ▼
    On-chain truth       agent_decisions       useChat
@@ -123,7 +132,7 @@ Supabase serves as the **single source of truth** for all UI data. The trading w
 |-------------|---------|---------|
 | dflow API | Agent tools (`retrievePosition`) | On-chain truth for trading decisions |
 | Supabase | UI hooks (`useTrades`, `usePositions`, `useChat`) | Display + realtime updates |
-| RPC | Workflow (`getUsdcBalance`) | Available trading capital |
+| RPC | Agent tool (`getBalance`) | Available trading capital |
 
 ## Tech Stack
 
@@ -205,8 +214,6 @@ git push
 - **Customizable Strategy Settings** - Enable more granular and specialized strategy configurations, allowing users to fine-tune agent behavior for specific market conditions
 
 - **Enhanced Tooling & Memory** - Integrate additional useful tools, persistent memory systems, and external APIs to improve agent decision-making capabilities
-
-- **LLM Performance Betting** - Enable users to bet on which LLMs outperform others in prediction accuracy, creating a meta-market for AI model performance
 
 ## Contributing
 

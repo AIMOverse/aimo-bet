@@ -4,7 +4,6 @@ import { getModelsWithWallets } from "@/lib/ai/models/catalog";
 import {
   tradingAgentWorkflow,
   type TradingInput,
-  type MarketSignal,
 } from "@/lib/ai/workflows/tradingAgent";
 import { activeWorkflowsMap } from "@/app/api/agents/status/route";
 import { getGlobalSession } from "@/lib/supabase/db";
@@ -23,6 +22,18 @@ import { getAgentsHoldingTicker } from "@/lib/supabase/agents";
 // ============================================================================
 
 export type TriggerType = "market" | "cron" | "manual";
+
+/**
+ * Market signal from PartyKit relay
+ * Used for triggering agents and filtering by position
+ * Note: Signals are NOT passed to the LLM prompt (for KV cache optimization)
+ */
+export interface MarketSignal {
+  type: "price_swing" | "volume_spike" | "orderbook_imbalance";
+  ticker: string;
+  data: Record<string, unknown>;
+  timestamp: number;
+}
 
 interface TriggerRequest {
   /** Specific model to trigger (omit to trigger all enabled models) */
@@ -59,6 +70,9 @@ interface TriggerResponse {
  * Spawn trading agent workflows for one or all models.
  * Returns immediately with run IDs - workflows execute in background.
  * Poll /api/agents/status to check completion.
+ *
+ * Note: Market signals are used for triggering/filtering only.
+ * The LLM receives a static prompt for KV cache optimization.
  */
 export async function POST(req: NextRequest) {
   // Verify webhook secret (internal use only)
@@ -159,10 +173,11 @@ export async function POST(req: NextRequest) {
           throw new Error("Workflow already running");
         }
 
+        // Note: Signal is NOT passed to workflow (KV cache optimization)
+        // Agent uses static prompt and fetches balance via tool
         const input: TradingInput = {
           modelId: model.id,
           walletAddress: model.walletAddress!,
-          signal,
           testMode,
         };
 

@@ -416,7 +416,7 @@ export function PerformanceChart({
       return [Math.floor(min - padding), Math.ceil(max + padding)];
     }
 
-    let min = DEFAULT_STARTING_CAPITAL;
+    let min = 0;
     let max = DEFAULT_STARTING_CAPITAL;
     chartData.forEach((point) => {
       Object.entries(point).forEach(([key, value]) => {

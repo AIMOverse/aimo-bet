@@ -1,10 +1,6 @@
 "use workflow";
 
-import {
-  PredictionMarketAgent,
-  type TradingResult,
-  type MarketSignal,
-} from "@/lib/ai/agents";
+import { PredictionMarketAgent, type TradingResult } from "@/lib/ai/agents";
 import { getWalletPrivateKey, getModelName } from "@/lib/ai/models/catalog";
 import { getGlobalSession } from "@/lib/supabase/db";
 import {
@@ -14,8 +10,7 @@ import {
   upsertAgentPosition,
   updateAgentSessionValue,
 } from "@/lib/supabase/agents";
-import type { AgentSession, TriggerType } from "@/lib/supabase/types";
-import { getCurrencyBalance } from "@/lib/solana/client";
+import type { AgentSession } from "@/lib/supabase/types";
 
 // ============================================================================
 // Types
@@ -24,13 +19,12 @@ import { getCurrencyBalance } from "@/lib/solana/client";
 export interface TradingInput {
   modelId: string;
   walletAddress: string;
-  signal?: MarketSignal;
   /** When true, uses test prompt that forces a $1-5 trade */
   testMode?: boolean;
 }
 
 // Re-export TradingResult for consumers
-export type { TradingResult, MarketSignal };
+export type { TradingResult };
 
 // ============================================================================
 // Trading Agent Workflow (Durable)
@@ -45,10 +39,15 @@ export type { TradingResult, MarketSignal };
  * - If agent fails mid-execution, the entire runAgentStep restarts
  * - Tools (especially placeOrder) fire once without retry to prevent duplicates
  *
+ * KV Cache Optimization:
+ * - Static system prompt (cacheable across runs)
+ * - Agent fetches balance via getBalance tool (appends to cache, doesn't invalidate)
+ * - No dynamic user prompt with balance/signals
+ *
  * Data Flow:
+ * - Agent's getBalance tool: Single RPC call for USDC balance
  * - Agent's retrievePosition tool: Uses dflow API (on-chain truth for trading decisions)
  * - UI hooks: Use Supabase (recorded data for display)
- * - USDC balance: Single RPC call (accurate, simple, fast)
  *
  * Recording:
  * - All results written atomically to Supabase:
@@ -73,16 +72,14 @@ export async function tradingAgentWorkflow(
       input.walletAddress,
     );
 
-    // Step 3: Get USDC balance (single RPC call - needed for trading budget)
-    const usdcBalance = await getUsdcBalanceStep(input.walletAddress);
-
-    // Step 4: Run AI agent (durable wrapper, agent inside is NOT durable)
+    // Step 3: Run AI agent (durable wrapper, agent inside is NOT durable)
+    // Agent fetches balance via getBalance tool (KV cache friendly)
     // Agent's retrievePosition tool uses dflow API (on-chain truth)
-    const result = await runAgentStep(input, usdcBalance);
+    const result = await runAgentStep(input);
 
-    // Step 5: Record all results atomically
+    // Step 4: Record all results atomically
     // (decision + trades + positions + session value)
-    await recordResultsStep(agentSession, input, result, usdcBalance);
+    await recordResultsStep(agentSession, result);
 
     console.log(
       `[tradingAgent:${input.modelId}] Completed: ${result.decision}, ${result.trades.length} trades`,
@@ -128,35 +125,19 @@ async function getAgentSessionStep(
 }
 
 /**
- * Get USDC balance only (single RPC call).
- * Durable: Safe to retry (read-only operation).
- */
-async function getUsdcBalanceStep(walletAddress: string): Promise<number> {
-  "use step";
-  try {
-    const balance = await getCurrencyBalance(walletAddress, "USDC");
-    if (!balance) return 0;
-    // Convert from bigint raw amount to number (formatted)
-    return parseFloat(balance.formatted);
-  } catch (error) {
-    console.error("[tradingAgent] Failed to fetch USDC balance:", error);
-    return 0;
-  }
-}
-
-/**
  * Run the PredictionMarketAgent.
  *
  * Durable wrapper: If this step fails, it restarts from the beginning.
  * Agent inside is NOT durable: Tools fire once without retry.
  * Agent tools use dflow API for on-chain data (not Supabase).
  *
+ * KV Cache Optimization:
+ * - Static system prompt is cacheable across runs
+ * - Agent fetches balance via getBalance tool (appends to cache)
+ *
  * IMPORTANT: placeOrder tool executes once - retrying would create duplicate orders.
  */
-async function runAgentStep(
-  input: TradingInput,
-  usdcBalance: number,
-): Promise<TradingResult> {
+async function runAgentStep(input: TradingInput): Promise<TradingResult> {
   "use step";
 
   // Create agent with wallet context
@@ -167,10 +148,9 @@ async function runAgentStep(
     maxSteps: 10,
   });
 
-  // Run the agent with lean context (signal + balance)
+  // Run the agent with minimal input (KV cache friendly)
+  // Agent will call getBalance tool to fetch current balance
   return await agent.run({
-    signal: input.signal,
-    usdcBalance,
     testMode: input.testMode,
   });
 }
@@ -183,33 +163,25 @@ async function runAgentStep(
  */
 async function recordResultsStep(
   agentSession: AgentSession,
-  input: TradingInput,
   result: TradingResult,
-  usdcBalance: number,
 ): Promise<void> {
   "use step";
-
-  // Determine trigger type
-  let triggerType: TriggerType = "periodic";
-  if (input.signal) {
-    triggerType = input.signal.type;
-  }
 
   // 1. Record the decision
   const decision = await recordAgentDecision({
     agentSessionId: agentSession.id,
-    triggerType,
-    triggerDetails: input.signal?.data || {},
+    triggerType: "periodic",
+    triggerDetails: {},
     marketTicker: result.marketTicker,
     marketTitle: result.marketTitle,
     decision: result.decision,
     reasoning: result.reasoning,
     confidence: result.confidence,
-    portfolioValueAfter: result.portfolioValue || usdcBalance,
+    portfolioValueAfter: result.portfolioValue,
   });
 
   console.log(
-    `[tradingAgent:${input.modelId}] Recorded decision: ${result.decision} (id: ${decision.id})`,
+    `[tradingAgent] Recorded decision: ${result.decision} (id: ${decision.id})`,
   );
 
   // 2. Record trades + update positions
@@ -245,9 +217,10 @@ async function recordResultsStep(
   }
 
   // 3. Update agent session value for leaderboard
+  const portfolioValue = result.portfolioValue || 0;
   await updateAgentSessionValue(
     agentSession.id,
-    result.portfolioValue || usdcBalance,
-    (result.portfolioValue || usdcBalance) - agentSession.startingCapital,
+    portfolioValue,
+    portfolioValue - agentSession.startingCapital,
   );
 }
