@@ -13,17 +13,21 @@ import type { ModelDefinition } from "./types";
 export const MODELS: ModelDefinition[] = [
   // OpenAI - GPT-5.2
   {
-    id: "openai/gpt-5.2",
-    name: "GPT-5.2",
+    id: "openai/gpt-5",
+    name: "GPT-5",
     provider: "aimo-network",
     contextLength: 128000,
     pricing: { prompt: 1.75, completion: 14 },
     description: "OpenAI's most capable model",
     supportsVision: true,
     supportsFunctions: true,
-    series: "openai",
+    providerIds: {
+      aimo: "openai/gpt-5",
+      openrouter: "openai/gpt-5",
+    },
+    series: "gpt",
     chartColor: "#10b981", // Emerald
-    walletAddress: process.env.WALLET_OPENAI_PUBLIC,
+    walletAddress: process.env.WALLET_GPT_PUBLIC,
     enabled: true,
   },
   // Claude - claude-sonnet-4.5
@@ -36,6 +40,10 @@ export const MODELS: ModelDefinition[] = [
     description: "Anthropic's balanced model with strong reasoning",
     supportsVision: true,
     supportsFunctions: true,
+    providerIds: {
+      aimo: "anthropic/claude-sonnet-4.5",
+      openrouter: "anthropic/claude-sonnet-4.5",
+    },
     series: "claude",
     chartColor: "#f97316", // Orange
     walletAddress: process.env.WALLET_CLAUDE_PUBLIC,
@@ -52,6 +60,10 @@ export const MODELS: ModelDefinition[] = [
       "DeepSeek-V3.2 harmonizes high computational efficiency with strong reasoning",
     supportsVision: false,
     supportsFunctions: true,
+    providerIds: {
+      aimo: "deepseek/deepseek-v3.2-exp",
+      openrouter: "deepseek/deepseek-v3.2",
+    },
     series: "deepseek",
     chartColor: "#a78bfa", // Light violet
     walletAddress: process.env.WALLET_DEEPSEEK_PUBLIC,
@@ -59,7 +71,7 @@ export const MODELS: ModelDefinition[] = [
   },
   // GLM - glm-4.7
   {
-    id: "z-ai/glm-4.7",
+    id: "z-ai/glm-4.6",
     name: "GLM-4.7",
     provider: "aimo-network",
     contextLength: 128000,
@@ -67,6 +79,10 @@ export const MODELS: ModelDefinition[] = [
     description: "Zhipu AI's latest GLM model with strong multilingual support",
     supportsVision: true,
     supportsFunctions: true,
+    providerIds: {
+      aimo: "z-ai/glm-4.6",
+      openrouter: "z-ai/glm-4.6",
+    },
     series: "glm",
     chartColor: "#06b6d4", // Cyan
     walletAddress: process.env.WALLET_GLM_PUBLIC,
@@ -74,7 +90,7 @@ export const MODELS: ModelDefinition[] = [
   },
   // Grok - grok-4
   {
-    id: "x-ai/grok-4",
+    id: "xai/grok-4",
     name: "Grok 4",
     provider: "aimo-network",
     contextLength: 256000,
@@ -82,6 +98,10 @@ export const MODELS: ModelDefinition[] = [
     description: "xAI's latest reasoning model with a 256k context window",
     supportsVision: true,
     supportsFunctions: true,
+    providerIds: {
+      aimo: "xai/grok-4",
+      openrouter: "x-ai/grok-4",
+    },
     series: "grok",
     chartColor: "#ef4444", // Red
     walletAddress: process.env.WALLET_GROK_PUBLIC,
@@ -97,6 +117,10 @@ export const MODELS: ModelDefinition[] = [
     description: "Alibaba's most capable Qwen model",
     supportsVision: true,
     supportsFunctions: true,
+    providerIds: {
+      aimo: "alibaba/qwen3-235b-a22b",
+      openrouter: "qwen/qwen3-max",
+    },
     series: "qwen",
     chartColor: "#8b5cf6", // Violet
     walletAddress: process.env.WALLET_QWEN_PUBLIC,
@@ -104,7 +128,7 @@ export const MODELS: ModelDefinition[] = [
   },
   // Gemini - gemini-3-pro
   {
-    id: "google/gemini-3-pro-preview",
+    id: "google/gemini-3-pro",
     name: "Gemini 3 Pro",
     provider: "aimo-network",
     contextLength: 1000000,
@@ -113,6 +137,10 @@ export const MODELS: ModelDefinition[] = [
       "Google's flagship frontier model for high-precision multimodal reasoning",
     supportsVision: true,
     supportsFunctions: true,
+    providerIds: {
+      aimo: "google/gemini-3-pro",
+      openrouter: "google/gemini-3-pro-preview",
+    },
     series: "gemini",
     chartColor: "#22c55e", // Green
     walletAddress: process.env.WALLET_GEMINI_PUBLIC,
@@ -128,6 +156,10 @@ export const MODELS: ModelDefinition[] = [
     description: "Moonshot AI's Kimi model with strong reasoning capabilities",
     supportsVision: true,
     supportsFunctions: true,
+    providerIds: {
+      aimo: "moonshot/kimi-k2",
+      openrouter: "moonshotai/kimi-k2-0905",
+    },
     series: "kimi",
     chartColor: "#ec4899", // Pink
     walletAddress: process.env.WALLET_KIMI_PUBLIC,
@@ -186,7 +218,7 @@ export function getArenaModel(id: string): ModelDefinition | undefined {
  * Get a specific arena model by short ID (e.g., "gpt-5.2" instead of "openai/gpt-5.2")
  */
 export function getArenaModelByShortId(
-  shortId: string,
+  shortId: string
 ): ModelDefinition | undefined {
   return MODELS.find((m) => m.id.endsWith(`/${shortId}`) || m.id === shortId);
 }
@@ -273,15 +305,16 @@ export function getModelsWithWallets(): ModelDefinition[] {
 /**
  * Wallet private key environment variable mapping.
  * Maps model ID to corresponding private key env var.
+ * NOTE: These must match the canonical model IDs in the MODELS array (the `id` field).
  */
 const WALLET_PRIVATE_KEY_MAP: Record<string, string | undefined> = {
-  "openai/gpt-5.2": process.env.WALLET_OPENAI_PRIVATE,
+  "openai/gpt-5": process.env.WALLET_GPT_PRIVATE,
   "anthropic/claude-sonnet-4.5": process.env.WALLET_CLAUDE_PRIVATE,
   "deepseek/deepseek-v3.2": process.env.WALLET_DEEPSEEK_PRIVATE,
-  "z-ai/glm-4.7": process.env.WALLET_GLM_PRIVATE,
-  "x-ai/grok-4": process.env.WALLET_GROK_PRIVATE,
+  "z-ai/glm-4.6": process.env.WALLET_GLM_PRIVATE,
+  "xai/grok-4": process.env.WALLET_GROK_PRIVATE,
   "qwen/qwen3-max": process.env.WALLET_QWEN_PRIVATE,
-  "google/gemini-3-pro-preview": process.env.WALLET_GEMINI_PRIVATE,
+  "google/gemini-3-pro": process.env.WALLET_GEMINI_PRIVATE,
   "moonshotai/kimi-k2-0905": process.env.WALLET_KIMI_PRIVATE,
 };
 
@@ -290,5 +323,13 @@ const WALLET_PRIVATE_KEY_MAP: Record<string, string | undefined> = {
  * Private keys are stored in environment variables and never exposed to client.
  */
 export function getWalletPrivateKey(modelId: string): string | undefined {
-  return WALLET_PRIVATE_KEY_MAP[modelId];
+  const privateKey = WALLET_PRIVATE_KEY_MAP[modelId];
+  if (!privateKey) {
+    console.warn(
+      `[Catalog] No private key found for model "${modelId}". Available keys: ${Object.keys(
+        WALLET_PRIVATE_KEY_MAP
+      ).join(", ")}`
+    );
+  }
+  return privateKey;
 }

@@ -74,23 +74,42 @@ export class PredictionMarketAgent {
       discoverEvent: discoverEventTool,
       increasePosition: createIncreasePositionTool(
         this.config.walletAddress,
-        signer,
+        signer
       ),
       decreasePosition: createDecreasePositionTool(
         this.config.walletAddress,
-        signer,
+        signer
       ),
       retrievePosition: createRetrievePositionTool(this.config.walletAddress),
       redeemPosition: createRedeemPositionTool(
         this.config.walletAddress,
-        signer,
+        signer
       ),
       webSearch: webSearchTool,
     };
 
+    // Get the model instance with detailed error logging
+    console.log(
+      `[PredictionMarketAgent:${this.config.modelId}] Getting model instance...`
+    );
+
+    let model;
+    try {
+      model = await getModel(this.config.modelId);
+      console.log(
+        `[PredictionMarketAgent:${this.config.modelId}] Model instance created successfully`
+      );
+    } catch (modelError) {
+      console.error(
+        `[PredictionMarketAgent:${this.config.modelId}] Failed to get model:`,
+        modelError
+      );
+      throw modelError;
+    }
+
     // Create ToolLoopAgent for this run
     const agent = new ToolLoopAgent({
-      model: await getModel(this.config.modelId),
+      model,
       instructions: TRADING_SYSTEM_PROMPT,
       tools,
       stopWhen: stepCountIs(this.config.maxSteps ?? 10),
@@ -102,15 +121,41 @@ export class PredictionMarketAgent {
       "Analyze prediction markets and execute trades if you find opportunities with >70% confidence.";
 
     console.log(
-      `[PredictionMarketAgent:${this.config.modelId}] Starting agent run`,
+      `[PredictionMarketAgent:${this.config.modelId}] Starting agent run`
     );
 
     // Run the agent with ToolLoopAgent.generate()
     // This is NOT durable - tools fire once without retry
-    const result = await agent.generate({ prompt });
+    let result;
+    try {
+      result = await agent.generate({ prompt });
+    } catch (agentError: unknown) {
+      // Log detailed error information for debugging
+      const error = agentError as Error & {
+        cause?: unknown;
+        statusCode?: number;
+        responseBody?: string;
+        url?: string;
+        requestBodyValues?: unknown;
+      };
+      console.error(
+        `[PredictionMarketAgent:${this.config.modelId}] Agent generate failed:`,
+        {
+          message: error.message,
+          name: error.name,
+          cause: error.cause,
+          statusCode: error.statusCode,
+          responseBody: error.responseBody,
+          url: error.url,
+          requestBodyValues: error.requestBodyValues,
+          stack: error.stack,
+        }
+      );
+      throw agentError;
+    }
 
     console.log(
-      `[PredictionMarketAgent:${this.config.modelId}] Completed with ${result.steps.length} steps`,
+      `[PredictionMarketAgent:${this.config.modelId}] Completed with ${result.steps.length} steps`
     );
 
     // Extract trades from tool call results
@@ -149,7 +194,7 @@ export class PredictionMarketAgent {
         input: unknown;
       }>;
       toolResults?: Array<{ toolCallId: string; output?: unknown }>;
-    }>,
+    }>
   ): ExecutedTrade[] {
     const trades: ExecutedTrade[] = [];
 
@@ -160,7 +205,7 @@ export class PredictionMarketAgent {
         // Handle increasePosition tool
         if (call.toolName === "increasePosition") {
           const resultEntry = step.toolResults.find(
-            (r) => r.toolCallId === call.toolCallId,
+            (r) => r.toolCallId === call.toolCallId
           );
 
           const typedOutput = resultEntry?.output as
@@ -197,7 +242,7 @@ export class PredictionMarketAgent {
         // Handle decreasePosition tool
         if (call.toolName === "decreasePosition") {
           const resultEntry = step.toolResults.find(
-            (r) => r.toolCallId === call.toolCallId,
+            (r) => r.toolCallId === call.toolCallId
           );
 
           const typedOutput = resultEntry?.output as
@@ -240,7 +285,7 @@ export class PredictionMarketAgent {
    */
   private determineDecision(
     text: string | undefined,
-    trades: ExecutedTrade[],
+    trades: ExecutedTrade[]
   ): DecisionType {
     if (trades.length > 0) {
       return trades[0].action === "buy" ? "buy" : "sell";
@@ -270,7 +315,7 @@ export class PredictionMarketAgent {
         input: unknown;
       }>;
       toolResults?: Array<{ toolCallId: string; output?: unknown }>;
-    }>,
+    }>
   ): number {
     for (const step of steps) {
       if (!step.toolCalls || !step.toolResults) continue;
@@ -278,7 +323,7 @@ export class PredictionMarketAgent {
       for (const call of step.toolCalls) {
         if (call.toolName === "getBalance") {
           const resultEntry = step.toolResults.find(
-            (r) => r.toolCallId === call.toolCallId,
+            (r) => r.toolCallId === call.toolCallId
           );
 
           const typedOutput = resultEntry?.output as
