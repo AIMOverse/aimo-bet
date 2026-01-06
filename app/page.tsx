@@ -31,7 +31,10 @@ export default function Home() {
     latestValues,
     deadModels,
     loading: performanceLoading,
-  } = usePerformanceChart({ sessionId });
+  } = usePerformanceChart({
+    sessionId,
+    since: "2026-01-06T06:50:00Z", // 2026-01-06 14:50 +08:00
+  });
   const { trades, isLoading: tradesLoading } = useSessionTrades(sessionId);
   const { positions, isLoading: positionsLoading } =
     useSessionPositions(sessionId);

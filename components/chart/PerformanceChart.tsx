@@ -407,66 +407,38 @@ export function PerformanceChart({
     });
   }, [data, valueDisplay, modelNames]);
 
-  // Calculate Y-axis domain: auto-scale based on data with padding
+  // Calculate Y-axis domain: 0 to max value + 10% padding
   const yDomain = useMemo(() => {
     const excludeKeys = new Set(["timestamp", "_ts"]);
 
-    // Find actual min and max values from data
-    let actualMin = Infinity;
+    // Find actual max value from data
     let actualMax = -Infinity;
 
     chartData.forEach((point) => {
       Object.entries(point).forEach(([key, value]) => {
         if (!excludeKeys.has(key) && typeof value === "number") {
-          actualMin = Math.min(actualMin, value);
           actualMax = Math.max(actualMax, value);
         }
       });
     });
 
     // Handle empty data case
-    if (!isFinite(actualMin) || !isFinite(actualMax)) {
+    if (!isFinite(actualMax)) {
       if (valueDisplay === "percent") {
-        return [-10, 10]; // -10% to +10%
+        return [0, 10]; // 0% to +10%
       }
-      return [DEFAULT_STARTING_CAPITAL * 0.9, DEFAULT_STARTING_CAPITAL * 1.1];
+      return [0, DEFAULT_STARTING_CAPITAL * 1.1];
     }
 
-    // Calculate range and add padding (10% on each side)
-    const range = actualMax - actualMin;
-    const padding = Math.max(
-      range * 0.1,
-      valueDisplay === "percent" ? 2 : DEFAULT_STARTING_CAPITAL * 0.02
-    );
+    // Add 10% padding to max
+    const maxY = actualMax * 1.1;
 
-    let minY = actualMin - padding;
-    let maxY = actualMax + padding;
-
-    // Round to nice values
+    // For percent mode, ensure we show at least up to +10%
     if (valueDisplay === "percent") {
-      // Round to nearest 5% for percent mode
-      minY = Math.floor(minY / 5) * 5;
-      maxY = Math.ceil(maxY / 5) * 5;
-      // Ensure at least -5% to +5% range
-      if (maxY - minY < 10) {
-        const mid = (minY + maxY) / 2;
-        minY = mid - 5;
-        maxY = mid + 5;
-      }
-    } else {
-      // Round to nice dollar values
-      const step = range > 1000 ? 500 : range > 100 ? 50 : 10;
-      minY = Math.floor(minY / step) * step;
-      maxY = Math.ceil(maxY / step) * step;
-      // Ensure minimum range
-      if (maxY - minY < step * 2) {
-        const mid = (minY + maxY) / 2;
-        minY = mid - step;
-        maxY = mid + step;
-      }
+      return [0, Math.max(maxY, 10)];
     }
 
-    return [minY, maxY];
+    return [0, maxY];
   }, [chartData, valueDisplay]);
 
   // Calculate X-axis domain: first data point to now + 1 hour

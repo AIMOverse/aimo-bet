@@ -10,7 +10,10 @@ import type {
 
 interface UsePerformanceChartOptions {
   sessionId: string | null;
+  /** Number of hours back to fetch data (default: 24). Ignored if `since` is provided. */
   hoursBack?: number;
+  /** Fetch data since this timestamp (ISO string or Date). Takes precedence over `hoursBack`. */
+  since?: string | Date;
 }
 
 interface UsePerformanceChartReturn {
@@ -45,10 +48,11 @@ interface DecisionRow {
 export function usePerformanceChart({
   sessionId,
   hoursBack = 24,
+  since,
 }: UsePerformanceChartOptions): UsePerformanceChartReturn {
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [latestValues, setLatestValues] = useState<Map<string, number>>(
-    new Map(),
+    new Map()
   );
   const [deadModels, setDeadModels] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -66,7 +70,7 @@ export function usePerformanceChart({
   const transformToChartData = useCallback(
     (
       decisions: DecisionRow[],
-      sessions: Map<string, AgentSessionRow>,
+      sessions: Map<string, AgentSessionRow>
     ): ChartDataPoint[] => {
       // Get all model names from sessions (source of truth)
       const allModels = Array.from(sessions.values()).map((s) => s.model_name);
@@ -129,7 +133,7 @@ export function usePerformanceChart({
 
       return result;
     },
-    [],
+    []
   );
 
   useEffect(() => {
@@ -139,9 +143,12 @@ export function usePerformanceChart({
       return;
     }
 
-    const since = new Date(
-      Date.now() - hoursBack * 60 * 60 * 1000,
-    ).toISOString();
+    // Use `since` if provided, otherwise calculate from `hoursBack`
+    const sinceTimestamp = since
+      ? since instanceof Date
+        ? since.toISOString()
+        : since
+      : new Date(Date.now() - hoursBack * 60 * 60 * 1000).toISOString();
 
     const fetchData = async () => {
       try {
@@ -185,10 +192,10 @@ export function usePerformanceChart({
             created_at,
             portfolio_value_after,
             agent_sessions!inner(session_id, model_name)
-          `,
+          `
           )
           .eq("agent_sessions.session_id", sessionId)
-          .gte("created_at", since)
+          .gte("created_at", sinceTimestamp)
           .order("created_at", { ascending: true });
 
         if (decisionsError) {
@@ -204,7 +211,7 @@ export function usePerformanceChart({
               portfolio_value_after: row.portfolio_value_after as number,
               model_name: agentSessions.model_name,
             };
-          },
+          }
         );
 
         // Transform to chart data (all models included)
@@ -212,7 +219,7 @@ export function usePerformanceChart({
       } catch (err) {
         console.error("[usePerformanceChart] Error fetching data:", err);
         setError(
-          err instanceof Error ? err : new Error("Failed to fetch chart data"),
+          err instanceof Error ? err : new Error("Failed to fetch chart data")
         );
       } finally {
         setLoading(false);
@@ -233,7 +240,7 @@ export function usePerformanceChart({
           table: "agent_decisions",
         },
         async (
-          payload: RealtimePostgresInsertPayload<Record<string, unknown>>,
+          payload: RealtimePostgresInsertPayload<Record<string, unknown>>
         ) => {
           try {
             const agentSessionId = payload.new.agent_session_id as string;
@@ -273,7 +280,7 @@ export function usePerformanceChart({
             setChartData((prev: ChartDataPoint[]) => {
               const updated = [...prev];
               const existingPointIndex = updated.findIndex(
-                (p) => p.timestamp === newPoint.created_at,
+                (p) => p.timestamp === newPoint.created_at
               );
 
               if (existingPointIndex >= 0) {
@@ -309,10 +316,10 @@ export function usePerformanceChart({
           } catch (err) {
             console.error(
               "[usePerformanceChart] Error processing decision update:",
-              err,
+              err
             );
           }
-        },
+        }
       )
       // Listen for agent_sessions updates (current_value changes)
       .on(
@@ -365,10 +372,10 @@ export function usePerformanceChart({
           } catch (err) {
             console.error(
               "[usePerformanceChart] Error processing session update:",
-              err,
+              err
             );
           }
-        },
+        }
       )
       // Listen for new agent_sessions (new models joining)
       .on(
@@ -436,10 +443,10 @@ export function usePerformanceChart({
           } catch (err) {
             console.error(
               "[usePerformanceChart] Error processing new session:",
-              err,
+              err
             );
           }
-        },
+        }
       )
       .subscribe((status: string) => {
         console.log(`[usePerformanceChart] Subscription status: ${status}`);
