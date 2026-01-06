@@ -305,15 +305,16 @@ export function getModelsWithWallets(): ModelDefinition[] {
 /**
  * Wallet private key environment variable mapping.
  * Maps model ID to corresponding private key env var.
+ * NOTE: These must match the canonical model IDs in the MODELS array (the `id` field).
  */
 const WALLET_PRIVATE_KEY_MAP: Record<string, string | undefined> = {
-  "openai/gpt-5.2": process.env.WALLET_OPENAI_PRIVATE,
+  "openai/gpt-5": process.env.WALLET_GPT_PRIVATE,
   "anthropic/claude-sonnet-4.5": process.env.WALLET_CLAUDE_PRIVATE,
   "deepseek/deepseek-v3.2": process.env.WALLET_DEEPSEEK_PRIVATE,
-  "z-ai/glm-4.7": process.env.WALLET_GLM_PRIVATE,
-  "x-ai/grok-4": process.env.WALLET_GROK_PRIVATE,
+  "z-ai/glm-4.6": process.env.WALLET_GLM_PRIVATE,
+  "xai/grok-4": process.env.WALLET_GROK_PRIVATE,
   "qwen/qwen3-max": process.env.WALLET_QWEN_PRIVATE,
-  "google/gemini-3-pro-preview": process.env.WALLET_GEMINI_PRIVATE,
+  "google/gemini-3-pro": process.env.WALLET_GEMINI_PRIVATE,
   "moonshotai/kimi-k2-0905": process.env.WALLET_KIMI_PRIVATE,
 };
 
@@ -322,5 +323,13 @@ const WALLET_PRIVATE_KEY_MAP: Record<string, string | undefined> = {
  * Private keys are stored in environment variables and never exposed to client.
  */
 export function getWalletPrivateKey(modelId: string): string | undefined {
-  return WALLET_PRIVATE_KEY_MAP[modelId];
+  const privateKey = WALLET_PRIVATE_KEY_MAP[modelId];
+  if (!privateKey) {
+    console.warn(
+      `[Catalog] No private key found for model "${modelId}". Available keys: ${Object.keys(
+        WALLET_PRIVATE_KEY_MAP
+      ).join(", ")}`
+    );
+  }
+  return privateKey;
 }

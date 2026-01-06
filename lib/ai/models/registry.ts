@@ -33,9 +33,16 @@ const providerType = getProviderType();
 function resolveModelId(modelId: string, provider: Provider): string {
   const model = MODELS.find((m) => m.id === modelId);
   if (!model?.providerIds) {
+    console.log(
+      `[ModelRegistry] No provider mapping for "${modelId}", using as-is`
+    );
     return modelId;
   }
-  return model.providerIds[provider] ?? modelId;
+  const resolvedId = model.providerIds[provider] ?? modelId;
+  console.log(
+    `[ModelRegistry] Resolved "${modelId}" → "${resolvedId}" for provider="${provider}"`
+  );
+  return resolvedId;
 }
 
 /**
@@ -51,12 +58,20 @@ function resolveModelId(modelId: string, provider: Provider): string {
  * const result = await generateText({ model, prompt: "..." });
  */
 export async function getModel(modelId: string): Promise<LanguageModel> {
+  console.log(
+    `[ModelRegistry] getModel called with "${modelId}", provider="${providerType}"`
+  );
+
   const resolvedId = resolveModelId(modelId, providerType);
 
   if (providerType === "openrouter") {
+    console.log(`[ModelRegistry] Using OpenRouter for "${resolvedId}"`);
     return openrouter(resolvedId) as LanguageModel;
   }
 
+  console.log(
+    `[ModelRegistry] Using AiMo for "${resolvedId}" (canonical: "${modelId}")`
+  );
   // Pass both resolved ID (for API call) and canonical ID (for wallet lookup)
   return getAimoModel(resolvedId, modelId) as Promise<LanguageModel>;
 }

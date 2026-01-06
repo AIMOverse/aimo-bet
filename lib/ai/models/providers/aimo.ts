@@ -79,20 +79,28 @@ export async function getAimoProvider(
   canonicalId: string = modelId
 ) {
   const series = getSeriesFromModelId(canonicalId);
+  console.log(
+    `[AimoProvider] Getting provider for modelId="${modelId}", canonicalId="${canonicalId}", series="${series}"`
+  );
 
   // Return cached provider if available
   const cached = providerCache.get(series);
   if (cached) {
+    console.log(`[AimoProvider] Using cached provider for series="${series}"`);
     return cached;
   }
 
   // Get wallet for this series
   const privateKey = WALLET_PRIVATE_KEYS[series];
   if (!privateKey) {
-    throw new Error(
-      `No wallet configured for model series "${series}". Set WALLET_${series.toUpperCase()}_PRIVATE environment variable.`
-    );
+    const error = `No wallet configured for model series "${series}". Set WALLET_${series.toUpperCase()}_PRIVATE environment variable.`;
+    console.error(`[AimoProvider] ${error}`);
+    throw new Error(error);
   }
+
+  console.log(
+    `[AimoProvider] Creating new provider for series="${series}" with wallet`
+  );
 
   // Create and cache the provider
   const provider = await createProviderWithWallet(privateKey);
@@ -117,6 +125,10 @@ export async function getAimoModel(
   // This handles mapping internal IDs (e.g. "qwen/qwen3-max") to provider IDs (e.g. "qwen/qwen3-235b-a22b")
   const model = getModelById(canonicalId);
   const providerModelId = model?.providerIds?.aimo || modelId;
+
+  console.log(
+    `[AimoProvider] getAimoModel: modelId="${modelId}", canonicalId="${canonicalId}", resolved="${providerModelId}"`
+  );
 
   const provider = await getAimoProvider(providerModelId, canonicalId);
   return provider.chat(providerModelId);
