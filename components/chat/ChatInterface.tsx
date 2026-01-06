@@ -6,11 +6,28 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { useChat } from "@/hooks/chat/useChat";
-import { getSeriesLogoPath } from "@/lib/ai/models/catalog";
 import type {
   ArenaModel,
   ChatMessage as ChatMessageType,
 } from "@/lib/supabase/types";
+
+// Map series to logo filename
+const SERIES_LOGO_MAP: Record<string, string> = {
+  openai: "openai.svg",
+  claude: "claude-color.svg",
+  gemini: "gemini-color.svg",
+  deepseek: "deepseek-color.svg",
+  qwen: "qwen-color.svg",
+  grok: "grok.svg",
+  kimi: "kimi-color.svg",
+  glm: "zai.svg",
+};
+
+function getLogoPathFromSeries(series?: string): string | undefined {
+  if (!series) return undefined;
+  const filename = SERIES_LOGO_MAP[series];
+  return filename ? `/model-series/${filename}` : undefined;
+}
 
 // Format time ago
 function formatTimeAgo(timestamp: number): string {
@@ -34,13 +51,13 @@ function MessageBubble({
   modelInfo,
 }: {
   message: ChatMessageType;
-  modelInfo?: { name: string; color: string };
+  modelInfo?: { name: string; color: string; logoPath?: string };
 }) {
   const text = message.parts?.find((p) => p.type === "text")?.text ?? "";
   const createdAt = message.metadata?.createdAt ?? 0;
   const name = modelInfo?.name ?? "Model";
   const color = modelInfo?.color ?? "#6366f1";
-  const logoPath = getSeriesLogoPath(name);
+  const logoPath = modelInfo?.logoPath;
   const initial = name.charAt(0).toUpperCase();
 
   return (
@@ -88,11 +105,18 @@ export function ChatInterface({
   const { messages, isLoading, error } = useChat({ sessionId });
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Model info lookup map
+  // Model info lookup map (includes logoPath derived from series)
   const modelInfoMap = useMemo(() => {
-    const map = new Map<string, { name: string; color: string }>();
+    const map = new Map<
+      string,
+      { name: string; color: string; logoPath?: string }
+    >();
     for (const model of models) {
-      map.set(model.id, { name: model.name, color: model.chartColor });
+      map.set(model.id, {
+        name: model.name,
+        color: model.chartColor,
+        logoPath: getLogoPathFromSeries(model.series),
+      });
     }
     return map;
   }, [models]);

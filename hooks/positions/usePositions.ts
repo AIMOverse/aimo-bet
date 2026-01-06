@@ -19,6 +19,8 @@ export interface AgentPosition {
   // Enriched
   modelId?: string;
   modelName?: string;
+  modelColor?: string;
+  modelSeries?: string;
 }
 
 interface UsePositionsOptions {
@@ -192,6 +194,8 @@ function mapPositionRow(row: Record<string, unknown>): AgentPosition {
     quantity: row.quantity as number,
     modelId: agentSession.model_id,
     modelName: model?.name || agentSession.model_name,
+    modelColor: model?.chartColor,
+    modelSeries: model?.series,
   };
 }
 

@@ -19,14 +19,6 @@ export {
   getModelsWithWallets,
 } from "./catalog";
 
-// Provider configurations
-export {
-  PROVIDERS,
-  getProviderById,
-  getDefaultProvider,
-  type ProviderConfig,
-} from "@/lib/config";
-
 // Provider instances
 export { openrouter, getAimoProvider, getAimoModel } from "./providers";
 

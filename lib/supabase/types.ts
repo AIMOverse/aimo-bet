@@ -98,6 +98,7 @@ export interface ArenaModel {
   walletAddress?: string; // Public wallet address for on-chain trading
   avatarUrl?: string;
   chartColor: string;
+  series?: string; // Model series for logo display (e.g., "openai", "claude", "gemini")
   enabled: boolean;
   createdAt: Date;
 }

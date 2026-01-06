@@ -7,11 +7,26 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import type { AgentPosition } from "@/hooks/positions/usePositions";
 import { cn } from "@/lib/utils";
-import {
-  getSeriesLogoPath,
-  getModelColor,
-  DEFAULT_CHART_COLOR,
-} from "@/lib/ai/models/catalog";
+
+const DEFAULT_CHART_COLOR = "#6366f1";
+
+// Map series to logo filename
+const SERIES_LOGO_MAP: Record<string, string> = {
+  openai: "openai.svg",
+  claude: "claude-color.svg",
+  gemini: "gemini-color.svg",
+  deepseek: "deepseek-color.svg",
+  qwen: "qwen-color.svg",
+  grok: "grok.svg",
+  kimi: "kimi-color.svg",
+  glm: "zai.svg",
+};
+
+function getLogoPathFromSeries(series?: string): string | undefined {
+  if (!series) return undefined;
+  const filename = SERIES_LOGO_MAP[series];
+  return filename ? `/model-series/${filename}` : undefined;
+}
 
 interface PositionsTableProps {
   positions: AgentPosition[];
@@ -21,10 +36,8 @@ interface PositionsTableProps {
 function PositionRow({ position }: { position: AgentPosition }) {
   const isYes = position.side === "yes";
   const modelName = position.modelName ?? "Model";
-  const logoPath = getSeriesLogoPath(modelName);
-  const chartColor = position.modelName
-    ? getModelColor(position.modelName)
-    : DEFAULT_CHART_COLOR;
+  const logoPath = getLogoPathFromSeries(position.modelSeries);
+  const chartColor = position.modelColor ?? DEFAULT_CHART_COLOR;
   const initial = modelName.charAt(0).toUpperCase();
 
   return (

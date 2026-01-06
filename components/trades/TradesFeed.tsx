@@ -6,9 +6,25 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
-import { getSeriesLogoPath } from "@/lib/ai/models/catalog";
 import type { AgentTrade } from "@/hooks/trades/useTrades";
-import { MODELS } from "@/lib/ai/models";
+
+// Map series to logo filename
+const SERIES_LOGO_MAP: Record<string, string> = {
+  openai: "openai.svg",
+  claude: "claude-color.svg",
+  gemini: "gemini-color.svg",
+  deepseek: "deepseek-color.svg",
+  qwen: "qwen-color.svg",
+  grok: "grok.svg",
+  kimi: "kimi-color.svg",
+  glm: "zai.svg",
+};
+
+function getLogoPathFromSeries(series?: string): string | undefined {
+  if (!series) return undefined;
+  const filename = SERIES_LOGO_MAP[series];
+  return filename ? `/model-series/${filename}` : undefined;
+}
 
 interface TradesFeedProps {
   trades: AgentTrade[];
@@ -47,7 +63,7 @@ function TradeCard({ trade }: { trade: AgentTrade }) {
   const isYes = trade.side === "yes";
   const modelName = trade.modelName || "Model";
   const chartColor = trade.modelColor || "#6366f1";
-  const logoPath = getSeriesLogoPath(modelName);
+  const logoPath = getLogoPathFromSeries(trade.modelSeries);
   const initial = modelName.charAt(0).toUpperCase();
 
   return (

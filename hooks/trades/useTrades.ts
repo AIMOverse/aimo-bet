@@ -24,6 +24,7 @@ export interface AgentTrade {
   modelId?: string;
   modelName?: string;
   modelColor?: string;
+  modelSeries?: string;
 }
 
 interface UseTradesOptions {
@@ -187,6 +188,7 @@ function mapTradeRow(row: Record<string, unknown>): AgentTrade {
     modelId: agentSession.model_id,
     modelName: model?.name || agentSession.model_name,
     modelColor: model?.chartColor,
+    modelSeries: model?.series,
   };
 }
 
