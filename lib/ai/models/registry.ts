@@ -1,4 +1,5 @@
 import type { LanguageModel } from "ai";
+import { MODELS } from "./catalog";
 import { getAimoModel } from "./providers/aimo";
 import { openrouter } from "./providers/openrouter";
 
@@ -26,6 +27,18 @@ function getProviderType(): Provider {
 const providerType = getProviderType();
 
 /**
+ * Resolve the provider-specific model ID.
+ * Falls back to the canonical ID if no provider-specific mapping exists.
+ */
+function resolveModelId(modelId: string, provider: Provider): string {
+  const model = MODELS.find((m) => m.id === modelId);
+  if (!model?.providerIds) {
+    return modelId;
+  }
+  return model.providerIds[provider] ?? modelId;
+}
+
+/**
  * Get a language model by ID.
  *
  * When using AiMo provider, each model uses its own wallet for API payments.
@@ -38,9 +51,12 @@ const providerType = getProviderType();
  * const result = await generateText({ model, prompt: "..." });
  */
 export async function getModel(modelId: string): Promise<LanguageModel> {
+  const resolvedId = resolveModelId(modelId, providerType);
+
   if (providerType === "openrouter") {
-    return openrouter(modelId) as LanguageModel;
+    return openrouter(resolvedId) as LanguageModel;
   }
 
-  return getAimoModel(modelId) as Promise<LanguageModel>;
+  // Pass both resolved ID (for API call) and canonical ID (for wallet lookup)
+  return getAimoModel(resolvedId, modelId) as Promise<LanguageModel>;
 }

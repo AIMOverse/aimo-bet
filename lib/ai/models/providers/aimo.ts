@@ -1,14 +1,18 @@
+import { SOLANA_RPC_URL } from "@/lib/config";
 import { aimoNetwork } from "@aimo.network/provider";
 import { SvmClientSigner, SOLANA_MAINNET_CHAIN_ID } from "@aimo.network/svm";
 import { createKeyPairSignerFromBytes, getBase58Encoder } from "@solana/kit";
+import { getModelById } from "../catalog";
 
 const AIMO_BASE_URL = "https://beta.aimo.network";
 
 /**
  * Wallet private key mapping by model series.
+ * The series name is defined in the model catalog, not extracted from the model ID.
+ * Maps series name -> env var name (e.g., openai series uses WALLET_GPT_PRIVATE)
  */
 const WALLET_PRIVATE_KEYS: Record<string, string | undefined> = {
-  openai: process.env.WALLET_OPENAI_PRIVATE,
+  openai: process.env.WALLET_GPT_PRIVATE,
   claude: process.env.WALLET_CLAUDE_PRIVATE,
   deepseek: process.env.WALLET_DEEPSEEK_PRIVATE,
   glm: process.env.WALLET_GLM_PRIVATE,
@@ -34,6 +38,9 @@ async function createProviderWithWallet(privateKeyBase58: string) {
   const signer = new SvmClientSigner({
     signer: keypairSigner,
     chainId: SOLANA_MAINNET_CHAIN_ID,
+    config: {
+      rpcUrl: SOLANA_RPC_URL,
+    },
   });
 
   return aimoNetwork({
@@ -44,9 +51,17 @@ async function createProviderWithWallet(privateKeyBase58: string) {
 
 /**
  * Get series from model ID.
- * e.g., "openai/gpt-5.2" -> "openai"
+ * Uses the model catalog to get the correct series name, with fallback to extracting from model ID.
+ * e.g., "xai/grok-4" -> series: "grok" (from catalog)
+ * e.g., "openai/gpt-5.2" -> series: "openai" (from catalog or fallback)
  */
 function getSeriesFromModelId(modelId: string): string {
+  // First try to get series from the model catalog
+  const model = getModelById(modelId);
+  if (model?.series) {
+    return model.series;
+  }
+  // Fallback to extracting from model ID prefix
   return modelId.split("/")[0];
 }
 
@@ -54,11 +69,15 @@ function getSeriesFromModelId(modelId: string): string {
  * Get an AiMo provider for a specific model.
  * Each model uses its own wallet for API payments.
  *
- * @param modelId - Model ID (e.g., "openai/gpt-5.2")
+ * @param modelId - Provider-specific model ID (e.g., "openai/gpt-5")
+ * @param canonicalId - Canonical model ID for catalog lookup (e.g., "openai/gpt-5")
  * @returns AiMo provider configured with the model's wallet
  */
-export async function getAimoProvider(modelId: string) {
-  const series = getSeriesFromModelId(modelId);
+export async function getAimoProvider(
+  modelId: string,
+  canonicalId: string = modelId
+) {
+  const series = getSeriesFromModelId(canonicalId);
 
   // Return cached provider if available
   const cached = providerCache.get(series);
@@ -70,7 +89,7 @@ export async function getAimoProvider(modelId: string) {
   const privateKey = WALLET_PRIVATE_KEYS[series];
   if (!privateKey) {
     throw new Error(
-      `No wallet configured for model series "${series}". Set WALLET_${series.toUpperCase()}_PRIVATE environment variable.`,
+      `No wallet configured for model series "${series}". Set WALLET_${series.toUpperCase()}_PRIVATE environment variable.`
     );
   }
 
@@ -85,10 +104,14 @@ export async function getAimoProvider(modelId: string) {
  * Get a language model from AiMo Network.
  * Uses the model's own wallet for API payments.
  *
- * @param modelId - Model ID (e.g., "openai/gpt-5.2")
+ * @param modelId - Provider-specific model ID (e.g., "openai/gpt-5")
+ * @param canonicalId - Canonical model ID for catalog lookup (defaults to modelId)
  * @returns Language model instance
  */
-export async function getAimoModel(modelId: string) {
-  const provider = await getAimoProvider(modelId);
+export async function getAimoModel(
+  modelId: string,
+  canonicalId: string = modelId
+) {
+  const provider = await getAimoProvider(modelId, canonicalId);
   return provider.chat(modelId);
 }

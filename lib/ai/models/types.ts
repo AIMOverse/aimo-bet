@@ -25,6 +25,15 @@ export interface ModelDefinition {
   supportsVision?: boolean;
   /** Whether this model supports function calling */
   supportsFunctions?: boolean;
+  /**
+   * Provider-specific model IDs.
+   * Use when the same model has different IDs across providers.
+   * Falls back to the canonical `id` if not specified.
+   */
+  providerIds?: {
+    aimo?: string;
+    openrouter?: string;
+  };
   // Arena-specific fields (optional)
   /** Model series identifier for logo display (e.g., "openai", "claude", "gemini") */
   series?: string;
