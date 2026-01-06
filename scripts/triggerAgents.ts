@@ -10,7 +10,6 @@
  *   npx tsx scripts/triggerAgents.ts --cron       # Simulate cron trigger
  *   npx tsx scripts/triggerAgents.ts --market     # Simulate market signal
  *   npx tsx scripts/triggerAgents.ts --poll       # Poll until workflows complete
- *   npx tsx scripts/triggerAgents.ts --test       # Force agents to buy $1-5 (test mode)
  *
  * Options:
  *   --model <id>      Only trigger a specific model
@@ -18,7 +17,6 @@
  *   --market          Use market trigger type with mock signal
  *   --check           Just check endpoint status, don't trigger
  *   --poll            Wait for workflows to complete (polls status)
- *   --test            Force agents to execute a $1-5 trade (test mode)
  *   --base-url <url>  Override API base URL (default: http://localhost:3000)
  *
  * Environment:
@@ -41,7 +39,6 @@ interface TriggerRequest {
     data: Record<string, unknown>;
   };
   triggerType: "market" | "cron" | "manual";
-  testMode?: boolean;
 }
 
 interface SpawnedWorkflow {
@@ -93,7 +90,6 @@ function parseArgs(): {
   triggerType: "market" | "cron" | "manual";
   check: boolean;
   poll: boolean;
-  testMode: boolean;
   baseUrl?: string;
 } {
   const args = process.argv.slice(2);
@@ -101,7 +97,6 @@ function parseArgs(): {
   let triggerType: "market" | "cron" | "manual" = "manual";
   let check = false;
   let poll = false;
-  let testMode = false;
   let baseUrl: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
@@ -118,12 +113,10 @@ function parseArgs(): {
       check = true;
     } else if (arg === "--poll") {
       poll = true;
-    } else if (arg === "--test") {
-      testMode = true;
     }
   }
 
-  return { modelId, triggerType, check, poll, testMode, baseUrl };
+  return { modelId, triggerType, check, poll, baseUrl };
 }
 
 async function checkEndpoint(): Promise<void> {
@@ -217,7 +210,6 @@ async function triggerAgents(
   modelId: string | undefined,
   triggerType: "market" | "cron" | "manual",
   poll: boolean,
-  testMode: boolean,
 ): Promise<void> {
   if (!WEBHOOK_SECRET) {
     console.error("❌ WEBHOOK_SECRET environment variable is required");
@@ -231,13 +223,11 @@ async function triggerAgents(
   console.log(`🚀 Triggering agents...`);
   console.log(`   Type: ${triggerType}`);
   console.log(`   Model: ${modelId || "all"}`);
-  console.log(`   Test mode: ${testMode ? "YES (forcing $1-5 trade)" : "no"}`);
   console.log(`   URL: ${BASE_URL}/api/agents/trigger\n`);
 
   const body: TriggerRequest = {
     triggerType,
     modelId,
-    testMode,
   };
 
   // Add mock market signal if market trigger
@@ -310,7 +300,7 @@ async function triggerAgents(
 }
 
 async function main(): Promise<void> {
-  const { modelId, triggerType, check, poll, testMode, baseUrl } = parseArgs();
+  const { modelId, triggerType, check, poll, baseUrl } = parseArgs();
 
   // Override BASE_URL if provided via command line
   if (baseUrl) {
@@ -321,7 +311,7 @@ async function main(): Promise<void> {
     if (check) {
       await checkEndpoint();
     } else {
-      await triggerAgents(modelId, triggerType, poll, testMode);
+      await triggerAgents(modelId, triggerType, poll);
     }
   } catch (error) {
     if (error instanceof Error && error.message.includes("ECONNREFUSED")) {

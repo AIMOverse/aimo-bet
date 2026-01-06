@@ -19,8 +19,6 @@ import type { AgentSession } from "@/lib/supabase/types";
 export interface TradingInput {
   modelId: string;
   walletAddress: string;
-  /** When true, uses test prompt that forces a $1-5 trade */
-  testMode?: boolean;
 }
 
 // Re-export TradingResult for consumers
@@ -150,9 +148,7 @@ async function runAgentStep(input: TradingInput): Promise<TradingResult> {
 
   // Run the agent with minimal input (KV cache friendly)
   // Agent will call getBalance tool to fetch current balance
-  return await agent.run({
-    testMode: input.testMode,
-  });
+  return await agent.run({});
 }
 
 /**

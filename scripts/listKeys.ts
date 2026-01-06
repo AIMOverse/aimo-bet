@@ -23,14 +23,14 @@ const KEYS_DIR = ".keys";
 
 // Model names for env var generation (matches catalog.ts order)
 const MODEL_ENV_NAMES = [
-  "GPT4O",
-  "GPT4O_MINI",
-  "CLAUDE_SONNET",
-  "CLAUDE_HAIKU",
-  "GEMINI_FLASH",
+  "GPT",
+  "CLAUDE",
+  "GEMINI",
+  "GROK",
   "DEEPSEEK",
-  "LLAMA",
-  "MISTRAL",
+  "GLM",
+  "QWEN",
+  "KIMI",
 ];
 
 interface KeyInfo {

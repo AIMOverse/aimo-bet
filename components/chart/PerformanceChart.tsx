@@ -18,7 +18,7 @@ import type { ChartDataPoint, LeaderboardEntry } from "@/lib/supabase/types";
 import { MODELS } from "@/lib/ai/models";
 import { getSeriesLogoPath } from "@/lib/ai/models/catalog";
 import { DEFAULT_STARTING_CAPITAL, CHART_CONFIG } from "@/lib/config";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -360,6 +360,17 @@ export function PerformanceChart({
   const [valueDisplay, setValueDisplay] = useState<ValueDisplay>("dollar");
   const [hoveredModel, setHoveredModel] = useState<string | null>(null);
 
+  // Real-time current time for X-axis (updates every minute)
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNow(Date.now());
+    }, 60 * 1000); // Update every minute
+
+    return () => clearInterval(interval);
+  }, []);
+
   // Get model names from data keys (excluding timestamp)
   const modelNames = useMemo(() => {
     if (data.length === 0) return [];
@@ -396,63 +407,57 @@ export function PerformanceChart({
     });
   }, [data, valueDisplay, modelNames]);
 
-  // Calculate Y-axis domain
+  // Calculate Y-axis domain: start from 0, max at least 2x starting capital
   const yDomain = useMemo(() => {
-    // Keys to exclude from Y-axis domain calculation
     const excludeKeys = new Set(["timestamp", "_ts"]);
+    const defaultMax = DEFAULT_STARTING_CAPITAL * 2; // $200 for $100 starting
 
     if (valueDisplay === "percent") {
-      let min = 0;
-      let max = 0;
+      // Percent mode: 0% to +100% minimum
+      const defaultMaxPercent = 100; // +100% = 2x starting capital
+
+      let actualMax = 0;
       chartData.forEach((point) => {
         Object.entries(point).forEach(([key, value]) => {
           if (!excludeKeys.has(key) && typeof value === "number") {
-            min = Math.min(min, value);
-            max = Math.max(max, value);
+            actualMax = Math.max(actualMax, value);
           }
         });
       });
-      const padding = Math.max((max - min) * 0.1, 2);
-      return [Math.floor(min - padding), Math.ceil(max + padding)];
+
+      // Use default or actual max (with 10% padding if exceeding default)
+      const maxY =
+        actualMax > defaultMaxPercent ? actualMax * 1.1 : defaultMaxPercent;
+
+      return [0, Math.ceil(maxY)];
     }
 
-    let min = 0;
-    let max = DEFAULT_STARTING_CAPITAL;
+    // Dollar mode: $0 to 2x starting capital minimum
+    let actualMax = 0;
     chartData.forEach((point) => {
       Object.entries(point).forEach(([key, value]) => {
         if (!excludeKeys.has(key) && typeof value === "number") {
-          min = Math.min(min, value);
-          max = Math.max(max, value);
+          actualMax = Math.max(actualMax, value);
         }
       });
     });
-    const padding = (max - min) * 0.05;
-    return [Math.floor(min - padding), Math.ceil(max + padding)];
+
+    // Use default or actual max (with 10% padding if exceeding default)
+    const maxY = actualMax > defaultMax ? actualMax * 1.1 : defaultMax;
+
+    return [0, Math.ceil(maxY)];
   }, [chartData, valueDisplay]);
 
-  // Calculate X-axis domain to extend one interval beyond last data point
-  const xDomain = useMemo((): [number, number] | undefined => {
-    if (chartData.length < 2) return undefined;
+  // Calculate X-axis domain: first data point to now + 1 hour
+  const xDomain = useMemo((): [number, number] => {
+    const oneHourLater = now + 60 * 60 * 1000;
 
-    const timestamps = chartData.map((p) => p._ts as number);
+    // Start from first data point, or "now" if no data
+    const firstTimestamp =
+      chartData.length > 0 ? (chartData[0]._ts as number) : now;
 
-    // Calculate intervals between points
-    const intervals: number[] = [];
-    for (let i = 1; i < timestamps.length; i++) {
-      intervals.push(timestamps[i] - timestamps[i - 1]);
-    }
-
-    // Use median interval (more robust than average)
-    intervals.sort((a, b) => a - b);
-    const medianInterval =
-      intervals[Math.floor(intervals.length / 2)] || 5 * 60 * 1000;
-
-    // Extend to one interval beyond last point
-    const lastTimestamp = timestamps[timestamps.length - 1];
-    const futureTimestamp = lastTimestamp + medianInterval;
-
-    return [timestamps[0], futureTimestamp];
-  }, [chartData]);
+    return [firstTimestamp, oneHourLater];
+  }, [chartData, now]);
 
   return (
     <Card className="flex-1">

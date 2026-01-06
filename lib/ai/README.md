@@ -120,7 +120,6 @@ import { tradingAgentWorkflow } from "@/lib/ai/workflows";
 const input = {
   modelId: "openai/gpt-5.2",
   walletAddress: "...",
-  testMode: false,  // Optional: force small trade for testing
 };
 
 // Returns TradingResult with reasoning, trades, decision
@@ -143,7 +142,7 @@ interface AgentConfig {
 
 ```typescript
 interface AgentRunInput {
-  testMode?: boolean; // Force small trade for testing
+  // Currently empty - agent uses tools for all context
 }
 ```
 
@@ -371,10 +370,6 @@ export const TRADING_SYSTEM_PROMPT = `You are an autonomous prediction market tr
 
 ## Trading Rules
 ...`;
-
-// Test mode instruction (appended for testing)
-export const TEST_MODE_INSTRUCTION = `## TEST MODE - Execute Trade
-...`;
 ```
 
 ## Agent Implementation
@@ -407,9 +402,7 @@ async run(input: AgentRunInput): Promise<TradingResult> {
   };
 
   // Static prompt for KV cache optimization
-  const prompt = input.testMode
-    ? TEST_MODE_INSTRUCTION
-    : "Analyze prediction markets and execute trades if you find opportunities with >70% confidence.";
+  const prompt = "Analyze prediction markets and execute trades if you find opportunities with >70% confidence.";
 
   // Run agent - it will call getBalance tool to fetch balance
   const result = await agent.generate({ prompt });
@@ -431,7 +424,6 @@ The workflow is simplified - no balance fetching step. Agent fetches via tool.
 interface TradingInput {
   modelId: string;
   walletAddress: string;
-  testMode?: boolean;
 }
 
 // Step 3: Run agent (fetches balance via getBalance tool)
@@ -446,9 +438,7 @@ async function runAgentStep(input: TradingInput): Promise<TradingResult> {
   });
 
   // Agent will call getBalance tool to fetch current balance
-  return await agent.run({
-    testMode: input.testMode,
-  });
+  return await agent.run({});
 }
 
 // Step 4: Record all results atomically

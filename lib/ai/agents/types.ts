@@ -37,10 +37,8 @@ export interface MarketSignal {
  * Lean input for agent run - minimal context for KV cache optimization
  * Agent discovers balance and market details via tools for fresher data
  */
-export interface AgentRunInput {
-  /** When true, uses test prompt that forces a $1-5 trade */
-  testMode?: boolean;
-}
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface AgentRunInput {}
 
 // =============================================================================
 // Agent Result (Output from Agent)

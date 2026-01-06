@@ -42,8 +42,6 @@ interface TriggerRequest {
   signal?: MarketSignal;
   /** What initiated this trigger */
   triggerType: TriggerType;
-  /** When true, uses test prompt that forces a $1-5 trade */
-  testMode?: boolean;
   /** When true, only trigger agents holding a position in signal.ticker */
   filterByPosition?: boolean;
 }
@@ -89,7 +87,6 @@ export async function POST(req: NextRequest) {
       modelId,
       signal,
       triggerType = "manual",
-      testMode = false,
       filterByPosition = false,
     } = body;
 
@@ -178,7 +175,6 @@ export async function POST(req: NextRequest) {
         const input: TradingInput = {
           modelId: model.id,
           walletAddress: model.walletAddress!,
-          testMode,
         };
 
         // Start workflow (returns immediately, executes in background)
