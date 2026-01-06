@@ -18,10 +18,7 @@ import { nanoid } from "nanoid";
 import { type KeyPairSigner } from "@solana/kit";
 import { getModel } from "@/lib/ai/models";
 import { createSignerFromBase58SecretKey } from "@/lib/solana/wallets";
-import {
-  TRADING_SYSTEM_PROMPT,
-  TEST_MODE_INSTRUCTION,
-} from "@/lib/ai/prompts/systemPrompt";
+import { TRADING_SYSTEM_PROMPT } from "@/lib/ai/prompts/systemPrompt";
 
 // Direct tool imports
 import { discoverEventTool } from "@/lib/ai/tools/discoverEvent";
@@ -62,9 +59,9 @@ export class PredictionMarketAgent {
    * KV Cache Optimization:
    * - Static system prompt (TRADING_SYSTEM_PROMPT) is cacheable
    * - Agent fetches balance via getBalance tool (appends to cache)
-   * - User prompt is static ("Analyze markets...") or test mode instruction
+   * - User prompt is static ("Analyze markets...")
    */
-  async run(input: AgentRunInput): Promise<TradingResult> {
+  async run(_input: AgentRunInput): Promise<TradingResult> {
     // Create signer from private key if available
     let signer: KeyPairSigner | undefined;
     if (this.config.privateKey) {
@@ -101,9 +98,8 @@ export class PredictionMarketAgent {
 
     // Static prompt for KV cache optimization
     // Agent will call getBalance tool to get current balance
-    const prompt = input.testMode
-      ? TEST_MODE_INSTRUCTION
-      : "Analyze prediction markets and execute trades if you find opportunities with >70% confidence.";
+    const prompt =
+      "Analyze prediction markets and execute trades if you find opportunities with >70% confidence.";
 
     console.log(
       `[PredictionMarketAgent:${this.config.modelId}] Starting agent run`,
