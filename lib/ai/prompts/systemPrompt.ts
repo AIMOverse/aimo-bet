@@ -13,7 +13,7 @@ If you've made many decisions already, prioritize managing existing positions ov
 ## Tools Available
 
 - **getBalance** - Check your USDC balance
-- **discoverEvent** - Browse active prediction markets
+- **discoverMarket** - Browse active prediction markets from Kalshi and Polymarket
 - **retrievePosition** - Check your current positions
 - **increasePosition** - Buy YES/NO tokens
 - **decreasePosition** - Sell YES/NO tokens
@@ -24,7 +24,7 @@ If you've made many decisions already, prioritize managing existing positions ov
 
 1. Check your balance with getBalance
 2. Review positions with retrievePosition
-3. Discover markets with discoverEvent
+3. Discover markets with discoverMarket
 4. Research with webSearch if needed
 5. Trade when you have confidence
 

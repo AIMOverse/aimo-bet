@@ -2,8 +2,26 @@
 // AI Tools - Prediction Market Trading Tools
 // ============================================================================
 
-// Market Discovery - Event-centric discovery
-export { discoverEventTool, createDiscoverEventTool } from "./discoverEvent";
+// Market Discovery - Multi-exchange unified discovery
+export {
+  discoverMarketTool,
+  discoverMarketFromKalshiTool,
+  discoverMarketFromPolymarketTool,
+  UNIFIED_CATEGORIES,
+  getKalshiCategories,
+  getPolymarketTags,
+  getAllUnifiedCategories,
+} from "./discover";
+
+export type {
+  UnifiedMarket,
+  UnifiedCategory,
+  Exchange,
+  CompositeCursor,
+  DiscoverMarketResult,
+  KalshiMarketResult,
+  PolymarketMarketResult,
+} from "./discover";
 
 // Position Management - creators that accept signer
 export {

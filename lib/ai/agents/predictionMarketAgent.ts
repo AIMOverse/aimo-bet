@@ -21,7 +21,7 @@ import { createSignerFromBase58SecretKey } from "@/lib/solana/wallets";
 import { TRADING_SYSTEM_PROMPT } from "@/lib/ai/prompts/systemPrompt";
 
 // Direct tool imports
-import { discoverEventTool } from "@/lib/ai/tools/discoverEvent";
+import { discoverMarketTool } from "@/lib/ai/tools/discover";
 import { createIncreasePositionTool } from "@/lib/ai/tools/increasePosition";
 import { createDecreasePositionTool } from "@/lib/ai/tools/decreasePosition";
 import { createRetrievePositionTool } from "@/lib/ai/tools/retrievePosition";
@@ -71,7 +71,7 @@ export class PredictionMarketAgent {
     // Create tools directly with wallet context
     const tools = {
       getBalance: createGetBalanceTool(this.config.walletAddress),
-      discoverEvent: discoverEventTool,
+      discoverMarket: discoverMarketTool,
       increasePosition: createIncreasePositionTool(
         this.config.walletAddress,
         signer
