@@ -4,13 +4,7 @@
 
 export type Exchange = "kalshi" | "polymarket";
 
-export type UnifiedCategory =
-  | "crypto"
-  | "politics"
-  | "sports"
-  | "economics"
-  | "entertainment"
-  | "science";
+export type UnifiedCategory = "crypto" | "politics" | "sports";
 
 // ============================================================================
 // Composite Cursor for Multi-Exchange Pagination
@@ -22,82 +16,97 @@ export interface CompositeCursor {
 }
 
 // ============================================================================
-// Unified Market Output
+// discoverMarkets Types
 // ============================================================================
 
-export interface UnifiedMarket {
+export interface MarketSummary {
   source: Exchange;
-
-  // Display
+  id: string;
   question: string;
-  event_title?: string;
   category: UnifiedCategory;
-
-  // Exchange-specific identifiers (mutually exclusive)
-  kalshi?: {
-    market_ticker: string; // Primary ID: "BTCD-25JAN09-B98000"
-    event_ticker: string; // Parent event: "BTCD-25JAN09"
-    series_ticker: string; // Series: "BTCD-DAILY"
-    yes_mint: string;
-    no_mint: string;
-  };
-  polymarket?: {
-    market_id: string; // Primary ID
-    event_id: string; // Parent event ID
-    condition_id: string; // Onchain identifier for resolution
-    yes_token_id: string; // Token ID for YES outcome
-    no_token_id: string; // Token ID for NO outcome
-    slug: string; // URL slug for direct access
-  };
-
-  // Market data (unified for comparison)
-  outcomes: ["Yes", "No"];
-  prices?: { yes: number; no: number };
+  price: { yes: number; no: number };
   volume_24h?: number;
-  liquidity?: number;
   status: "active" | "closed" | "resolved";
   end_date?: string;
 }
 
-// ============================================================================
-// Discovery Result
-// ============================================================================
-
-export interface DiscoverMarketResult {
+export interface DiscoverMarketsResult {
   success: boolean;
-  markets: UnifiedMarket[];
-
-  // Pagination
+  markets: MarketSummary[];
   cursor?: CompositeCursor;
   has_more: boolean;
-
-  // Metadata
   source_breakdown: { kalshi: number; polymarket: number };
-  filters_applied: Record<string, unknown>;
-
-  // Error handling
-  error?: string;
-  suggestion?: string;
-}
-
-// ============================================================================
-// Exchange-Specific Results (for sub-tools)
-// ============================================================================
-
-export interface KalshiMarketResult {
-  success: boolean;
-  markets: UnifiedMarket[];
-  cursor?: number;
-  has_more: boolean;
-  filters_applied: Record<string, unknown>;
   error?: string;
 }
 
-export interface PolymarketMarketResult {
+// ============================================================================
+// explainMarket Types
+// ============================================================================
+
+export interface RawOrderbook {
+  market: string;
+  asset_id: string;
+  timestamp: string;
+  hash: string;
+  bids: Array<{ price: string; size: string }>;
+  asks: Array<{ price: string; size: string }>;
+  min_order_size?: string;
+  tick_size?: string;
+  neg_risk?: boolean;
+}
+
+export interface ExplainMarketResult {
   success: boolean;
-  markets: UnifiedMarket[];
-  offset?: number;
-  has_more: boolean;
-  filters_applied: Record<string, unknown>;
+
+  // Identity
+  source: Exchange;
+  id: string;
+  question: string;
+  description?: string;
+
+  // Parent context
+  event: {
+    id: string;
+    title: string;
+    slug?: string;
+    series_ticker?: string;
+  };
+
+  // Trading identifiers
+  trading: {
+    market_ticker?: string;
+    yes_mint?: string;
+    no_mint?: string;
+    condition_id?: string;
+    yes_token_id?: string;
+    no_token_id?: string;
+  };
+
+  // Market state
+  prices: { yes: number; no: number };
+  volume_24h?: number;
+  total_volume?: number;
+  liquidity?: number;
+  open_interest?: number;
+
+  // Resolution
+  resolution: {
+    criteria?: string;
+    source?: string;
+    end_date?: string;
+    status: "active" | "closed" | "resolved";
+    outcome?: "yes" | "no";
+  };
+
+  // Raw order book
+  orderbook?: RawOrderbook;
+
+  // Related markets
+  related_markets?: Array<{
+    id: string;
+    question: string;
+    price: { yes: number; no: number };
+  }>;
+
   error?: string;
 }

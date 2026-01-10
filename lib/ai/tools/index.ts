@@ -4,9 +4,8 @@
 
 // Market Discovery - Multi-exchange unified discovery
 export {
-  discoverMarketTool,
-  discoverMarketFromKalshiTool,
-  discoverMarketFromPolymarketTool,
+  discoverMarketsTool,
+  explainMarketTool,
   UNIFIED_CATEGORIES,
   getKalshiCategories,
   getPolymarketTags,
@@ -14,35 +13,74 @@ export {
 } from "./discover";
 
 export type {
-  UnifiedMarket,
+  MarketSummary,
   UnifiedCategory,
   Exchange,
   CompositeCursor,
-  DiscoverMarketResult,
-  KalshiMarketResult,
-  PolymarketMarketResult,
+  DiscoverMarketsResult,
+  ExplainMarketResult,
+  RawOrderbook,
 } from "./discover";
 
-// Position Management - creators that accept signer
+// Trade Tools - Multi-exchange unified trading
 export {
-  createIncreasePositionTool,
-  increasePositionTool,
-} from "./increasePosition";
-export {
-  createDecreasePositionTool,
-  decreasePositionTool,
-} from "./decreasePosition";
-export {
-  createRetrievePositionTool,
-  retrievePositionTool,
-} from "./retrievePosition";
-export { createRedeemPositionTool, redeemPositionTool } from "./redeemPosition";
+  createPlaceOrderTool,
+  placeOrderTool,
+  createCancelOrderTool,
+  cancelOrderTool,
+} from "./trade";
 
-// Utilities
+export type {
+  OrderSide,
+  Outcome,
+  OrderType,
+  TimeInForce,
+  OrderStatus,
+  PlaceOrderInput,
+  PlaceOrderResult,
+  CancelOrderInput,
+  CancelOrderResult,
+} from "./trade";
+
+// Management Tools - Multi-exchange portfolio management
+export {
+  createGetBalanceTool,
+  getBalanceTool,
+  createGetPositionsTool,
+  getPositionsTool,
+} from "./management";
+
+export type {
+  Exchange as ManagementExchange,
+  Signer,
+  ToolSigners,
+  ChainBalance,
+  GetBalanceResult,
+  Position,
+  PositionSummary,
+  GetPositionsResult,
+} from "./management";
+
+// Analysis Tools - Parallel AI powered research
+export {
+  webSearchTool,
+  createWebSearchTool,
+  deepResearchTool,
+  createDeepResearchTool,
+} from "./analysis";
+
+export type {
+  WebSearchInput,
+  WebSearchOutput,
+  DeepResearchInput,
+  DeepResearchOutput,
+} from "./analysis";
+
+// Utilities - Re-export from dflow layer for convenience
 export {
   resolveMints,
   getTradeMintsForBuy,
   getTradeMintsForSell,
   getOutcomeMint,
   clearMarketCache,
-} from "./utils/resolveMints";
+} from "@/lib/prediction-market/kalshi/dflow/resolveMints";

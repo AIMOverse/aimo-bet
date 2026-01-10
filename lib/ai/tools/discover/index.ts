@@ -1,19 +1,16 @@
-// Unified tool
-export { discoverMarketTool } from "./discoverMarket";
-
-// Exchange-specific tools (for sub-agents)
-export { discoverMarketFromKalshiTool } from "./discoverMarketFromKalshi";
-export { discoverMarketFromPolymarketTool } from "./discoverMarketFromPolymarket";
+// Tools
+export { discoverMarketsTool } from "./discoverMarkets";
+export { explainMarketTool } from "./explainMarket";
 
 // Types
 export type {
   CompositeCursor,
-  DiscoverMarketResult,
+  DiscoverMarketsResult,
   Exchange,
-  KalshiMarketResult,
-  PolymarketMarketResult,
+  ExplainMarketResult,
+  MarketSummary,
+  RawOrderbook,
   UnifiedCategory,
-  UnifiedMarket,
 } from "./types";
 
 // Category utilities

@@ -14,21 +14,6 @@ export const UNIFIED_CATEGORIES = {
     kalshi: ["Sports"],
     polymarket: ["sports"],
   },
-  economics: {
-    label: "Economics",
-    kalshi: ["Economics", "Financials"],
-    polymarket: ["economics", "fed"],
-  },
-  entertainment: {
-    label: "Entertainment",
-    kalshi: ["Entertainment"],
-    polymarket: ["entertainment"],
-  },
-  science: {
-    label: "Science & Tech",
-    kalshi: ["Science and Technology"],
-    polymarket: ["science", "technology"],
-  },
 } as const;
 
 export type UnifiedCategory = keyof typeof UNIFIED_CATEGORIES;

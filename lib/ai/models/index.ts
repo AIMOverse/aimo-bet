@@ -20,7 +20,7 @@ export {
 } from "./catalog";
 
 // Provider instances
-export { openrouter, getAimoProvider, getAimoModel } from "./providers";
+export { getAimoProvider, getAimoModel } from "./providers";
 
 // Model access
 export { getModel } from "./registry";

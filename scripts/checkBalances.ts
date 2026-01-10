@@ -9,7 +9,7 @@ import {
   getSolBalance,
   getTokenAccountsByOwner,
   TOKEN_MINTS,
-} from "../lib/solana/client";
+} from "../lib/crypto/solana/client";
 
 // Load environment variables
 config();

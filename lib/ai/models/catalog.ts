@@ -23,7 +23,6 @@ export const MODELS: ModelDefinition[] = [
     supportsFunctions: true,
     providerIds: {
       aimo: "openai/gpt-5",
-      openrouter: "openai/gpt-5",
     },
     series: "gpt",
     chartColor: "#10b981", // Emerald
@@ -42,7 +41,6 @@ export const MODELS: ModelDefinition[] = [
     supportsFunctions: true,
     providerIds: {
       aimo: "anthropic/claude-sonnet-4.5",
-      openrouter: "anthropic/claude-sonnet-4.5",
     },
     series: "claude",
     chartColor: "#f97316", // Orange
@@ -62,7 +60,6 @@ export const MODELS: ModelDefinition[] = [
     supportsFunctions: true,
     providerIds: {
       aimo: "deepseek/deepseek-v3.2-exp",
-      openrouter: "deepseek/deepseek-v3.2",
     },
     series: "deepseek",
     chartColor: "#a78bfa", // Light violet
@@ -81,7 +78,6 @@ export const MODELS: ModelDefinition[] = [
     supportsFunctions: true,
     providerIds: {
       aimo: "z-ai/glm-4.6",
-      openrouter: "z-ai/glm-4.6",
     },
     series: "glm",
     chartColor: "#06b6d4", // Cyan
@@ -100,7 +96,6 @@ export const MODELS: ModelDefinition[] = [
     supportsFunctions: true,
     providerIds: {
       aimo: "xai/grok-4",
-      openrouter: "x-ai/grok-4",
     },
     series: "grok",
     chartColor: "#ef4444", // Red
@@ -119,7 +114,6 @@ export const MODELS: ModelDefinition[] = [
     supportsFunctions: true,
     providerIds: {
       aimo: "alibaba/qwen3-235b-a22b",
-      openrouter: "qwen/qwen3-max",
     },
     series: "qwen",
     chartColor: "#8b5cf6", // Violet
@@ -139,7 +133,6 @@ export const MODELS: ModelDefinition[] = [
     supportsFunctions: true,
     providerIds: {
       aimo: "google/gemini-3-pro",
-      openrouter: "google/gemini-3-pro-preview",
     },
     series: "gemini",
     chartColor: "#22c55e", // Green
@@ -158,7 +151,6 @@ export const MODELS: ModelDefinition[] = [
     supportsFunctions: true,
     providerIds: {
       aimo: "moonshot/kimi-k2",
-      openrouter: "moonshotai/kimi-k2-0905",
     },
     series: "kimi",
     chartColor: "#ec4899", // Pink
@@ -218,7 +210,7 @@ export function getArenaModel(id: string): ModelDefinition | undefined {
  * Get a specific arena model by short ID (e.g., "gpt-5.2" instead of "openai/gpt-5.2")
  */
 export function getArenaModelByShortId(
-  shortId: string
+  shortId: string,
 ): ModelDefinition | undefined {
   return MODELS.find((m) => m.id.endsWith(`/${shortId}`) || m.id === shortId);
 }
@@ -327,8 +319,8 @@ export function getWalletPrivateKey(modelId: string): string | undefined {
   if (!privateKey) {
     console.warn(
       `[Catalog] No private key found for model "${modelId}". Available keys: ${Object.keys(
-        WALLET_PRIVATE_KEY_MAP
-      ).join(", ")}`
+        WALLET_PRIVATE_KEY_MAP,
+      ).join(", ")}`,
     );
   }
   return privateKey;
