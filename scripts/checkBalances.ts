@@ -4,15 +4,14 @@
 // Usage: npx tsx scripts/checkBalances.ts
 // ============================================================================
 
-import { config } from "dotenv";
+// Load environment variables FIRST - using side-effect import ensures it runs before other imports
+import "dotenv/config";
+
 import {
   getSolBalance,
   getTokenAccountsByOwner,
   TOKEN_MINTS,
 } from "../lib/crypto/solana/client";
-
-// Load environment variables
-config();
 
 // ============================================================================
 // Wallet Configuration
@@ -151,8 +150,18 @@ function formatTable(balances: WalletBalances[]): void {
 // Main
 // ============================================================================
 
+/**
+ * Sleep helper to avoid rate limiting
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function main() {
   console.log("🔍 Fetching wallet balances...\n");
+  console.log(
+    `🌐 Using RPC: ${process.env.SOLANA_RPC_URL || "default mainnet"}\n`
+  );
 
   // Get wallets from env
   const wallets = getWalletsFromEnv();
@@ -165,8 +174,20 @@ async function main() {
 
   console.log(`📋 Found ${wallets.length} wallet(s) in .env\n`);
 
-  // Fetch balances in parallel
-  const balances = await Promise.all(wallets.map(fetchWalletBalances));
+  // Fetch balances sequentially with delay to avoid rate limiting
+  const balances: WalletBalances[] = [];
+  for (let i = 0; i < wallets.length; i++) {
+    const wallet = wallets[i];
+    process.stdout.write(`   Fetching ${wallet.name}... `);
+    const balance = await fetchWalletBalances(wallet);
+    balances.push(balance);
+    console.log("✓");
+
+    // Small delay between requests to avoid rate limiting (except for last one)
+    if (i < wallets.length - 1) {
+      await sleep(1000);
+    }
+  }
 
   // Display results
   formatTable(balances);

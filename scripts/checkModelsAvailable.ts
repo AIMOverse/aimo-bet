@@ -13,8 +13,7 @@
  *   WALLET_<SERIES>_PRIVATE - Private keys for each model series
  */
 
-import dotenv from "dotenv";
-dotenv.config();
+import "dotenv/config";
 
 import { aimoNetwork } from "@aimo.network/provider";
 import { SvmClientSigner, SOLANA_MAINNET_CHAIN_ID } from "@aimo.network/svm";
