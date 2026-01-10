@@ -85,10 +85,12 @@ interface EventsResponse {
  */
 async function fetchSeriesFromApi(
   category: string,
-  status: string,
+  status: string
 ): Promise<SeriesResponse> {
   const params = new URLSearchParams({ category, status });
-  const response = await fetch(`/api/dflow/series?${params}`);
+  const response = await fetch(
+    `/api/prediction-market/kalshi/dflow/series?${params}`
+  );
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.error || `Failed to fetch series: ${response.status}`);
@@ -102,7 +104,7 @@ async function fetchSeriesFromApi(
 async function fetchEventsFromApi(
   seriesTickers: string[],
   status: string,
-  limit: number,
+  limit: number
 ): Promise<EventsResponse> {
   const params = new URLSearchParams({
     seriesTickers: seriesTickers.join(","),
@@ -110,7 +112,9 @@ async function fetchEventsFromApi(
     limit: String(limit),
     withNestedMarkets: "true",
   });
-  const response = await fetch(`/api/dflow/events?${params}`);
+  const response = await fetch(
+    `/api/prediction-market/kalshi/dflow/events?${params}`
+  );
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.error || `Failed to fetch events: ${response.status}`);
@@ -153,7 +157,7 @@ export function useLivePrices(): UseLivePricesReturn {
   // State for WebSocket updates only (not initial data)
   // -------------------------------------------------------------------------
   const [wsUpdates, setWsUpdates] = useState<Map<string, Partial<MarketPrice>>>(
-    new Map(),
+    new Map()
   );
   const [priceDirection, setPriceDirection] = useState<
     Map<string, PriceDirection>
@@ -187,7 +191,7 @@ export function useLivePrices(): UseLivePricesReturn {
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
       dedupingInterval: SERIES_CACHE_TIME,
-    },
+    }
   );
 
   // Extract series tickers from response (limit to 25 due to API constraint)
@@ -221,7 +225,7 @@ export function useLivePrices(): UseLivePricesReturn {
     {
       revalidateOnFocus: false,
       dedupingInterval: EVENTS_CACHE_TIME,
-    },
+    }
   );
 
   // Transform events to MarketPrice array (base data from REST)
@@ -292,7 +296,7 @@ export function useLivePrices(): UseLivePricesReturn {
         // Update direction with timeout for flash effect
         if (direction !== "neutral") {
           setPriceDirection((dirPrev) =>
-            new Map(dirPrev).set(ticker, direction),
+            new Map(dirPrev).set(ticker, direction)
           );
 
           // Clear existing timeout
@@ -309,7 +313,7 @@ export function useLivePrices(): UseLivePricesReturn {
                 return next;
               });
               directionTimeouts.current.delete(ticker);
-            }, DIRECTION_FLASH_DURATION),
+            }, DIRECTION_FLASH_DURATION)
           );
         }
 
@@ -328,7 +332,7 @@ export function useLivePrices(): UseLivePricesReturn {
         console.error("[useLivePrices] Failed to parse WS message:", error);
       }
     },
-    [tickerSet, initialPricesMap],
+    [tickerSet, initialPricesMap]
   );
 
   // -------------------------------------------------------------------------
