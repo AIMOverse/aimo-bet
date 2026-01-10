@@ -41,7 +41,9 @@ export function createGetPositionsTool(signers: ToolSigners) {
       market_id: z
         .string()
         .optional()
-        .describe("Filter to a specific market ID (ticker for Kalshi, conditionId for Polymarket)"),
+        .describe(
+          "Filter to a specific market ID (ticker for Kalshi, conditionId for Polymarket)"
+        ),
     }),
     execute: async ({
       exchange = "all",
@@ -49,7 +51,9 @@ export function createGetPositionsTool(signers: ToolSigners) {
       market_id,
     }): Promise<GetPositionsResult> => {
       const logPrefix = "[management/getPositions]";
-      console.log(`${logPrefix} Fetching positions: exchange=${exchange}, status=${status}`);
+      console.log(
+        `${logPrefix} Fetching positions: exchange=${exchange}, status=${status}`
+      );
 
       const allPositions: Position[] = [];
 
@@ -62,18 +66,28 @@ export function createGetPositionsTool(signers: ToolSigners) {
             market_id
           );
           allPositions.push(...kalshiPositions);
-          console.log(`${logPrefix} Kalshi: ${kalshiPositions.length} positions`);
+          console.log(
+            `${logPrefix} Kalshi: ${kalshiPositions.length} positions`
+          );
         }
 
-        // Fetch Polymarket positions
+        // Fetch Polymarket positions - skip if no EVM address configured
         if (exchange === "all" || exchange === "polymarket") {
-          const polymarketPositions = await fetchPolymarketPositions(
-            signers.evm.address,
-            status,
-            market_id
-          );
-          allPositions.push(...polymarketPositions);
-          console.log(`${logPrefix} Polymarket: ${polymarketPositions.length} positions`);
+          if (signers.evm.address) {
+            const polymarketPositions = await fetchPolymarketPositions(
+              signers.evm.address,
+              status,
+              market_id
+            );
+            allPositions.push(...polymarketPositions);
+            console.log(
+              `${logPrefix} Polymarket: ${polymarketPositions.length} positions`
+            );
+          } else {
+            console.log(
+              `${logPrefix} Polymarket skipped (no EVM address configured)`
+            );
+          }
         }
 
         // Calculate summary
@@ -124,7 +138,9 @@ async function fetchKalshiPositions(
 
     // Determine position status
     const isResolved = !!userPos.market.result;
-    const positionStatus: "active" | "closed" = isResolved ? "closed" : "active";
+    const positionStatus: "active" | "closed" = isResolved
+      ? "closed"
+      : "active";
 
     // Filter by status
     if (status !== "all" && positionStatus !== status) continue;
@@ -166,7 +182,10 @@ async function fetchPolymarketPositions(
         positions.push(transformPolymarketPosition(pos, "active"));
       }
     } catch (error) {
-      console.warn("[getPositions] Failed to fetch Polymarket active positions:", error);
+      console.warn(
+        "[getPositions] Failed to fetch Polymarket active positions:",
+        error
+      );
     }
   }
 
@@ -182,7 +201,10 @@ async function fetchPolymarketPositions(
         positions.push(transformPolymarketPosition(pos, "closed"));
       }
     } catch (error) {
-      console.warn("[getPositions] Failed to fetch Polymarket closed positions:", error);
+      console.warn(
+        "[getPositions] Failed to fetch Polymarket closed positions:",
+        error
+      );
     }
   }
 
@@ -235,7 +257,9 @@ function calculateSummary(positions: Position[]): PositionSummary {
   const closedPositions = positions.filter((p) => p.status === "closed");
 
   // Calculate total value and PnL from positions that have this data
-  const positionsWithValue = positions.filter((p) => p.current_value !== undefined);
+  const positionsWithValue = positions.filter(
+    (p) => p.current_value !== undefined
+  );
   const totalValue =
     positionsWithValue.length > 0
       ? positionsWithValue.reduce((sum, p) => sum + (p.current_value || 0), 0)

@@ -24,15 +24,15 @@ interface WalletConfig {
 
 /**
  * Get all wallet public keys from environment variables
- * Looks for pattern: WALLET_<NAME>_PUBLIC
+ * Looks for pattern: WALLET_<NAME>_SVM_PUBLIC (Solana public keys)
  */
 function getWalletsFromEnv(): WalletConfig[] {
   const wallets: WalletConfig[] = [];
 
   for (const [key, value] of Object.entries(process.env)) {
-    if (key.startsWith("WALLET_") && key.endsWith("_PUBLIC") && value) {
-      // Extract name: WALLET_GPT_PUBLIC -> GPT
-      const name = key.replace("WALLET_", "").replace("_PUBLIC", "");
+    if (key.startsWith("WALLET_") && key.endsWith("_SVM_PUBLIC") && value) {
+      // Extract name: WALLET_GPT_SVM_PUBLIC -> GPT
+      const name = key.replace("WALLET_", "").replace("_SVM_PUBLIC", "");
       wallets.push({
         name,
         publicKey: value,
@@ -168,7 +168,7 @@ async function main() {
 
   if (wallets.length === 0) {
     console.error("❌ No wallets found in .env");
-    console.error("   Expected format: WALLET_<NAME>_PUBLIC=<address>");
+    console.error("   Expected format: WALLET_<NAME>_SVM_PUBLIC=<address>");
     process.exit(1);
   }
 
@@ -185,7 +185,7 @@ async function main() {
 
     // Small delay between requests to avoid rate limiting (except for last one)
     if (i < wallets.length - 1) {
-      await sleep(1000);
+      await sleep(200);
     }
   }
 

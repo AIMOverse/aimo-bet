@@ -37,7 +37,7 @@
     "@solana/kit": "^5.1.0",
     "@supabase/supabase-js": "^2.89.0",
     "@workflow/ai": "4.0.1-beta.38",
-    "ai": "6.0.3",
+    "ai": "^6.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

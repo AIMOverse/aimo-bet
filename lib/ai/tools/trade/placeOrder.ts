@@ -117,7 +117,7 @@ async function placeKalshiOrder(params: {
         slippageBps,
         predictionMarketSlippageBps: slippageBps,
       },
-      signer,
+      signer
     );
 
     if (!result.success) {
@@ -312,7 +312,7 @@ async function placePolymarketOrder(params: {
 export function createPlaceOrderTool(
   kalshiWalletAddress: string,
   kalshiSigner?: KeyPairSigner,
-  polymarketWallet?: Wallet,
+  polymarketWallet?: Wallet
 ) {
   return tool({
     description:
@@ -324,7 +324,7 @@ export function createPlaceOrderTool(
       id: z
         .string()
         .describe(
-          "Market identifier: market_ticker (Kalshi) or token_id (Polymarket)",
+          "Market identifier: market_ticker (Kalshi) or token_id (Polymarket)"
         ),
       side: z.enum(["buy", "sell"]).describe("Trade direction"),
       outcome: z.enum(["yes", "no"]).describe("Outcome to trade"),
@@ -333,8 +333,8 @@ export function createPlaceOrderTool(
         .describe("Order type. Limit orders only supported on Polymarket"),
       quantity: z
         .number()
-        .positive()
-        .describe("Number of outcome tokens to trade"),
+        .min(1)
+        .describe("Number of outcome tokens to trade (must be >= 1)"),
       price: z
         .number()
         .min(0)
@@ -348,7 +348,7 @@ export function createPlaceOrderTool(
         .optional()
         .default(DEFAULT_SLIPPAGE_BPS)
         .describe(
-          "Slippage tolerance in basis points for market orders (default: 200)",
+          "Slippage tolerance in basis points for market orders (default: 200)"
         ),
       time_in_force: z
         .enum(["GTC", "FOK", "IOC"])

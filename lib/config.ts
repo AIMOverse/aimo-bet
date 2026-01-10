@@ -24,7 +24,8 @@ export const POLYGON_RPC_URL =
   process.env.POLYGON_RPC_URL || "https://polygon-rpc.com";
 
 /** USDC.e contract address on Polygon (bridged USDC, 6 decimals) */
-export const POLYGON_USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
+export const POLYGON_USDC_ADDRESS =
+  "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
 
 // =============================================================================
 // Arena Configuration

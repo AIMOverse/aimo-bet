@@ -42,21 +42,33 @@ export function createGetBalanceTool(signers: ToolSigners) {
           if (kalshiResult) {
             balances.kalshi = kalshiResult;
             totalBalance += kalshiResult.balance;
-            console.log(`${logPrefix} Kalshi balance: $${kalshiResult.balance}`);
+            console.log(
+              `${logPrefix} Kalshi balance: $${kalshiResult.balance}`
+            );
           } else {
             throw new Error("Failed to fetch Kalshi balance");
           }
         }
 
-        // Fetch Polymarket (Polygon) balance
+        // Fetch Polymarket (Polygon) balance - skip if no EVM address configured
         if (exchange === "all" || exchange === "polymarket") {
-          const polymarketResult = await fetchPolymarketBalance(signers.evm.address);
-          if (polymarketResult) {
-            balances.polymarket = polymarketResult;
-            totalBalance += polymarketResult.balance;
-            console.log(`${logPrefix} Polymarket balance: $${polymarketResult.balance}`);
+          if (signers.evm.address) {
+            const polymarketResult = await fetchPolymarketBalance(
+              signers.evm.address
+            );
+            if (polymarketResult) {
+              balances.polymarket = polymarketResult;
+              totalBalance += polymarketResult.balance;
+              console.log(
+                `${logPrefix} Polymarket balance: $${polymarketResult.balance}`
+              );
+            } else {
+              throw new Error("Failed to fetch Polymarket balance");
+            }
           } else {
-            throw new Error("Failed to fetch Polymarket balance");
+            console.log(
+              `${logPrefix} Polymarket skipped (no EVM address configured)`
+            );
           }
         }
 
@@ -86,7 +98,9 @@ export function createGetBalanceTool(signers: ToolSigners) {
 // Balance Fetchers
 // ============================================================================
 
-async function fetchKalshiBalance(address: string): Promise<ChainBalance | null> {
+async function fetchKalshiBalance(
+  address: string
+): Promise<ChainBalance | null> {
   const result = await getCurrencyBalance(address, "USDC");
   if (result === null) {
     return {
@@ -105,7 +119,9 @@ async function fetchKalshiBalance(address: string): Promise<ChainBalance | null>
   };
 }
 
-async function fetchPolymarketBalance(address: string): Promise<ChainBalance | null> {
+async function fetchPolymarketBalance(
+  address: string
+): Promise<ChainBalance | null> {
   const result = await getUsdcBalance(address);
   if (result === null) {
     return {

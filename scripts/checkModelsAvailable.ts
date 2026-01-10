@@ -10,7 +10,7 @@
  *   npx tsx scripts/checkModelsAvailable.ts --model X # Check specific model by ID
  *
  * Environment:
- *   WALLET_<SERIES>_PRIVATE - Private keys for each model series
+ *   WALLET_<SERIES>_SVM_PRIVATE - Private keys for each model series (Solana)
  */
 
 import "dotenv/config";
@@ -22,18 +22,19 @@ import { generateText } from "ai";
 import { MODELS } from "../lib/ai/models/catalog";
 import type { ModelDefinition } from "../lib/ai/models/types";
 
-const AIMO_BASE_URL = "https://beta.aimo.network";
+const AIMO_BASE_URL = process.env.AIMO_BASE_URL ?? "https://beta.aimo.network";
+console.log(`Using AiMo Network Base URL: ${AIMO_BASE_URL}`);
 
-// Wallet private keys by series
+// Wallet private keys by series (SVM/Solana)
 const WALLET_PRIVATE_KEYS: Record<string, string | undefined> = {
-  gpt: process.env.WALLET_GPT_PRIVATE,
-  claude: process.env.WALLET_CLAUDE_PRIVATE,
-  deepseek: process.env.WALLET_DEEPSEEK_PRIVATE,
-  glm: process.env.WALLET_GLM_PRIVATE,
-  grok: process.env.WALLET_GROK_PRIVATE,
-  qwen: process.env.WALLET_QWEN_PRIVATE,
-  gemini: process.env.WALLET_GEMINI_PRIVATE,
-  kimi: process.env.WALLET_KIMI_PRIVATE,
+  gpt: process.env.WALLET_GPT_SVM_PRIVATE,
+  claude: process.env.WALLET_CLAUDE_SVM_PRIVATE,
+  deepseek: process.env.WALLET_DEEPSEEK_SVM_PRIVATE,
+  glm: process.env.WALLET_GLM_SVM_PRIVATE,
+  grok: process.env.WALLET_GROK_SVM_PRIVATE,
+  qwen: process.env.WALLET_QWEN_SVM_PRIVATE,
+  gemini: process.env.WALLET_GEMINI_SVM_PRIVATE,
+  kimi: process.env.WALLET_KIMI_SVM_PRIVATE,
 };
 
 interface CheckResult {
@@ -61,6 +62,7 @@ async function createProvider(privateKeyBase58: string) {
   return aimoNetwork({
     signer,
     baseURL: AIMO_BASE_URL,
+    siwxDomain: "beta.aimo.network",
   });
 }
 
@@ -79,7 +81,7 @@ async function checkModel(model: ModelDefinition): Promise<CheckResult> {
       modelName: model.name,
       series,
       success: false,
-      error: `No wallet configured (WALLET_${series.toUpperCase()}_PRIVATE not set)`,
+      error: `No wallet configured (WALLET_${series.toUpperCase()}_SVM_PRIVATE not set)`,
     };
   }
 
@@ -92,8 +94,8 @@ async function checkModel(model: ModelDefinition): Promise<CheckResult> {
     const result = await generateText({
       model: provider.chat(aimoModelId),
       prompt: "Say OK",
-      maxTokens: 5,
-    } as Parameters<typeof generateText>[0]);
+      maxOutputTokens: 100,
+    });
 
     const responseTime = Date.now() - startTime;
 
@@ -117,6 +119,7 @@ async function checkModel(model: ModelDefinition): Promise<CheckResult> {
       responseTime,
     };
   } catch (err) {
+    console.error(err);
     const responseTime = Date.now() - startTime;
     const errorMessage =
       err instanceof Error ? err.message : "Unknown error occurred";
@@ -185,7 +188,7 @@ function checkWalletConfig(): void {
   if (missingSeries.length > 0) {
     console.log("\n⚠️  Missing wallet configurations:");
     for (const series of missingSeries) {
-      console.log(`   - WALLET_${series.toUpperCase()}_PRIVATE`);
+      console.log(`   - WALLET_${series.toUpperCase()}_SVM_PRIVATE`);
     }
     console.log();
   }

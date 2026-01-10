@@ -23,9 +23,13 @@ import { createPolygonWallet } from "@/lib/crypto/polygon/client";
 import { TRADING_SYSTEM_PROMPT } from "@/lib/ai/prompts/systemPrompt";
 
 // Direct tool imports
-import { discoverMarketsTool, explainMarketTool } from "@/lib/ai/tools/discover";
+import {
+  discoverMarketsTool,
+  explainMarketTool,
+} from "@/lib/ai/tools/discover";
 import { createPlaceOrderTool } from "@/lib/ai/tools/trade/placeOrder";
-import { createCancelOrderTool } from "@/lib/ai/tools/trade/cancelOrder";
+// DISABLED: Polymarket tools temporarily disabled
+// import { createCancelOrderTool } from "@/lib/ai/tools/trade/cancelOrder";
 
 // Analysis tools (Parallel AI)
 import { webSearchTool, deepResearchTool } from "@/lib/ai/tools/analysis";
@@ -74,26 +78,27 @@ export class PredictionMarketAgent {
     let kalshiSigner: KeyPairSigner | undefined;
     if (this.config.privateKey) {
       kalshiSigner = await createSignerFromBase58SecretKey(
-        this.config.privateKey,
+        this.config.privateKey
       );
     }
 
+    // DISABLED: Polymarket wallet creation temporarily disabled
     // Create Polymarket wallet from environment if available
-    let polymarketWallet: Wallet | undefined;
-    const polygonKey =
-      process.env.POLYGON_PRIVATE_KEY || process.env.PRIVATE_KEY;
-    if (polygonKey) {
-      try {
-        polymarketWallet = createPolygonWallet(polygonKey);
-      } catch (e) {
-        console.warn("[PredictionMarketAgent] Failed to create Polygon wallet");
-      }
-    }
+    // let polymarketWallet: Wallet | undefined;
+    // const polygonKey =
+    //   process.env.POLYGON_PRIVATE_KEY || process.env.PRIVATE_KEY;
+    // if (polygonKey) {
+    //   try {
+    //     polymarketWallet = createPolygonWallet(polygonKey);
+    //   } catch (e) {
+    //     console.warn("[PredictionMarketAgent] Failed to create Polygon wallet");
+    //   }
+    // }
 
-    // Create signers for management tools
+    // Create signers for management tools (Kalshi/SVM only for now)
     const signers: ToolSigners = {
       svm: { address: this.config.walletAddress },
-      evm: { address: polymarketWallet?.address || "" },
+      evm: { address: "" }, // Polymarket disabled
     };
 
     // Create tools directly with wallet context
@@ -105,28 +110,29 @@ export class PredictionMarketAgent {
       placeOrder: createPlaceOrderTool(
         this.config.walletAddress,
         kalshiSigner,
-        polymarketWallet,
+        undefined // polymarketWallet disabled
       ),
-      cancelOrder: createCancelOrderTool(polymarketWallet),
+      // DISABLED: Polymarket-only tools
+      // cancelOrder: createCancelOrderTool(polymarketWallet),
       webSearch: webSearchTool,
       deepResearch: deepResearchTool,
     };
 
     // Get the model instance with detailed error logging
     console.log(
-      `[PredictionMarketAgent:${this.config.modelId}] Getting model instance...`,
+      `[PredictionMarketAgent:${this.config.modelId}] Getting model instance...`
     );
 
     let model;
     try {
       model = await getModel(this.config.modelId);
       console.log(
-        `[PredictionMarketAgent:${this.config.modelId}] Model instance created successfully`,
+        `[PredictionMarketAgent:${this.config.modelId}] Model instance created successfully`
       );
     } catch (modelError) {
       console.error(
         `[PredictionMarketAgent:${this.config.modelId}] Failed to get model:`,
-        modelError,
+        modelError
       );
       throw modelError;
     }
@@ -147,7 +153,7 @@ export class PredictionMarketAgent {
     const prompt = this.buildPrompt();
 
     console.log(
-      `[PredictionMarketAgent:${this.config.modelId}] Starting agent run`,
+      `[PredictionMarketAgent:${this.config.modelId}] Starting agent run`
     );
 
     // Run the agent with ToolLoopAgent.generate()
@@ -175,13 +181,13 @@ export class PredictionMarketAgent {
           url: error.url,
           requestBodyValues: error.requestBodyValues,
           stack: error.stack,
-        },
+        }
       );
       throw agentError;
     }
 
     console.log(
-      `[PredictionMarketAgent:${this.config.modelId}] Completed with ${result.steps.length} steps`,
+      `[PredictionMarketAgent:${this.config.modelId}] Completed with ${result.steps.length} steps`
     );
 
     // Extract trades from tool call results
@@ -227,7 +233,9 @@ export class PredictionMarketAgent {
 
     // If research failed, just note it and continue
     if (research.status === "failed") {
-      return `${basePrompt}\n\nNote: A background research task failed with error: ${research.error || "Unknown error"}. Please proceed with your analysis using other tools.`;
+      return `${basePrompt}\n\nNote: A background research task failed with error: ${
+        research.error || "Unknown error"
+      }. Please proceed with your analysis using other tools.`;
     }
 
     // Include successful research content
@@ -244,7 +252,7 @@ export class PredictionMarketAgent {
    */
   private extractReasoning(
     finalText: string | undefined,
-    steps: Array<{ text?: string }>,
+    steps: Array<{ text?: string }>
   ): string {
     // If we have final text, use it
     if (finalText && finalText.trim()) {
@@ -276,7 +284,7 @@ export class PredictionMarketAgent {
         input: unknown;
       }>;
       toolResults?: Array<{ toolCallId: string; output?: unknown }>;
-    }>,
+    }>
   ): ExecutedTrade[] {
     const trades: ExecutedTrade[] = [];
 
@@ -287,7 +295,7 @@ export class PredictionMarketAgent {
         // Handle placeOrder tool (unified across exchanges)
         if (call.toolName === "placeOrder") {
           const resultEntry = step.toolResults.find(
-            (r) => r.toolCallId === call.toolCallId,
+            (r) => r.toolCallId === call.toolCallId
           );
 
           const typedOutput = resultEntry?.output as
@@ -336,7 +344,7 @@ export class PredictionMarketAgent {
    */
   private determineDecision(
     text: string | undefined,
-    trades: ExecutedTrade[],
+    trades: ExecutedTrade[]
   ): DecisionType {
     if (trades.length > 0) {
       return trades[0].action === "buy" ? "buy" : "sell";
@@ -366,7 +374,7 @@ export class PredictionMarketAgent {
         input: unknown;
       }>;
       toolResults?: Array<{ toolCallId: string; output?: unknown }>;
-    }>,
+    }>
   ): number {
     for (const step of steps) {
       if (!step.toolCalls || !step.toolResults) continue;
@@ -374,14 +382,17 @@ export class PredictionMarketAgent {
       for (const call of step.toolCalls) {
         if (call.toolName === "getBalance") {
           const resultEntry = step.toolResults.find(
-            (r) => r.toolCallId === call.toolCallId,
+            (r) => r.toolCallId === call.toolCallId
           );
 
           const typedOutput = resultEntry?.output as
             | { success?: boolean; total_balance?: number }
             | undefined;
 
-          if (typedOutput?.success && typeof typedOutput.total_balance === "number") {
+          if (
+            typedOutput?.success &&
+            typeof typedOutput.total_balance === "number"
+          ) {
             return typedOutput.total_balance;
           }
         }
