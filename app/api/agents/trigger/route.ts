@@ -21,7 +21,7 @@ import { getAgentsHoldingTicker } from "@/lib/supabase/agents";
 // Clients can poll /api/agents/status?runIds=... to check workflow status.
 // ============================================================================
 
-export type TriggerType = "market" | "cron" | "manual";
+export type TriggerType = "market" | "cron" | "manual" | "research_complete";
 
 /**
  * Market signal from PartyKit relay
@@ -35,6 +35,23 @@ export interface MarketSignal {
   timestamp: number;
 }
 
+/**
+ * Research payload from Parallel webhook
+ * Delivered when async research task completes
+ */
+export interface ResearchPayload {
+  run_id: string;
+  status: "completed" | "failed";
+  content?: string;
+  basis?: Array<{
+    field: string;
+    citations: Array<{ url: string; excerpt: string }>;
+    confidence: number;
+    reasoning: string;
+  }>;
+  error?: string;
+}
+
 interface TriggerRequest {
   /** Specific model to trigger (omit to trigger all enabled models) */
   modelId?: string;
@@ -44,6 +61,8 @@ interface TriggerRequest {
   triggerType: TriggerType;
   /** When true, only trigger agents holding a position in signal.ticker */
   filterByPosition?: boolean;
+  /** Research payload (present when triggerType === "research_complete") */
+  research?: ResearchPayload;
 }
 
 interface SpawnedWorkflow {
@@ -88,6 +107,7 @@ export async function POST(req: NextRequest) {
       signal,
       triggerType = "manual",
       filterByPosition = false,
+      research,
     } = body;
 
     console.log(
@@ -172,9 +192,11 @@ export async function POST(req: NextRequest) {
 
         // Note: Signal is NOT passed to workflow (KV cache optimization)
         // Agent uses static prompt and fetches balance via tool
+        // Research is passed when triggered by research_complete
         const input: TradingInput = {
           modelId: model.id,
           walletAddress: model.walletAddress!,
+          research: triggerType === "research_complete" ? research : undefined,
         };
 
         // Start workflow (returns immediately, executes in background)

@@ -32,7 +32,6 @@ export interface ModelDefinition {
    */
   providerIds?: {
     aimo?: string;
-    openrouter?: string;
   };
   // Arena-specific fields (optional)
   /** Model series identifier for logo display (e.g., "openai", "claude", "gemini") */

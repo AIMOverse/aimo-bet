@@ -45,14 +45,14 @@ party/
 
 ## Design Decisions
 
-| Decision          | Choice                          | Rationale                               |
-| ----------------- | ------------------------------- | --------------------------------------- |
-| Tool creation     | Direct imports in agent         | Clearer dependencies, simpler code      |
-| Context injection | Signer passed at agent level    | Only signer needed for trading tools    |
-| **Prompt strategy** | **Static prompt + getBalance tool** | **KV cache optimization**            |
-| Market fetching   | Agent uses discoverEvent        | No stale pre-fetched data               |
-| Agent tools       | dflow API (on-chain truth)      | Trading decisions need real-time data   |
-| UI hooks          | Supabase (recorded data)        | Display uses single source of truth     |
+| Decision            | Choice                              | Rationale                             |
+| ------------------- | ----------------------------------- | ------------------------------------- |
+| Tool creation       | Direct imports in agent             | Clearer dependencies, simpler code    |
+| Context injection   | Signer passed at agent level        | Only signer needed for trading tools  |
+| **Prompt strategy** | **Static prompt + getBalance tool** | **KV cache optimization**             |
+| Market fetching     | Agent uses discoverEvent            | No stale pre-fetched data             |
+| Agent tools         | dflow API (on-chain truth)          | Trading decisions need real-time data |
+| UI hooks            | Supabase (recorded data)            | Display uses single source of truth   |
 
 ## KV Cache Optimization
 
@@ -67,11 +67,13 @@ After (cache-optimized):
 ```
 
 **Benefits:**
+
 - System prompt is fully cacheable across runs
 - Balance comes in as tool result (appends to cache, doesn't invalidate prefix)
 - Reduces inference costs and latency
 
 **Implementation:**
+
 - `TRADING_SYSTEM_PROMPT` is static (no dynamic values)
 - Agent calls `getBalance` tool as first step to get current USDC balance
 - Signals are used for triggering/filtering only, NOT passed to LLM prompt
@@ -177,7 +179,7 @@ interface MarketSignal {
 }
 ```
 
-**Note:** Signals are used to decide *when* to trigger agents and filter by position. They are NOT passed to the LLM prompt (for KV cache optimization).
+**Note:** Signals are used to decide _when_ to trigger agents and filter by position. They are NOT passed to the LLM prompt (for KV cache optimization).
 
 ## Tools
 
@@ -406,10 +408,10 @@ async run(input: AgentRunInput): Promise<TradingResult> {
 
   // Run agent - it will call getBalance tool to fetch balance
   const result = await agent.generate({ prompt });
-  
+
   // Extract portfolio value from getBalance tool result
   const portfolioValue = this.extractBalanceFromSteps(result.steps);
-  
+
   // ...
 }
 ```
@@ -447,19 +449,19 @@ async function recordResultsStep(
   result: TradingResult,
 ): Promise<void> {
   "use step";
-  
+
   // 1. Record decision
   const decision = await recordAgentDecision({...});
-  
+
   // 2. Record trades + update positions
   for (const trade of result.trades) {
     await recordAgentTrade({...});
-    
+
     // Delta-based position update
-    const quantityDelta = trade.action === "buy" 
-      ? trade.quantity 
+    const quantityDelta = trade.action === "buy"
+      ? trade.quantity
       : -trade.quantity;
-    
+
     await upsertAgentPosition({
       agentSessionId,
       marketTicker: trade.marketTicker,
@@ -468,7 +470,7 @@ async function recordResultsStep(
       quantityDelta,
     });
   }
-  
+
   // 3. Update session value for leaderboard
   await updateAgentSessionValue(agentSessionId, portfolioValue, pnl);
 }
@@ -508,9 +510,9 @@ OPENROUTER_API_KEY=...
 # dflow API
 DFLOW_API_KEY=...
 
-# Model wallet keys
-WALLET_GPT4O_PUBLIC=<solana-public-key>
-WALLET_GPT4O_PRIVATE=<solana-private-key>
+# Model wallet keys (Solana/SVM)
+WALLET_GPT_SVM_PUBLIC=<solana-public-key>
+WALLET_GPT_SVM_PRIVATE=<solana-private-key>
 
 # Security
 ADMIN_SECRET=...
@@ -545,10 +547,10 @@ The trigger system separates **position management** (real-time, filtered) from 
 
 ### Trigger Types
 
-| Trigger Type       | Purpose                       | Frequency      | Which Agents                           |
-| ------------------ | ----------------------------- | -------------- | -------------------------------------- |
-| **Cron**           | Market discovery + portfolio  | Every 5 min    | All agents                             |
-| **Position Signal**| React to held position moves  | Real-time      | Only agents holding that ticker        |
+| Trigger Type        | Purpose                      | Frequency   | Which Agents                    |
+| ------------------- | ---------------------------- | ----------- | ------------------------------- |
+| **Cron**            | Market discovery + portfolio | Every 5 min | All agents                      |
+| **Position Signal** | React to held position moves | Real-time   | Only agents holding that ticker |
 
 **Note:** Signals are used for triggering/filtering only. They are NOT passed to the LLM prompt (for KV cache optimization).
 
@@ -556,10 +558,10 @@ The trigger system separates **position management** (real-time, filtered) from 
 
 The PartyKit relay (`party/dflow-relay.ts`) monitors dflow WebSocket and detects:
 
-| Signal         | Threshold   | Use Case                    |
-| -------------- | ----------- | --------------------------- |
-| `price_swing`  | 10% change  | Position P&L impact         |
-| `volume_spike` | 10x average | Momentum/news indicator     |
+| Signal         | Threshold   | Use Case                |
+| -------------- | ----------- | ----------------------- |
+| `price_swing`  | 10% change  | Position P&L impact     |
+| `volume_spike` | 10x average | Momentum/news indicator |
 
 ### Position Filtering
 
@@ -571,8 +573,8 @@ When `filterByPosition: true` is passed to the trigger endpoint:
 
 ```typescript
 // lib/supabase/agents.ts
-getAgentHeldTickers(agentSessionId)   // → ["BTC-100K", "ETH-5K"]
-getAgentsHoldingTicker(sessionId, ticker) // → ["openai/gpt-5.2", "anthropic/claude-sonnet-4.5"]
+getAgentHeldTickers(agentSessionId); // → ["BTC-100K", "ETH-5K"]
+getAgentsHoldingTicker(sessionId, ticker); // → ["openai/gpt-5.2", "anthropic/claude-sonnet-4.5"]
 ```
 
 ### Key Constraints
