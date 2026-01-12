@@ -1,7 +1,11 @@
 "use workflow";
 
 import { PredictionMarketAgent, type TradingResult } from "@/lib/ai/agents";
-import { getWalletPrivateKey, getModelName } from "@/lib/ai/models/catalog";
+import {
+  getWalletPrivateKey,
+  getModelName,
+  getModelsWithWallets,
+} from "@/lib/ai/models/catalog";
 import { getGlobalSession } from "@/lib/supabase/db";
 import {
   getOrCreateAgentSession,
@@ -251,6 +255,7 @@ async function recordResultsStep(
 /**
  * Update balances for all agents in the trading session.
  * Fetches USDC balances from the blockchain and updates the database.
+ * Uses wallet addresses from env vars (via catalog) for accuracy.
  * This keeps the leaderboard in sync with on-chain state.
  * Durable: Balance updates should complete for data integrity.
  */
@@ -258,6 +263,14 @@ async function updateAllBalancesStep(session: TradingSession): Promise<void> {
   "use step";
 
   console.log(`[tradingAgent] Updating balances for all agents`);
+
+  // Get models with wallet addresses from env vars
+  const models = getModelsWithWallets()
+    .filter((m) => m.walletAddress)
+    .map((m) => ({
+      modelId: m.id,
+      walletAddress: m.walletAddress!,
+    }));
 
   // Fetch USDC balance from Solana for each agent
   const fetchBalance = async (
@@ -268,6 +281,10 @@ async function updateAllBalancesStep(session: TradingSession): Promise<void> {
     return Number(result.formatted);
   };
 
-  const updated = await updateAllAgentBalances(session.id, fetchBalance);
+  const updated = await updateAllAgentBalances(
+    session.id,
+    models,
+    fetchBalance
+  );
   console.log(`[tradingAgent] Updated ${updated.length} agent balances`);
 }

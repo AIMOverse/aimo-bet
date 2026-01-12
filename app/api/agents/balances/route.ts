@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getGlobalSession } from "@/lib/supabase/db";
 import { updateAllAgentBalances } from "@/lib/supabase/agents";
+import { getModelsWithWallets } from "@/lib/ai/models/catalog";
 import { getCurrencyBalance } from "@/lib/crypto/solana/client";
 
 // ============================================================================
@@ -11,7 +12,7 @@ import { getCurrencyBalance } from "@/lib/crypto/solana/client";
 // Authentication: Requires CRON_SECRET in Authorization header.
 //
 // This endpoint fetches USDC balances from Solana for all agents and updates
-// the database. It ensures the leaderboard reflects current on-chain state.
+// the database. Uses wallet addresses from env vars (via catalog) for accuracy.
 //
 // Configure cron in vercel.json:
 // {
@@ -52,8 +53,20 @@ export async function GET(req: NextRequest) {
     // Get the global trading session
     const session = await getGlobalSession();
 
-    // Update all agent balances
-    const updated = await updateAllAgentBalances(session.id, fetchBalance);
+    // Get models with wallet addresses from env vars
+    const models = getModelsWithWallets()
+      .filter((m) => m.walletAddress)
+      .map((m) => ({
+        modelId: m.id,
+        walletAddress: m.walletAddress!,
+      }));
+
+    // Update all agent balances using env var addresses
+    const updated = await updateAllAgentBalances(
+      session.id,
+      models,
+      fetchBalance
+    );
 
     console.log(`[agents/balances] Updated ${updated.length} agent balances`);
 

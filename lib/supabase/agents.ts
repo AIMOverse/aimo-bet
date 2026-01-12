@@ -609,15 +609,26 @@ export async function getAgentPositions(
 // ============================================================================
 
 /**
+ * Model info for balance updates (from catalog/env vars)
+ */
+export interface ModelWalletInfo {
+  modelId: string;
+  walletAddress: string;
+}
+
+/**
  * Update balances for all agent sessions in a trading session.
+ * Uses wallet addresses from the provided models (sourced from env vars via catalog).
  * Fetches USDC balances from the blockchain and updates current_value and total_pnl.
  *
  * @param sessionId - Trading session ID
+ * @param models - Array of models with wallet addresses (from env vars)
  * @param fetchBalance - Function to fetch balance for a wallet address
  * @returns Array of updated agent session info
  */
 export async function updateAllAgentBalances(
   sessionId: string,
+  models: ModelWalletInfo[],
   fetchBalance: (walletAddress: string) => Promise<number | null>
 ): Promise<Array<{ modelId: string; balance: number; pnl: number }>> {
   const client = createServerClient();
@@ -631,6 +642,9 @@ export async function updateAllAgentBalances(
     return [];
   }
 
+  // Create a map of modelId -> walletAddress from env vars
+  const walletMap = new Map(models.map((m) => [m.modelId, m.walletAddress]));
+
   console.log(
     `[agents] Updating balances for ${sessions.length} agent sessions`
   );
@@ -638,11 +652,21 @@ export async function updateAllAgentBalances(
   // Fetch balances in parallel
   const results = await Promise.allSettled(
     sessions.map(async (session) => {
-      const balance = await fetchBalance(session.walletAddress);
+      // Use wallet address from env vars (via catalog), not from database
+      const walletAddress = walletMap.get(session.modelId);
+
+      if (!walletAddress) {
+        console.warn(
+          `[agents] No wallet address configured for ${session.modelId}`
+        );
+        return null;
+      }
+
+      const balance = await fetchBalance(walletAddress);
 
       if (balance === null) {
         console.warn(
-          `[agents] Failed to fetch balance for ${session.modelId} (${session.walletAddress})`
+          `[agents] Failed to fetch balance for ${session.modelId} (${walletAddress})`
         );
         return null;
       }
