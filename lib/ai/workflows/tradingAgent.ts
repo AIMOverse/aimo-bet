@@ -173,7 +173,7 @@ async function runAgentStep(input: TradingInput): Promise<TradingResult> {
     modelId: input.modelId,
     walletAddress: input.walletAddress,
     privateKey: getWalletPrivateKey(input.modelId),
-    maxSteps: 15,
+    maxSteps: 20,
     researchContext: input.research,
   });
 
