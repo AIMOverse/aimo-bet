@@ -16,9 +16,28 @@ import type { AgentSession } from "@/lib/supabase/types";
 // Types
 // ============================================================================
 
+/**
+ * Research payload from Parallel webhook
+ * Present when triggered by research_complete
+ */
+export interface ResearchPayload {
+  run_id: string;
+  status: "completed" | "failed";
+  content?: string;
+  basis?: Array<{
+    field: string;
+    citations: Array<{ url: string; excerpt: string }>;
+    confidence: number;
+    reasoning: string;
+  }>;
+  error?: string;
+}
+
 export interface TradingInput {
   modelId: string;
   walletAddress: string;
+  /** Research payload (present when triggered by research completion) */
+  research?: ResearchPayload;
 }
 
 // Re-export TradingResult for consumers
@@ -145,6 +164,7 @@ async function runAgentStep(input: TradingInput): Promise<TradingResult> {
     walletAddress: input.walletAddress,
     privateKey: getWalletPrivateKey(input.modelId),
     maxSteps: 10,
+    researchContext: input.research,
   });
 
   // Run the agent with minimal input (KV cache friendly)

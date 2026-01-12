@@ -10,6 +10,23 @@ import type {
 // =============================================================================
 
 /**
+ * Research context from Parallel Task API
+ * Present when agent is triggered by research completion
+ */
+export interface ResearchContext {
+  run_id: string;
+  status: "completed" | "failed";
+  content?: string;
+  basis?: Array<{
+    field: string;
+    citations: Array<{ url: string; excerpt: string }>;
+    confidence: number;
+    reasoning: string;
+  }>;
+  error?: string;
+}
+
+/**
  * Configuration for creating a PredictionMarketAgent instance
  */
 export interface AgentConfig {
@@ -17,6 +34,8 @@ export interface AgentConfig {
   walletAddress: string;
   privateKey?: string;
   maxSteps?: number;
+  /** Research context from Parallel (present when triggered by research completion) */
+  researchContext?: ResearchContext;
 }
 
 // =============================================================================

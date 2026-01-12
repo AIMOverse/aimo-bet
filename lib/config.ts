@@ -16,6 +16,18 @@ export const DFLOW_METADATA_API_URL =
   "https://prediction-markets-api.dflow.net";
 
 // =============================================================================
+// Polygon Configuration
+// =============================================================================
+
+/** Polygon RPC URL for EVM queries */
+export const POLYGON_RPC_URL =
+  process.env.POLYGON_RPC_URL || "https://polygon-rpc.com";
+
+/** USDC.e contract address on Polygon (bridged USDC, 6 decimals) */
+export const POLYGON_USDC_ADDRESS =
+  "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
+
+// =============================================================================
 // Arena Configuration
 // =============================================================================
 
@@ -34,6 +46,24 @@ export const CHART_CONFIG = {
   margin: { top: 20, right: 30, left: 20, bottom: 5 },
   animationDuration: 300,
 } as const;
+
+// =============================================================================
+// Parallel AI Configuration
+// =============================================================================
+
+/** Parallel AI API key */
+export const PARALLEL_API_KEY = process.env.PARALLEL_API_KEY;
+
+/** Parallel AI API base URL */
+export const PARALLEL_API_URL = "https://api.parallel.ai";
+
+/** Parallel webhook secret for verifying incoming webhooks */
+export const PARALLEL_WEBHOOK_SECRET = process.env.PARALLEL_WEBHOOK_SECRET;
+
+/** Webhook URL for Task API callbacks */
+export const PARALLEL_WEBHOOK_URL = process.env.VERCEL_URL
+  ? `https://${process.env.VERCEL_URL}/api/parallel/webhook`
+  : "http://localhost:3000/api/parallel/webhook";
 
 // =============================================================================
 // Trading Configuration

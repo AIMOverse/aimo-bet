@@ -32,8 +32,12 @@ export interface ModelDefinition {
    */
   providerIds?: {
     aimo?: string;
-    openrouter?: string;
   };
+  /**
+   * SDK provider type for special handling.
+   * Currently used for Google models that require thought signature bypass.
+   */
+  aimoSdkProvider?: "google" | "openai" | "anthropic";
   // Arena-specific fields (optional)
   /** Model series identifier for logo display (e.g., "openai", "claude", "gemini") */
   series?: string;

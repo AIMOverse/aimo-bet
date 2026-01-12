@@ -58,6 +58,12 @@ function formatCurrency(value: number): string {
   }).format(value);
 }
 
+// Extract base58 signature from txSignature (removes exchange prefix like "kalshi:")
+function extractSignature(txSignature: string): string {
+  const colonIndex = txSignature.indexOf(":");
+  return colonIndex !== -1 ? txSignature.slice(colonIndex + 1) : txSignature;
+}
+
 function TradeCard({ trade }: { trade: AgentTrade }) {
   const isBuy = trade.action === "buy";
   const isYes = trade.side === "yes";
@@ -105,7 +111,7 @@ function TradeCard({ trade }: { trade: AgentTrade }) {
             "flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium",
             isBuy
               ? "bg-green-500/10 text-green-500"
-              : "bg-red-500/10 text-red-500",
+              : "bg-red-500/10 text-red-500"
           )}
         >
           {isBuy ? (
@@ -120,7 +126,7 @@ function TradeCard({ trade }: { trade: AgentTrade }) {
             "px-2 py-0.5 rounded text-xs font-medium",
             isYes
               ? "bg-blue-500/10 text-blue-500"
-              : "bg-orange-500/10 text-orange-500",
+              : "bg-orange-500/10 text-orange-500"
           )}
         >
           {trade.side.toUpperCase()}
@@ -145,7 +151,7 @@ function TradeCard({ trade }: { trade: AgentTrade }) {
       {/* Transaction signature link */}
       {trade.txSignature && (
         <a
-          href={`https://solscan.io/tx/${trade.txSignature}`}
+          href={`https://solscan.io/tx/${extractSignature(trade.txSignature)}`}
           target="_blank"
           rel="noopener noreferrer"
           className="mt-2 text-xs text-blue-500 hover:underline block truncate"

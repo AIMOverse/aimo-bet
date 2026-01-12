@@ -22,12 +22,11 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: true,
     supportsFunctions: true,
     providerIds: {
-      aimo: "openai/gpt-5",
-      openrouter: "openai/gpt-5",
+      aimo: "GL9JtU2u8uo4XFrGrZg2KySxstdsQS2UcbZAwgtR3Rhq:openai/gpt-5",
     },
     series: "gpt",
     chartColor: "#10b981", // Emerald
-    walletAddress: process.env.WALLET_GPT_PUBLIC,
+    walletAddress: process.env.WALLET_GPT_SVM_PUBLIC,
     enabled: true,
   },
   // Claude - claude-sonnet-4.5
@@ -41,12 +40,11 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: true,
     supportsFunctions: true,
     providerIds: {
-      aimo: "anthropic/claude-sonnet-4.5",
-      openrouter: "anthropic/claude-sonnet-4.5",
+      aimo: "9D9ZcNGUSDCfiDQ4DcGvvF1de5s9cqZuE5T7KcWFSgV6:anthropic/claude-sonnet-4.5",
     },
     series: "claude",
     chartColor: "#f97316", // Orange
-    walletAddress: process.env.WALLET_CLAUDE_PUBLIC,
+    walletAddress: process.env.WALLET_CLAUDE_SVM_PUBLIC,
     enabled: true,
   },
   // DeepSeek - deepseek-v3.2
@@ -61,12 +59,11 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: false,
     supportsFunctions: true,
     providerIds: {
-      aimo: "deepseek/deepseek-v3.2-exp",
-      openrouter: "deepseek/deepseek-v3.2",
+      aimo: "47bztUnCFpGYXWw5hCu7esJExSVRsK2Ww3Y5y8mMk7cY:deepseek/deepseek-v3.2-exp",
     },
     series: "deepseek",
     chartColor: "#a78bfa", // Light violet
-    walletAddress: process.env.WALLET_DEEPSEEK_PUBLIC,
+    walletAddress: process.env.WALLET_DEEPSEEK_SVM_PUBLIC,
     enabled: true,
   },
   // GLM - glm-4.7
@@ -80,12 +77,11 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: true,
     supportsFunctions: true,
     providerIds: {
-      aimo: "z-ai/glm-4.6",
-      openrouter: "z-ai/glm-4.6",
+      aimo: "GL9JtU2u8uo4XFrGrZg2KySxstdsQS2UcbZAwgtR3Rhq:z-ai/glm-4.6",
     },
     series: "glm",
     chartColor: "#06b6d4", // Cyan
-    walletAddress: process.env.WALLET_GLM_PUBLIC,
+    walletAddress: process.env.WALLET_GLM_SVM_PUBLIC,
     enabled: true,
   },
   // Grok - grok-4
@@ -99,12 +95,11 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: true,
     supportsFunctions: true,
     providerIds: {
-      aimo: "xai/grok-4",
-      openrouter: "x-ai/grok-4",
+      aimo: "9D9ZcNGUSDCfiDQ4DcGvvF1de5s9cqZuE5T7KcWFSgV6:xai/grok-4",
     },
     series: "grok",
     chartColor: "#ef4444", // Red
-    walletAddress: process.env.WALLET_GROK_PUBLIC,
+    walletAddress: process.env.WALLET_GROK_SVM_PUBLIC,
     enabled: true,
   },
   // Qwen - qwen-3-max
@@ -118,12 +113,11 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: true,
     supportsFunctions: true,
     providerIds: {
-      aimo: "alibaba/qwen3-235b-a22b",
-      openrouter: "qwen/qwen3-max",
+      aimo: "47bztUnCFpGYXWw5hCu7esJExSVRsK2Ww3Y5y8mMk7cY:alibaba/qwen3-max",
     },
     series: "qwen",
     chartColor: "#8b5cf6", // Violet
-    walletAddress: process.env.WALLET_QWEN_PUBLIC,
+    walletAddress: process.env.WALLET_QWEN_SVM_PUBLIC,
     enabled: true,
   },
   // Gemini - gemini-3-pro
@@ -138,12 +132,12 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: true,
     supportsFunctions: true,
     providerIds: {
-      aimo: "google/gemini-3-pro",
-      openrouter: "google/gemini-3-pro-preview",
+      aimo: "GL9JtU2u8uo4XFrGrZg2KySxstdsQS2UcbZAwgtR3Rhq:google/gemini-3-pro",
     },
+    aimoSdkProvider: "google",
     series: "gemini",
     chartColor: "#22c55e", // Green
-    walletAddress: process.env.WALLET_GEMINI_PUBLIC,
+    walletAddress: process.env.WALLET_GEMINI_SVM_PUBLIC,
     enabled: true,
   },
   // Kimi - kimi-k2-0905
@@ -157,12 +151,11 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: true,
     supportsFunctions: true,
     providerIds: {
-      aimo: "moonshot/kimi-k2",
-      openrouter: "moonshotai/kimi-k2-0905",
+      aimo: "47bztUnCFpGYXWw5hCu7esJExSVRsK2Ww3Y5y8mMk7cY:moonshot/kimi-k2",
     },
     series: "kimi",
     chartColor: "#ec4899", // Pink
-    walletAddress: process.env.WALLET_KIMI_PUBLIC,
+    walletAddress: process.env.WALLET_KIMI_SVM_PUBLIC,
     enabled: true,
   },
 ];
@@ -306,16 +299,17 @@ export function getModelsWithWallets(): ModelDefinition[] {
  * Wallet private key environment variable mapping.
  * Maps model ID to corresponding private key env var.
  * NOTE: These must match the canonical model IDs in the MODELS array (the `id` field).
+ * Uses the same SVM private keys as the aimo-network provider (registry.ts).
  */
 const WALLET_PRIVATE_KEY_MAP: Record<string, string | undefined> = {
-  "openai/gpt-5": process.env.WALLET_GPT_PRIVATE,
-  "anthropic/claude-sonnet-4.5": process.env.WALLET_CLAUDE_PRIVATE,
-  "deepseek/deepseek-v3.2": process.env.WALLET_DEEPSEEK_PRIVATE,
-  "z-ai/glm-4.6": process.env.WALLET_GLM_PRIVATE,
-  "xai/grok-4": process.env.WALLET_GROK_PRIVATE,
-  "qwen/qwen3-max": process.env.WALLET_QWEN_PRIVATE,
-  "google/gemini-3-pro": process.env.WALLET_GEMINI_PRIVATE,
-  "moonshotai/kimi-k2-0905": process.env.WALLET_KIMI_PRIVATE,
+  "openai/gpt-5": process.env.WALLET_GPT_SVM_PRIVATE,
+  "anthropic/claude-sonnet-4.5": process.env.WALLET_CLAUDE_SVM_PRIVATE,
+  "deepseek/deepseek-v3.2": process.env.WALLET_DEEPSEEK_SVM_PRIVATE,
+  "z-ai/glm-4.6": process.env.WALLET_GLM_SVM_PRIVATE,
+  "xai/grok-4": process.env.WALLET_GROK_SVM_PRIVATE,
+  "qwen/qwen3-max": process.env.WALLET_QWEN_SVM_PRIVATE,
+  "google/gemini-3-pro": process.env.WALLET_GEMINI_SVM_PRIVATE,
+  "moonshotai/kimi-k2-0905": process.env.WALLET_KIMI_SVM_PRIVATE,
 };
 
 /**

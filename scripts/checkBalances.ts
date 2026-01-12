@@ -4,15 +4,14 @@
 // Usage: npx tsx scripts/checkBalances.ts
 // ============================================================================
 
-import { config } from "dotenv";
+// Load environment variables FIRST - using side-effect import ensures it runs before other imports
+import "dotenv/config";
+
 import {
   getSolBalance,
   getTokenAccountsByOwner,
   TOKEN_MINTS,
-} from "../lib/solana/client";
-
-// Load environment variables
-config();
+} from "../lib/crypto/solana/client";
 
 // ============================================================================
 // Wallet Configuration
@@ -25,15 +24,15 @@ interface WalletConfig {
 
 /**
  * Get all wallet public keys from environment variables
- * Looks for pattern: WALLET_<NAME>_PUBLIC
+ * Looks for pattern: WALLET_<NAME>_SVM_PUBLIC (Solana public keys)
  */
 function getWalletsFromEnv(): WalletConfig[] {
   const wallets: WalletConfig[] = [];
 
   for (const [key, value] of Object.entries(process.env)) {
-    if (key.startsWith("WALLET_") && key.endsWith("_PUBLIC") && value) {
-      // Extract name: WALLET_GPT_PUBLIC -> GPT
-      const name = key.replace("WALLET_", "").replace("_PUBLIC", "");
+    if (key.startsWith("WALLET_") && key.endsWith("_SVM_PUBLIC") && value) {
+      // Extract name: WALLET_GPT_SVM_PUBLIC -> GPT
+      const name = key.replace("WALLET_", "").replace("_SVM_PUBLIC", "");
       wallets.push({
         name,
         publicKey: value,
@@ -151,22 +150,44 @@ function formatTable(balances: WalletBalances[]): void {
 // Main
 // ============================================================================
 
+/**
+ * Sleep helper to avoid rate limiting
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function main() {
   console.log("🔍 Fetching wallet balances...\n");
+  console.log(
+    `🌐 Using RPC: ${process.env.SOLANA_RPC_URL || "default mainnet"}\n`
+  );
 
   // Get wallets from env
   const wallets = getWalletsFromEnv();
 
   if (wallets.length === 0) {
     console.error("❌ No wallets found in .env");
-    console.error("   Expected format: WALLET_<NAME>_PUBLIC=<address>");
+    console.error("   Expected format: WALLET_<NAME>_SVM_PUBLIC=<address>");
     process.exit(1);
   }
 
   console.log(`📋 Found ${wallets.length} wallet(s) in .env\n`);
 
-  // Fetch balances in parallel
-  const balances = await Promise.all(wallets.map(fetchWalletBalances));
+  // Fetch balances sequentially with delay to avoid rate limiting
+  const balances: WalletBalances[] = [];
+  for (let i = 0; i < wallets.length; i++) {
+    const wallet = wallets[i];
+    process.stdout.write(`   Fetching ${wallet.name}... `);
+    const balance = await fetchWalletBalances(wallet);
+    balances.push(balance);
+    console.log("✓");
+
+    // Small delay between requests to avoid rate limiting (except for last one)
+    if (i < wallets.length - 1) {
+      await sleep(200);
+    }
+  }
 
   // Display results
   formatTable(balances);

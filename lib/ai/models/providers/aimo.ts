@@ -1,52 +1,378 @@
-import { SOLANA_RPC_URL } from "@/lib/config";
 import { aimoNetwork } from "@aimo.network/provider";
-import { SvmClientSigner, SOLANA_MAINNET_CHAIN_ID } from "@aimo.network/svm";
-import { createKeyPairSignerFromBytes, getBase58Encoder } from "@solana/kit";
+import {
+  type Chain,
+  getWalletForChain,
+  getSeriesWallets,
+} from "@/lib/crypto/wallets/registry";
+import { createSvmSigner } from "@/lib/crypto/wallets/svm";
+import { createEvmSigner } from "@/lib/crypto/wallets/evm";
 import { getModelById } from "../catalog";
 
 const AIMO_BASE_URL = "https://beta.aimo.network";
 
 /**
- * Wallet private key mapping by model series.
- * The series name is defined in the model catalog, not extracted from the model ID.
- * Maps series name -> env var name (e.g., openai series uses WALLET_GPT_PRIVATE)
+ * Google thought signature bypass value.
+ * Used to skip validation for function calls that don't have thought signatures.
+ * @see https://cloud.google.com/vertex-ai/docs/generative-ai/model-reference/function-calling
  */
-const WALLET_PRIVATE_KEYS: Record<string, string | undefined> = {
-  openai: process.env.WALLET_GPT_PRIVATE,
-  gpt: process.env.WALLET_GPT_PRIVATE,
-  claude: process.env.WALLET_CLAUDE_PRIVATE,
-  deepseek: process.env.WALLET_DEEPSEEK_PRIVATE,
-  glm: process.env.WALLET_GLM_PRIVATE,
-  grok: process.env.WALLET_GROK_PRIVATE,
-  qwen: process.env.WALLET_QWEN_PRIVATE,
-  gemini: process.env.WALLET_GEMINI_PRIVATE,
-  kimi: process.env.WALLET_KIMI_PRIVATE,
-};
+const GOOGLE_THOUGHT_SIGNATURE_BYPASS = "skip_thought_signature_validator";
 
 /**
- * Cache of initialized providers per series.
+ * Cache of initialized providers per series and chain.
+ * Key format: "{series}:{chain}:{isGoogle}" (e.g., "gpt:svm:false", "gemini:svm:true")
  */
 const providerCache = new Map<string, ReturnType<typeof aimoNetwork>>();
 
 /**
- * Create an AiMo Network provider with the specified wallet.
+ * Clear the provider cache. Useful for testing or when configuration changes.
  */
-async function createProviderWithWallet(privateKeyBase58: string) {
-  const encoder = getBase58Encoder();
-  const secretKeyBytes = encoder.encode(privateKeyBase58);
-  const keypairSigner = await createKeyPairSignerFromBytes(secretKeyBytes);
+export function clearProviderCache() {
+  console.log(
+    `[AimoProvider] Clearing provider cache (${providerCache.size} entries)`
+  );
+  providerCache.clear();
+}
 
-  const signer = new SvmClientSigner({
-    signer: keypairSigner,
-    chainId: SOLANA_MAINNET_CHAIN_ID,
-    config: {
-      rpcUrl: SOLANA_RPC_URL,
-    },
+// ============================================================================
+// Google Thought Signature Capture & Injection
+// ============================================================================
+
+/**
+ * Cache of thought signatures captured from Google model responses.
+ * Maps tool_call_id -> thought_signature
+ * These are captured from responses and injected back into subsequent requests.
+ */
+const thoughtSignatureCache = new Map<string, string>();
+
+/**
+ * Clear the thought signature cache.
+ */
+export function clearThoughtSignatureCache() {
+  console.log(
+    `[GoogleFetchWrapper] Clearing thought signature cache (${thoughtSignatureCache.size} entries)`
+  );
+  thoughtSignatureCache.clear();
+}
+
+/**
+ * Structure of a tool call in the request/response body
+ */
+interface ToolCall {
+  extra_content?: {
+    google?: {
+      thought_signature?: string;
+    };
+  };
+  function?: {
+    arguments?: string;
+    name?: string;
+  };
+  id?: string;
+  type?: string;
+}
+
+/**
+ * Structure of a message in the request body
+ */
+interface RequestMessage {
+  role?: string;
+  tool_calls?: ToolCall[];
+  content?: unknown;
+}
+
+/**
+ * Request body structure for chat completions
+ */
+interface ChatRequestBody {
+  messages?: RequestMessage[];
+  [key: string]: unknown;
+}
+
+/**
+ * Response body structure (OpenAI format)
+ */
+interface ChatResponseBody {
+  choices?: Array<{
+    message?: {
+      role?: string;
+      content?: string;
+      tool_calls?: ToolCall[];
+    };
+    delta?: {
+      tool_calls?: ToolCall[];
+    };
+  }>;
+}
+
+/**
+ * Capture thought signatures from response tool_calls and store in cache.
+ */
+function captureThoughtSignatures(responseBody: ChatResponseBody): void {
+  if (!responseBody.choices) return;
+
+  for (const choice of responseBody.choices) {
+    const toolCalls = choice.message?.tool_calls || choice.delta?.tool_calls;
+    if (!toolCalls) continue;
+
+    for (const toolCall of toolCalls) {
+      const signature = toolCall.extra_content?.google?.thought_signature;
+      if (signature && toolCall.id) {
+        console.log(
+          `[GoogleFetchWrapper] Captured thought_signature for tool_call ${
+            toolCall.id
+          }: ${signature.slice(0, 50)}...`
+        );
+        thoughtSignatureCache.set(toolCall.id, signature);
+      }
+    }
+  }
+}
+
+/**
+ * Inject cached thought signatures into tool_calls that are missing them.
+ * Falls back to bypass signature if no cached signature is found.
+ */
+function injectGoogleThoughtSignatures(body: ChatRequestBody): ChatRequestBody {
+  if (!body.messages || !Array.isArray(body.messages)) {
+    return body;
+  }
+
+  const updatedMessages = body.messages.map((message: RequestMessage) => {
+    // Only process messages with tool_calls (typically from model/assistant role)
+    if (!message.tool_calls || !Array.isArray(message.tool_calls)) {
+      return message;
+    }
+
+    const updatedToolCalls = message.tool_calls.map((toolCall: ToolCall) => {
+      // Check if signature is already present
+      if (toolCall.extra_content?.google?.thought_signature) {
+        return toolCall;
+      }
+
+      // Try to get cached signature for this tool_call
+      const cachedSignature = toolCall.id
+        ? thoughtSignatureCache.get(toolCall.id)
+        : undefined;
+      const signature = cachedSignature || GOOGLE_THOUGHT_SIGNATURE_BYPASS;
+
+      if (cachedSignature) {
+        console.log(
+          `[GoogleFetchWrapper] Injecting cached signature for tool_call ${toolCall.id}`
+        );
+      } else {
+        console.log(
+          `[GoogleFetchWrapper] No cached signature for tool_call ${toolCall.id}, using bypass`
+        );
+      }
+
+      // Inject the signature
+      return {
+        ...toolCall,
+        extra_content: {
+          ...toolCall.extra_content,
+          google: {
+            ...toolCall.extra_content?.google,
+            thought_signature: signature,
+          },
+        },
+      };
+    });
+
+    return {
+      ...message,
+      tool_calls: updatedToolCalls,
+    };
   });
 
+  return {
+    ...body,
+    messages: updatedMessages,
+  };
+}
+
+/**
+ * Create a fetch wrapper that injects Google thought signature bypass.
+ * This wraps the global fetch and modifies request bodies for chat completion calls.
+ */
+function createGoogleFetchWrapper(): typeof fetch {
+  console.log(
+    "[GoogleFetchWrapper] Creating new Google fetch wrapper instance"
+  );
+
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.href
+        : input.url;
+    console.log(
+      `[GoogleFetchWrapper] Fetch called: ${init?.method || "GET"} ${url}`
+    );
+
+    // Only intercept POST requests with JSON bodies
+    if (init?.method?.toUpperCase() === "POST" && init.body) {
+      try {
+        const bodyString =
+          typeof init.body === "string" ? init.body : undefined;
+
+        console.log(
+          `[GoogleFetchWrapper] Intercepting POST request, body type: ${typeof init.body}, isString: ${
+            typeof init.body === "string"
+          }`
+        );
+
+        if (bodyString) {
+          const body = JSON.parse(bodyString) as ChatRequestBody;
+
+          // Inject thought signatures if messages exist
+          if (body.messages) {
+            // Debug: log message structure
+            for (let i = 0; i < body.messages.length; i++) {
+              const msg = body.messages[i];
+              console.log(
+                `[GoogleFetchWrapper] Message ${i}: role=${
+                  msg.role
+                }, has tool_calls=${!!msg.tool_calls}, keys=${Object.keys(
+                  msg
+                ).join(",")}`
+              );
+              if (msg.tool_calls) {
+                console.log(
+                  `[GoogleFetchWrapper]   tool_calls: ${JSON.stringify(
+                    msg.tool_calls
+                  ).slice(0, 200)}...`
+                );
+              }
+            }
+
+            console.log(
+              `[GoogleFetchWrapper] Found ${body.messages.length} messages, checking for tool_calls...`
+            );
+
+            // Count tool_calls before injection
+            const toolCallsBefore = body.messages.reduce((count, msg) => {
+              return count + (msg.tool_calls?.length || 0);
+            }, 0);
+
+            const modifiedBody = injectGoogleThoughtSignatures(body);
+
+            // Count tool_calls after injection (with signatures)
+            const toolCallsAfter =
+              modifiedBody.messages?.reduce((count, msg) => {
+                const msgWithToolCalls = msg as RequestMessage;
+                return count + (msgWithToolCalls.tool_calls?.length || 0);
+              }, 0) || 0;
+
+            console.log(
+              `[GoogleFetchWrapper] Injected thought signatures: ${toolCallsBefore} tool_calls found, ${toolCallsAfter} after injection`
+            );
+
+            // Debug: Log the first tool_call after injection to verify format
+            if (modifiedBody.messages) {
+              for (const msg of modifiedBody.messages) {
+                const typedMsg = msg as RequestMessage;
+                if (typedMsg.tool_calls && typedMsg.tool_calls.length > 0) {
+                  console.log(
+                    `[GoogleFetchWrapper] Modified tool_call sample: ${JSON.stringify(
+                      typedMsg.tool_calls[0]
+                    )}`
+                  );
+                }
+              }
+            }
+
+            init = {
+              ...init,
+              body: JSON.stringify(modifiedBody),
+            };
+          }
+        } else {
+          console.log(
+            `[GoogleFetchWrapper] Body is not a string, type: ${init.body?.constructor?.name}`
+          );
+        }
+      } catch (e) {
+        // If parsing fails, proceed with original request
+        console.error(`[GoogleFetchWrapper] Error processing request:`, e);
+      }
+    }
+
+    // Make the actual fetch request
+    const response = await fetch(input, init);
+
+    // Capture thought signatures from response
+    // Clone the response since we need to read the body
+    try {
+      const clonedResponse = response.clone();
+      const responseText = await clonedResponse.text();
+
+      console.log(
+        `[GoogleFetchWrapper] Response status: ${response.status}, body length: ${responseText.length}`
+      );
+
+      if (responseText) {
+        const responseBody = JSON.parse(responseText) as ChatResponseBody;
+        console.log(
+          `[GoogleFetchWrapper] Response has choices: ${!!responseBody.choices}, count: ${
+            responseBody.choices?.length || 0
+          }`
+        );
+
+        if (responseBody.choices?.[0]?.message?.tool_calls) {
+          console.log(
+            `[GoogleFetchWrapper] Response tool_calls: ${JSON.stringify(
+              responseBody.choices[0].message.tool_calls
+            )}`
+          );
+        }
+
+        captureThoughtSignatures(responseBody);
+      }
+    } catch (e) {
+      // Silently fail - response might be streaming or not JSON
+      console.log(
+        `[GoogleFetchWrapper] Could not capture response signatures: ${
+          e instanceof Error ? e.message : "unknown"
+        }`
+      );
+    }
+
+    return response;
+  };
+}
+
+// ============================================================================
+// Provider Creation
+// ============================================================================
+
+/**
+ * Create an AiMo Network provider with an SVM (Solana) wallet.
+ */
+async function createSvmProvider(
+  privateKeyBase58: string,
+  useGoogleFetchWrapper: boolean = false
+) {
+  const signer = await createSvmSigner(privateKeyBase58);
   return aimoNetwork({
     signer,
     baseURL: AIMO_BASE_URL,
+    ...(useGoogleFetchWrapper && { fetch: createGoogleFetchWrapper() }),
+  });
+}
+
+/**
+ * Create an AiMo Network provider with an EVM (Polygon) wallet.
+ */
+function createEvmProvider(
+  privateKeyHex: string,
+  useGoogleFetchWrapper: boolean = false
+) {
+  const signer = createEvmSigner(privateKeyHex);
+  return aimoNetwork({
+    signer,
+    baseURL: AIMO_BASE_URL,
+    ...(useGoogleFetchWrapper && { fetch: createGoogleFetchWrapper() }),
   });
 }
 
@@ -67,45 +393,61 @@ function getSeriesFromModelId(modelId: string): string {
 }
 
 /**
- * Get an AiMo provider for a specific model.
+ * Get an AiMo provider for a specific model and chain.
  * Each model uses its own wallet for API payments.
  *
  * @param modelId - Provider-specific model ID (e.g., "openai/gpt-5")
  * @param canonicalId - Canonical model ID for catalog lookup (e.g., "openai/gpt-5")
- * @returns AiMo provider configured with the model's wallet
+ * @param chain - Payment chain to use ("svm" for Solana, "evm" for Polygon)
+ * @returns AiMo provider configured with the model's wallet for the specified chain
  */
 export async function getAimoProvider(
   modelId: string,
-  canonicalId: string = modelId
+  canonicalId: string = modelId,
+  chain: Chain = "svm"
 ) {
+  const model = getModelById(canonicalId);
   const series = getSeriesFromModelId(canonicalId);
+  const isGoogleModel = model?.aimoSdkProvider === "google";
+  const cacheKey = `${series}:${chain}:${isGoogleModel}`;
+
   console.log(
-    `[AimoProvider] Getting provider for modelId="${modelId}", canonicalId="${canonicalId}", series="${series}"`
+    `[AimoProvider] Getting provider for modelId="${modelId}", canonicalId="${canonicalId}", series="${series}", chain="${chain}", isGoogle=${isGoogleModel}`
   );
 
   // Return cached provider if available
-  const cached = providerCache.get(series);
+  const cached = providerCache.get(cacheKey);
   if (cached) {
-    console.log(`[AimoProvider] Using cached provider for series="${series}"`);
+    console.log(
+      `[AimoProvider] Using cached provider for series="${series}", chain="${chain}", isGoogle=${isGoogleModel}`
+    );
     return cached;
   }
 
-  // Get wallet for this series
-  const privateKey = WALLET_PRIVATE_KEYS[series];
+  // Get wallet for this series and chain
+  const privateKey = getWalletForChain(series, chain);
   if (!privateKey) {
-    const error = `No wallet configured for model series "${series}". Set WALLET_${series.toUpperCase()}_PRIVATE environment variable.`;
+    const envVarName = `WALLET_${series.toUpperCase()}_${chain.toUpperCase()}_PRIVATE`;
+    const error = `No ${chain.toUpperCase()} wallet configured for model series "${series}". Set ${envVarName} environment variable.`;
     console.error(`[AimoProvider] ${error}`);
     throw new Error(error);
   }
 
   console.log(
-    `[AimoProvider] Creating new provider for series="${series}" with wallet`
+    `[AimoProvider] Creating new provider for series="${series}", chain="${chain}", isGoogle=${isGoogleModel}`
   );
 
-  // Create and cache the provider
-  const provider = await createProviderWithWallet(privateKey);
-  providerCache.set(series, provider);
+  // Create provider based on chain type
+  // Google models use a custom fetch wrapper to inject thought signature bypass
+  let provider: ReturnType<typeof aimoNetwork>;
+  if (chain === "evm") {
+    provider = createEvmProvider(privateKey, isGoogleModel);
+  } else {
+    provider = await createSvmProvider(privateKey, isGoogleModel);
+  }
 
+  // Cache and return the provider
+  providerCache.set(cacheKey, provider);
   return provider;
 }
 
@@ -115,11 +457,13 @@ export async function getAimoProvider(
  *
  * @param modelId - Provider-specific model ID (e.g., "openai/gpt-5")
  * @param canonicalId - Canonical model ID for catalog lookup (defaults to modelId)
+ * @param chain - Payment chain to use ("svm" for Solana, "evm" for Polygon)
  * @returns Language model instance
  */
 export async function getAimoModel(
   modelId: string,
-  canonicalId: string = modelId
+  canonicalId: string = modelId,
+  chain: Chain = "svm"
 ) {
   // Resolve the actual provider model ID from the catalog if available
   // This handles mapping internal IDs (e.g. "qwen/qwen3-max") to provider IDs (e.g. "qwen/qwen3-235b-a22b")
@@ -127,9 +471,27 @@ export async function getAimoModel(
   const providerModelId = model?.providerIds?.aimo || modelId;
 
   console.log(
-    `[AimoProvider] getAimoModel: modelId="${modelId}", canonicalId="${canonicalId}", resolved="${providerModelId}"`
+    `[AimoProvider] getAimoModel: modelId="${modelId}", canonicalId="${canonicalId}", resolved="${providerModelId}", chain="${chain}"`
   );
 
-  const provider = await getAimoProvider(providerModelId, canonicalId);
+  const provider = await getAimoProvider(providerModelId, canonicalId, chain);
   return provider.chat(providerModelId);
 }
+
+/**
+ * Check if a model series has a wallet configured for a specific chain.
+ * Useful for determining available payment options.
+ *
+ * @param modelId - Model ID to check
+ * @param chain - Chain to check for
+ * @returns True if wallet is configured
+ */
+export function hasWalletForModel(modelId: string, chain: Chain): boolean {
+  const series = getSeriesFromModelId(modelId);
+  const wallets = getSeriesWallets(series);
+  const key = wallets?.[chain];
+  return key !== undefined && key.length > 0;
+}
+
+// Re-export Chain type for convenience
+export type { Chain } from "@/lib/crypto/wallets/registry";
