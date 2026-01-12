@@ -60,10 +60,16 @@ export const PARALLEL_API_URL = "https://api.parallel.ai";
 /** Parallel webhook secret for verifying incoming webhooks */
 export const PARALLEL_WEBHOOK_SECRET = process.env.PARALLEL_WEBHOOK_SECRET;
 
+/** Base URL for webhooks */
+const WEBHOOK_BASE_URL = process.env.VERCEL_URL
+  ? `https://${process.env.VERCEL_URL}`
+  : "http://localhost:3000";
+
 /** Webhook URL for Task API callbacks */
-export const PARALLEL_WEBHOOK_URL = process.env.VERCEL_URL
-  ? `https://${process.env.VERCEL_URL}/api/parallel/webhook`
-  : "http://localhost:3000/api/parallel/webhook";
+export const PARALLEL_TASK_WEBHOOK_URL = `${WEBHOOK_BASE_URL}/api/parallel/task/webhook`;
+
+/** Webhook URL for Monitor API callbacks */
+export const PARALLEL_MONITOR_WEBHOOK_URL = `${WEBHOOK_BASE_URL}/api/parallel/monitor/webhook`;
 
 // =============================================================================
 // Trading Configuration

@@ -93,3 +93,84 @@ export interface ResearchResult {
   created_at: string;
   completed_at?: string;
 }
+
+// ============================================================================
+// Monitor API Types
+// ============================================================================
+
+/** Monitor cadence options */
+export type MonitorCadence = "hourly" | "daily" | "weekly";
+
+/** Monitor status */
+export type MonitorStatus = "active" | "paused" | "cancelled";
+
+/** Monitor webhook event types */
+export type MonitorEventType =
+  | "monitor.event.detected"
+  | "monitor.execution.completed"
+  | "monitor.execution.failed";
+
+/** Monitor configuration for creation */
+export interface MonitorConfig {
+  /** Natural language query describing what to monitor */
+  query: string;
+  /** How often to run the monitor */
+  cadence: MonitorCadence;
+  /** Optional metadata for routing/filtering */
+  metadata?: Record<string, string>;
+}
+
+/** Response from creating a monitor */
+export interface MonitorCreateResponse {
+  monitor_id: string;
+  status: MonitorStatus;
+  created_at: string;
+}
+
+/** Single event detected by a monitor */
+export interface MonitorEvent {
+  /** Summary of the detected change */
+  output: string;
+  /** When the event was detected */
+  event_date: string;
+  /** Source URLs for the event */
+  source_urls: string[];
+}
+
+/** Event group containing related events */
+export interface MonitorEventGroup {
+  event_group_id: string;
+  monitor_id: string;
+  events: MonitorEvent[];
+  created_at: string;
+}
+
+/** Webhook payload for monitor.event.detected */
+export interface MonitorWebhookPayload {
+  type: MonitorEventType;
+  timestamp: string;
+  data: {
+    monitor_id: string;
+    event?: {
+      event_group_id: string;
+    };
+    metadata?: Record<string, string>;
+    error?: string;
+  };
+}
+
+/** Monitor details from GET /monitors/{id} */
+export interface MonitorDetails {
+  monitor_id: string;
+  query: string;
+  cadence: MonitorCadence;
+  status: MonitorStatus;
+  metadata?: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+}
+
+/** List monitors response */
+export interface MonitorListResponse {
+  monitors: MonitorDetails[];
+}
