@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo, useEffect, useRef } from "react";
-import { MessageSquare, Loader2 } from "lucide-react";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { MessageSquare, Loader2, ChevronDown } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 import { useChat } from "@/hooks/chat/useChat";
 import { MODELS } from "@/lib/ai/models";
 import type { ChatMessage as ChatMessageType } from "@/lib/supabase/types";
@@ -12,6 +13,7 @@ import type { ChatMessage as ChatMessageType } from "@/lib/supabase/types";
 // Map series to logo filename
 const SERIES_LOGO_MAP: Record<string, string> = {
   openai: "openai.svg",
+  gpt: "openai.svg",
   claude: "claude-color.svg",
   gemini: "gemini-color.svg",
   deepseek: "deepseek-color.svg",
@@ -98,8 +100,14 @@ export function ChatInterface({
   sessionId,
   selectedModelId = null,
 }: ChatInterfaceProps) {
-  const { messages, isLoading, error } = useChat({ sessionId });
+  // Pass modelId to hook for server-side filtering
+  const { messages, isLoading, isLoadingMore, hasMore, error, loadMore } =
+    useChat({
+      sessionId,
+      modelId: selectedModelId,
+    });
   const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   // Model info lookup map from catalog (includes logoPath derived from series)
   const modelInfoMap = useMemo(() => {
@@ -119,20 +127,16 @@ export function ChatInterface({
     return map;
   }, []);
 
-  // Filter by selected model
-  const filteredMessages = useMemo(() => {
-    if (!selectedModelId) return messages;
-    return messages.filter(
-      (msg: ChatMessageType) => msg.metadata?.authorId === selectedModelId
-    );
-  }, [messages, selectedModelId]);
-
-  // Auto-scroll on new messages
+  // Auto-scroll on new messages (only when at bottom)
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (scrollAreaRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = scrollAreaRef.current;
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
+      if (isAtBottom) {
+        scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
+      }
     }
-  }, [filteredMessages.length]);
+  }, [messages.length]);
 
   if (!sessionId) {
     return (
@@ -149,34 +153,58 @@ export function ChatInterface({
 
   return (
     <Card className="h-full flex flex-col">
-      <CardHeader className="pb-3">
-        {isLoading && (
-          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-        )}
-      </CardHeader>
-      <CardContent className="flex-1 min-h-0">
-        <ScrollArea className="h-full pr-4" ref={scrollRef}>
-          {error ? (
-            <div className="flex flex-col items-center justify-center py-8 text-center">
-              <MessageSquare className="h-12 w-12 text-destructive/50 mb-4" />
-              <p className="text-destructive">Failed to load messages</p>
-            </div>
-          ) : filteredMessages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8 text-center">
-              <MessageSquare className="h-12 w-12 text-muted-foreground/50 mb-4" />
-              <p className="text-muted-foreground">No messages yet</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {filteredMessages.map((msg: ChatMessageType) => (
-                <MessageBubble
-                  key={msg.id}
-                  message={msg}
-                  modelInfo={modelInfoMap.get(msg.metadata?.authorId ?? "")}
-                />
-              ))}
-            </div>
-          )}
+      <CardContent className="flex-1 min-h-0 pt-4">
+        <ScrollArea className="h-full pr-4" ref={scrollAreaRef}>
+          <div ref={scrollRef}>
+            {/* Loading spinner for initial load */}
+            {isLoading && (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            )}
+
+            {error ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <MessageSquare className="h-12 w-12 text-destructive/50 mb-4" />
+                <p className="text-destructive">Failed to load messages</p>
+              </div>
+            ) : messages.length === 0 && !isLoading ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <MessageSquare className="h-12 w-12 text-muted-foreground/50 mb-4" />
+                <p className="text-muted-foreground">No messages yet</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {messages.map((msg: ChatMessageType) => (
+                  <MessageBubble
+                    key={msg.id}
+                    message={msg}
+                    modelInfo={modelInfoMap.get(msg.metadata?.authorId ?? "")}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Load more button at bottom (loads older messages) */}
+            {hasMore && !isLoading && (
+              <div className="flex justify-center pt-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={loadMore}
+                  disabled={isLoadingMore}
+                  className="h-8 text-xs text-muted-foreground"
+                >
+                  {isLoadingMore ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                  ) : (
+                    <ChevronDown className="h-3.5 w-3.5 mr-1" />
+                  )}
+                  Load older messages
+                </Button>
+              </div>
+            )}
+          </div>
         </ScrollArea>
       </CardContent>
     </Card>

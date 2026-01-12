@@ -256,6 +256,7 @@ export function getSeriesLogoPath(modelName: string): string | undefined {
   // Map series to logo filename
   const logoMap: Record<string, string> = {
     openai: "openai.svg",
+    gpt: "openai.svg",
     claude: "claude-color.svg",
     gemini: "gemini-color.svg",
     deepseek: "deepseek-color.svg",
