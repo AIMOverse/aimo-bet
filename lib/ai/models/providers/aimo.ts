@@ -1,11 +1,6 @@
 import { aimoNetwork } from "@aimo.network/provider";
-import {
-  type Chain,
-  getWalletForChain,
-  getSeriesWallets,
-} from "@/lib/crypto/wallets/registry";
+import { getSeriesWallets } from "@/lib/crypto/wallets/registry";
 import { createSvmSigner } from "@/lib/crypto/wallets/svm";
-import { createEvmSigner } from "@/lib/crypto/wallets/evm";
 import { getModelById } from "../catalog";
 
 const AIMO_BASE_URL = "https://beta.aimo.network";
@@ -348,27 +343,13 @@ function createGoogleFetchWrapper(): typeof fetch {
 
 /**
  * Create an AiMo Network provider with an SVM (Solana) wallet.
+ * All inference payments use SVM (Solana) only.
  */
 async function createSvmProvider(
   privateKeyBase58: string,
   useGoogleFetchWrapper: boolean = false
 ) {
   const signer = await createSvmSigner(privateKeyBase58);
-  return aimoNetwork({
-    signer,
-    baseURL: AIMO_BASE_URL,
-    ...(useGoogleFetchWrapper && { fetch: createGoogleFetchWrapper() }),
-  });
-}
-
-/**
- * Create an AiMo Network provider with an EVM (Polygon) wallet.
- */
-function createEvmProvider(
-  privateKeyHex: string,
-  useGoogleFetchWrapper: boolean = false
-) {
-  const signer = createEvmSigner(privateKeyHex);
   return aimoNetwork({
     signer,
     baseURL: AIMO_BASE_URL,
@@ -393,58 +374,52 @@ function getSeriesFromModelId(modelId: string): string {
 }
 
 /**
- * Get an AiMo provider for a specific model and chain.
- * Each model uses its own wallet for API payments.
+ * Get an AiMo provider for a specific model.
+ * Each model uses its own SVM (Solana) wallet for API payments.
  *
  * @param modelId - Provider-specific model ID (e.g., "openai/gpt-5")
  * @param canonicalId - Canonical model ID for catalog lookup (e.g., "openai/gpt-5")
- * @param chain - Payment chain to use ("svm" for Solana, "evm" for Polygon)
- * @returns AiMo provider configured with the model's wallet for the specified chain
+ * @returns AiMo provider configured with the model's SVM wallet
  */
 export async function getAimoProvider(
   modelId: string,
-  canonicalId: string = modelId,
-  chain: Chain = "svm"
+  canonicalId: string = modelId
 ) {
   const model = getModelById(canonicalId);
   const series = getSeriesFromModelId(canonicalId);
   const isGoogleModel = model?.aimoSdkProvider === "google";
-  const cacheKey = `${series}:${chain}:${isGoogleModel}`;
+  const cacheKey = `${series}:svm:${isGoogleModel}`;
 
   console.log(
-    `[AimoProvider] Getting provider for modelId="${modelId}", canonicalId="${canonicalId}", series="${series}", chain="${chain}", isGoogle=${isGoogleModel}`
+    `[AimoProvider] Getting provider for modelId="${modelId}", canonicalId="${canonicalId}", series="${series}", isGoogle=${isGoogleModel}`
   );
 
   // Return cached provider if available
   const cached = providerCache.get(cacheKey);
   if (cached) {
     console.log(
-      `[AimoProvider] Using cached provider for series="${series}", chain="${chain}", isGoogle=${isGoogleModel}`
+      `[AimoProvider] Using cached provider for series="${series}", isGoogle=${isGoogleModel}`
     );
     return cached;
   }
 
-  // Get wallet for this series and chain
-  const privateKey = getWalletForChain(series, chain);
+  // Get SVM wallet for this series
+  const wallets = getSeriesWallets(series);
+  const privateKey = wallets?.svm;
   if (!privateKey) {
-    const envVarName = `WALLET_${series.toUpperCase()}_${chain.toUpperCase()}_PRIVATE`;
-    const error = `No ${chain.toUpperCase()} wallet configured for model series "${series}". Set ${envVarName} environment variable.`;
+    const envVarName = `WALLET_${series.toUpperCase()}_SVM_PRIVATE`;
+    const error = `No SVM wallet configured for model series "${series}". Set ${envVarName} environment variable.`;
     console.error(`[AimoProvider] ${error}`);
     throw new Error(error);
   }
 
   console.log(
-    `[AimoProvider] Creating new provider for series="${series}", chain="${chain}", isGoogle=${isGoogleModel}`
+    `[AimoProvider] Creating new provider for series="${series}", isGoogle=${isGoogleModel}`
   );
 
-  // Create provider based on chain type
+  // Create SVM provider
   // Google models use a custom fetch wrapper to inject thought signature bypass
-  let provider: ReturnType<typeof aimoNetwork>;
-  if (chain === "evm") {
-    provider = createEvmProvider(privateKey, isGoogleModel);
-  } else {
-    provider = await createSvmProvider(privateKey, isGoogleModel);
-  }
+  const provider = await createSvmProvider(privateKey, isGoogleModel);
 
   // Cache and return the provider
   providerCache.set(cacheKey, provider);
@@ -453,17 +428,15 @@ export async function getAimoProvider(
 
 /**
  * Get a language model from AiMo Network.
- * Uses the model's own wallet for API payments.
+ * Uses the model's own SVM wallet for API payments.
  *
  * @param modelId - Provider-specific model ID (e.g., "openai/gpt-5")
  * @param canonicalId - Canonical model ID for catalog lookup (defaults to modelId)
- * @param chain - Payment chain to use ("svm" for Solana, "evm" for Polygon)
  * @returns Language model instance
  */
 export async function getAimoModel(
   modelId: string,
-  canonicalId: string = modelId,
-  chain: Chain = "svm"
+  canonicalId: string = modelId
 ) {
   // Resolve the actual provider model ID from the catalog if available
   // This handles mapping internal IDs (e.g. "qwen/qwen3-max") to provider IDs (e.g. "qwen/qwen3-235b-a22b")
@@ -471,27 +444,23 @@ export async function getAimoModel(
   const providerModelId = model?.providerIds?.aimo || modelId;
 
   console.log(
-    `[AimoProvider] getAimoModel: modelId="${modelId}", canonicalId="${canonicalId}", resolved="${providerModelId}", chain="${chain}"`
+    `[AimoProvider] getAimoModel: modelId="${modelId}", canonicalId="${canonicalId}", resolved="${providerModelId}"`
   );
 
-  const provider = await getAimoProvider(providerModelId, canonicalId, chain);
+  const provider = await getAimoProvider(providerModelId, canonicalId);
   return provider.chat(providerModelId);
 }
 
 /**
- * Check if a model series has a wallet configured for a specific chain.
- * Useful for determining available payment options.
+ * Check if a model series has an SVM wallet configured.
+ * All inference payments use SVM (Solana) only.
  *
  * @param modelId - Model ID to check
- * @param chain - Chain to check for
- * @returns True if wallet is configured
+ * @returns True if SVM wallet is configured
  */
-export function hasWalletForModel(modelId: string, chain: Chain): boolean {
+export function hasWalletForModel(modelId: string): boolean {
   const series = getSeriesFromModelId(modelId);
   const wallets = getSeriesWallets(series);
-  const key = wallets?.[chain];
+  const key = wallets?.svm;
   return key !== undefined && key.length > 0;
 }
-
-// Re-export Chain type for convenience
-export type { Chain } from "@/lib/crypto/wallets/registry";
