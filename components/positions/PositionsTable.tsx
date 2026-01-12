@@ -7,10 +7,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import type { AgentPosition } from "@/hooks/positions/usePositions";
 import { cn } from "@/lib/utils";
+import { AnimateNumber } from "motion-plus/react";
 
 const DEFAULT_CHART_COLOR = "#6366f1";
 
-// Map series to logo filename
 const SERIES_LOGO_MAP: Record<string, string> = {
   openai: "openai.svg",
   claude: "claude-color.svg",
@@ -33,68 +33,142 @@ interface PositionsTableProps {
   selectedModelId?: string | null;
 }
 
-function PositionRow({ position }: { position: AgentPosition }) {
-  const isYes = position.side === "yes";
-  const modelName = position.modelName ?? "Model";
-  const logoPath = getLogoPathFromSeries(position.modelSeries);
-  const chartColor = position.modelColor ?? DEFAULT_CHART_COLOR;
-  const initial = modelName.charAt(0).toUpperCase();
+interface PositionWithPrice extends AgentPosition {
+  mockPrice: number;
+}
+
+interface MarketGroup {
+  marketTicker: string;
+  marketTitle?: string;
+  positions: PositionWithPrice[];
+  yesPosition?: PositionWithPrice;
+  noPosition?: PositionWithPrice;
+}
+
+interface ModelGroup {
+  modelId: string;
+  modelName: string;
+  modelColor: string;
+  modelSeries?: string;
+  totalValue: number;
+  markets: MarketGroup[];
+}
+
+function getMockPrice(ticker: string, side: "yes" | "no"): number {
+  const hash = ticker.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const basePrice = 35 + (hash % 50);
+  return side === "yes" ? basePrice / 100 : (100 - basePrice) / 100;
+}
+
+function formatCents(value: number): string {
+  return `${Math.round(value * 100)}¢`;
+}
+
+function Badge({
+  side,
+  isSelected,
+  price,
+}: {
+  side: "yes" | "no";
+  isSelected: boolean;
+  price?: number;
+}) {
+  const isYes = side === "yes";
+
+  return (
+    <div
+      className={cn(
+        "flex flex-col items-center px-3 py-1.5 rounded-md text-xs font-medium transition-all",
+        isSelected
+          ? isYes
+            ? "bg-blue-500 text-white"
+            : "bg-orange-500 text-white"
+          : "bg-muted/50 text-muted-foreground opacity-60",
+      )}
+    >
+      <span className="uppercase">{side}</span>
+      {price !== undefined && (
+        <span className={cn("text-[10px] mt-0.5", isSelected ? "text-white/80" : "text-muted-foreground")}>
+          {formatCents(price)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ModelRow({ modelGroup }: { modelGroup: ModelGroup }) {
+  const logoPath = getLogoPathFromSeries(modelGroup.modelSeries);
+  const initial = modelGroup.modelName.charAt(0).toUpperCase();
 
   return (
     <div className="p-4 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
-      {/* Model avatar and name */}
-      {position.modelName && (
-        <div className="flex items-center gap-2 mb-2">
-          <Avatar
-            className="size-5 ring-[1.5px] ring-offset-0 bg-background shrink-0"
-            style={{ ["--tw-ring-color" as string]: chartColor }}
-          >
-            {logoPath ? (
-              <AvatarImage
-                src={logoPath}
-                alt={`${modelName} logo`}
-                className="p-0.5"
-              />
-            ) : null}
-            <AvatarFallback
-              className="text-[10px] font-semibold text-foreground"
-              style={{ backgroundColor: `${chartColor}20` }}
-            >
-              {initial}
-            </AvatarFallback>
-          </Avatar>
-          <span className="font-medium text-sm">{modelName}</span>
-        </div>
-      )}
-
-      {/* Market ticker and side badge */}
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <p className="text-sm font-medium font-mono line-clamp-2 flex-1">
-          {position.marketTicker}
-        </p>
-        <span
-          className={cn(
-            "px-2 py-0.5 rounded text-xs font-medium shrink-0",
-            isYes
-              ? "bg-blue-500/10 text-blue-500"
-              : "bg-orange-500/10 text-orange-500",
-          )}
+      <div className="flex items-center gap-2 mb-3">
+        <Avatar
+          className="size-5 ring-[1.5px] ring-offset-0 bg-background shrink-0"
+          style={{ ["--tw-ring-color" as string]: modelGroup.modelColor }}
         >
-          {position.side.toUpperCase()}
-        </span>
+          {logoPath ? (
+            <AvatarImage
+              src={logoPath}
+              alt={`${modelGroup.modelName} logo`}
+              className="p-0.5"
+            />
+          ) : null}
+          <AvatarFallback
+            className="text-[10px] font-semibold text-foreground"
+            style={{ backgroundColor: `${modelGroup.modelColor}20` }}
+          >
+            {initial}
+          </AvatarFallback>
+        </Avatar>
+        <span className="font-medium text-sm">{modelGroup.modelName}</span>
+        <AnimateNumber
+          prefix="$"
+          format={{ maximumFractionDigits: 0, minimumFractionDigits: 0 }}
+          className="font-mono text-muted-foreground"
+        >
+          {modelGroup.totalValue}
+        </AnimateNumber>
       </div>
 
-      {/* Position details */}
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        <div>
-          <span className="text-muted-foreground">Quantity</span>
-          <p className="font-medium">{position.quantity.toLocaleString()}</p>
-        </div>
-      </div>
+      <div className="space-y-4">
+        {modelGroup.markets.map((market) => (
+          <div key={market.marketTicker} className="pl-0">
+            <p className="text-sm font-medium font-mono line-clamp-1 mb-2">
+              {market.marketTitle || market.marketTicker}
+            </p>
 
-      {/* Mint address (truncated) */}
-      <div className="mt-2 text-xs text-muted-foreground font-mono">
-        {position.mint.slice(0, 4)}...{position.mint.slice(-4)}
+            <div className="flex items-start gap-2">
+              <div className="flex gap-2">
+                <Badge
+                  side="yes"
+                  isSelected={market.yesPosition?.side === "yes"}
+                  price={market.yesPosition?.mockPrice}
+                />
+                <Badge
+                  side="no"
+                  isSelected={market.noPosition?.side === "no"}
+                  price={market.noPosition?.mockPrice}
+                />
+              </div>
+
+              <div className="flex-1" />
+
+              <div className="flex flex-col items-end gap-1 text-xs">
+                {market.yesPosition && (
+                  <div className="text-muted-foreground">
+                    Qty: {market.yesPosition.quantity.toLocaleString()}
+                  </div>
+                )}
+                {market.noPosition && (
+                  <div className="text-muted-foreground">
+                    Qty: {market.noPosition.quantity.toLocaleString()}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -104,10 +178,63 @@ export function PositionsTable({
   positions,
   selectedModelId,
 }: PositionsTableProps) {
-  // Filter positions by selected model
-  const filteredPositions = useMemo(() => {
-    if (!selectedModelId) return positions;
-    return positions.filter((p) => p.modelId === selectedModelId);
+  const modelGroups = useMemo(() => {
+    const positionsWithPrice: PositionWithPrice[] = positions.map((p) => ({
+      ...p,
+      mockPrice: getMockPrice(p.marketTicker, p.side),
+    }));
+
+    const groupedByModel = new Map<string, ModelGroup>();
+
+    for (const position of positionsWithPrice) {
+      if (selectedModelId && position.modelId !== selectedModelId) continue;
+
+      const modelKey = position.modelId || "unknown";
+
+      if (!groupedByModel.has(modelKey)) {
+        groupedByModel.set(modelKey, {
+          modelId: modelKey,
+          modelName: position.modelName || "Unknown",
+          modelColor: position.modelColor || DEFAULT_CHART_COLOR,
+          modelSeries: position.modelSeries,
+          totalValue: 0,
+          markets: [],
+        });
+      }
+
+      const modelGroup = groupedByModel.get(modelKey)!;
+      modelGroup.totalValue += position.quantity * position.mockPrice;
+    }
+
+    for (const position of positionsWithPrice) {
+      if (selectedModelId && position.modelId !== selectedModelId) continue;
+
+      const modelKey = position.modelId || "unknown";
+      const modelGroup = groupedByModel.get(modelKey)!;
+      const marketKey = position.marketTicker;
+
+      let market = modelGroup.markets.find((m) => m.marketTicker === marketKey);
+
+      if (!market) {
+        market = {
+          marketTicker: position.marketTicker,
+          marketTitle: position.marketTitle,
+          positions: [],
+          yesPosition: undefined,
+          noPosition: undefined,
+        };
+        modelGroup.markets.push(market);
+      }
+
+      market.positions.push(position);
+      if (position.side === "yes") {
+        market.yesPosition = position;
+      } else {
+        market.noPosition = position;
+      }
+    }
+
+    return Array.from(groupedByModel.values());
   }, [positions, selectedModelId]);
 
   return (
@@ -116,7 +243,7 @@ export function PositionsTable({
 
       <CardContent className="flex-1 min-h-0">
         <ScrollArea className="h-full pr-4">
-          {filteredPositions.length === 0 ? (
+          {modelGroups.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <Briefcase className="h-12 w-12 text-muted-foreground/50 mb-4" />
               <p className="text-muted-foreground">No open positions</p>
@@ -126,11 +253,8 @@ export function PositionsTable({
             </div>
           ) : (
             <div className="space-y-3">
-              {filteredPositions.map((position, index) => (
-                <PositionRow
-                  key={`${position.marketTicker}-${position.side}-${index}`}
-                  position={position}
-                />
+              {modelGroups.map((modelGroup) => (
+                <ModelRow key={modelGroup.modelId} modelGroup={modelGroup} />
               ))}
             </div>
           )}
