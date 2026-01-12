@@ -9,8 +9,10 @@ import {
   recordAgentTrade,
   upsertAgentPosition,
   updateAgentSessionValue,
+  updateAllAgentBalances,
 } from "@/lib/supabase/agents";
-import type { AgentSession } from "@/lib/supabase/types";
+import { getCurrencyBalance } from "@/lib/crypto/solana/client";
+import type { AgentSession, TradingSession } from "@/lib/supabase/types";
 
 // ============================================================================
 // Types
@@ -97,6 +99,10 @@ export async function tradingAgentWorkflow(
     // Step 4: Record all results atomically
     // (decision + trades + positions + session value)
     await recordResultsStep(agentSession, result);
+
+    // Step 5: Update balances for ALL agents (durable)
+    // This ensures leaderboard reflects current on-chain state
+    await updateAllBalancesStep(session);
 
     console.log(
       `[tradingAgent:${input.modelId}] Completed: ${result.decision}, ${result.trades.length} trades`
@@ -240,4 +246,28 @@ async function recordResultsStep(
     portfolioValue,
     portfolioValue - agentSession.startingCapital
   );
+}
+
+/**
+ * Update balances for all agents in the trading session.
+ * Fetches USDC balances from the blockchain and updates the database.
+ * This keeps the leaderboard in sync with on-chain state.
+ * Durable: Balance updates should complete for data integrity.
+ */
+async function updateAllBalancesStep(session: TradingSession): Promise<void> {
+  "use step";
+
+  console.log(`[tradingAgent] Updating balances for all agents`);
+
+  // Fetch USDC balance from Solana for each agent
+  const fetchBalance = async (
+    walletAddress: string
+  ): Promise<number | null> => {
+    const result = await getCurrencyBalance(walletAddress, "USDC");
+    if (result === null) return null;
+    return Number(result.formatted);
+  };
+
+  const updated = await updateAllAgentBalances(session.id, fetchBalance);
+  console.log(`[tradingAgent] Updated ${updated.length} agent balances`);
 }

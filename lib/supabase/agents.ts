@@ -30,7 +30,7 @@ export async function getOrCreateAgentSession(
   modelId: string,
   modelName: string,
   walletAddress: string,
-  startingCapital = 10000,
+  startingCapital = 10000
 ): Promise<AgentSession> {
   const client = createServerClient();
   if (!client) throw new Error("Supabase not configured");
@@ -45,7 +45,7 @@ export async function getOrCreateAgentSession(
 
   if (existing && !findError) {
     return mapDbToAgentSession(
-      existing as Record<string, unknown>,
+      existing as Record<string, unknown>
     ) as AgentSession;
   }
 
@@ -74,7 +74,7 @@ export async function getOrCreateAgentSession(
 
   console.log(`[agents] Created agent session for ${modelId}`);
   return mapDbToAgentSession(
-    newSession as Record<string, unknown>,
+    newSession as Record<string, unknown>
   ) as AgentSession;
 }
 
@@ -82,7 +82,7 @@ export async function getOrCreateAgentSession(
  * Get all agent sessions for a trading session
  */
 export async function getAgentSessions(
-  sessionId: string,
+  sessionId: string
 ): Promise<AgentSession[]> {
   const client = createServerClient();
   if (!client) return [];
@@ -99,7 +99,7 @@ export async function getAgentSessions(
   }
 
   return (data || []).map(
-    (row: Record<string, unknown>) => mapDbToAgentSession(row) as AgentSession,
+    (row: Record<string, unknown>) => mapDbToAgentSession(row) as AgentSession
   );
 }
 
@@ -109,7 +109,7 @@ export async function getAgentSessions(
 export async function updateAgentSessionValue(
   agentSessionId: string,
   currentValue: number,
-  totalPnl: number,
+  totalPnl: number
 ): Promise<void> {
   const client = createServerClient();
   if (!client) throw new Error("Supabase not configured");
@@ -146,7 +146,7 @@ export interface RecordDecisionInput {
  * Record an agent decision to the database
  */
 export async function recordAgentDecision(
-  input: RecordDecisionInput,
+  input: RecordDecisionInput
 ): Promise<AgentDecision> {
   const client = createServerClient();
   if (!client) throw new Error("Supabase not configured");
@@ -198,7 +198,7 @@ export async function recordAgentDecision(
  */
 export async function getDecisions(
   sessionId: string,
-  limit = 100,
+  limit = 100
 ): Promise<
   Array<{
     decision: AgentDecision;
@@ -216,7 +216,7 @@ export async function getDecisions(
       *,
       agent_sessions!inner(session_id, model_id, model_name),
       agent_trades(id, side, action, quantity, price, notional)
-    `,
+    `
     )
     .eq("agent_sessions.session_id", sessionId)
     .order("created_at", { ascending: true })
@@ -303,7 +303,7 @@ export interface RecordTradeInput {
  * Record an executed trade to the database
  */
 export async function recordAgentTrade(
-  input: RecordTradeInput,
+  input: RecordTradeInput
 ): Promise<AgentTrade> {
   const client = createServerClient();
   if (!client) throw new Error("Supabase not configured");
@@ -356,7 +356,7 @@ export async function recordAgentTrade(
  */
 export async function getAgentTrades(
   sessionId: string,
-  limit = 100,
+  limit = 100
 ): Promise<AgentTrade[]> {
   const client = createServerClient();
   if (!client) return [];
@@ -367,7 +367,7 @@ export async function getAgentTrades(
       `
       *,
       agent_sessions!inner(session_id)
-    `,
+    `
     )
     .eq("agent_sessions.session_id", sessionId)
     .order("created_at", { ascending: false })
@@ -411,7 +411,7 @@ export async function getAgentTrades(
  * Derives from agent_trades by calculating net quantity (buys - sells) per ticker.
  */
 export async function getAgentHeldTickers(
-  agentSessionId: string,
+  agentSessionId: string
 ): Promise<string[]> {
   const client = createServerClient();
   if (!client) return [];
@@ -450,7 +450,7 @@ export async function getAgentHeldTickers(
  */
 export async function getAgentsHoldingTicker(
   sessionId: string,
-  marketTicker: string,
+  marketTicker: string
 ): Promise<string[]> {
   const client = createServerClient();
   if (!client) return [];
@@ -485,7 +485,7 @@ export async function getAgentsHoldingTicker(
 
 export async function getChartData(
   sessionId: string,
-  hoursBack = 24,
+  hoursBack = 24
 ): Promise<
   Array<{
     timestamp: string;
@@ -505,7 +505,7 @@ export async function getChartData(
       created_at,
       portfolio_value_after,
       agent_sessions!inner(session_id, model_name)
-    `,
+    `
     )
     .eq("agent_sessions.session_id", sessionId)
     .gte("created_at", since)
@@ -545,7 +545,7 @@ export interface UpsertPositionInput {
  * Creates position if doesn't exist, updates quantity if exists
  */
 export async function upsertAgentPosition(
-  input: UpsertPositionInput,
+  input: UpsertPositionInput
 ): Promise<void> {
   const client = createServerClient();
   if (!client) throw new Error("Supabase not configured");
@@ -560,7 +560,7 @@ export async function upsertAgentPosition(
       p_side: input.side,
       p_mint: input.mint,
       p_quantity_delta: input.quantityDelta,
-    },
+    }
   );
 
   if (error) {
@@ -573,7 +573,7 @@ export async function upsertAgentPosition(
  * Get all positions for an agent session
  */
 export async function getAgentPositions(
-  agentSessionId: string,
+  agentSessionId: string
 ): Promise<AgentPosition[]> {
   const client = createServerClient();
   if (!client) return [];
@@ -602,4 +602,83 @@ export async function getAgentPositions(
     createdAt: new Date(row.created_at as string),
     updatedAt: new Date(row.updated_at as string),
   }));
+}
+
+// ============================================================================
+// Batch Balance Updates
+// ============================================================================
+
+/**
+ * Update balances for all agent sessions in a trading session.
+ * Fetches USDC balances from the blockchain and updates current_value and total_pnl.
+ *
+ * @param sessionId - Trading session ID
+ * @param fetchBalance - Function to fetch balance for a wallet address
+ * @returns Array of updated agent session info
+ */
+export async function updateAllAgentBalances(
+  sessionId: string,
+  fetchBalance: (walletAddress: string) => Promise<number | null>
+): Promise<Array<{ modelId: string; balance: number; pnl: number }>> {
+  const client = createServerClient();
+  if (!client) throw new Error("Supabase not configured");
+
+  // Get all agent sessions for this trading session
+  const sessions = await getAgentSessions(sessionId);
+
+  if (sessions.length === 0) {
+    console.log("[agents] No agent sessions to update balances for");
+    return [];
+  }
+
+  console.log(
+    `[agents] Updating balances for ${sessions.length} agent sessions`
+  );
+
+  // Fetch balances in parallel
+  const results = await Promise.allSettled(
+    sessions.map(async (session) => {
+      const balance = await fetchBalance(session.walletAddress);
+
+      if (balance === null) {
+        console.warn(
+          `[agents] Failed to fetch balance for ${session.modelId} (${session.walletAddress})`
+        );
+        return null;
+      }
+
+      const pnl = balance - session.startingCapital;
+
+      // Update session with new balance
+      await updateAgentSessionValue(session.id, balance, pnl);
+
+      console.log(
+        `[agents] Updated ${session.modelId}: $${balance.toFixed(2)} (PnL: ${
+          pnl >= 0 ? "+" : ""
+        }$${pnl.toFixed(2)})`
+      );
+
+      return {
+        modelId: session.modelId,
+        balance,
+        pnl,
+      };
+    })
+  );
+
+  // Collect successful updates
+  return results
+    .filter(
+      (
+        r
+      ): r is PromiseFulfilledResult<{
+        modelId: string;
+        balance: number;
+        pnl: number;
+      } | null> => r.status === "fulfilled"
+    )
+    .map((r) => r.value)
+    .filter(
+      (v): v is { modelId: string; balance: number; pnl: number } => v !== null
+    );
 }
