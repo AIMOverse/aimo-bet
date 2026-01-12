@@ -13,6 +13,7 @@ const DEFAULT_CHART_COLOR = "#6366f1";
 // Map series to logo filename
 const SERIES_LOGO_MAP: Record<string, string> = {
   openai: "openai.svg",
+  gpt: "openai.svg",
   claude: "claude-color.svg",
   gemini: "gemini-color.svg",
   deepseek: "deepseek-color.svg",
@@ -77,7 +78,7 @@ function PositionRow({ position }: { position: AgentPosition }) {
             "px-2 py-0.5 rounded text-xs font-medium shrink-0",
             isYes
               ? "bg-blue-500/10 text-blue-500"
-              : "bg-orange-500/10 text-orange-500",
+              : "bg-orange-500/10 text-orange-500"
           )}
         >
           {position.side.toUpperCase()}

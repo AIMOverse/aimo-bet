@@ -12,6 +12,7 @@ import type { ChatMessage as ChatMessageType } from "@/lib/supabase/types";
 // Map series to logo filename
 const SERIES_LOGO_MAP: Record<string, string> = {
   openai: "openai.svg",
+  gpt: "openai.svg",
   claude: "claude-color.svg",
   gemini: "gemini-color.svg",
   deepseek: "deepseek-color.svg",
