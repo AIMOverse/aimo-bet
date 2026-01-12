@@ -132,8 +132,9 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: true,
     supportsFunctions: true,
     providerIds: {
-      aimo: "9D9ZcNGUSDCfiDQ4DcGvvF1de5s9cqZuE5T7KcWFSgV6:google/gemini-3-pro",
+      aimo: "GL9JtU2u8uo4XFrGrZg2KySxstdsQS2UcbZAwgtR3Rhq:google/gemini-3-pro",
     },
+    aimoSdkProvider: "google",
     series: "gemini",
     chartColor: "#22c55e", // Green
     walletAddress: process.env.WALLET_GEMINI_SVM_PUBLIC,

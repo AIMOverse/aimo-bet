@@ -20,7 +20,12 @@ export {
 } from "./catalog";
 
 // Provider instances
-export { getAimoProvider, getAimoModel } from "./providers";
+export {
+  getAimoProvider,
+  getAimoModel,
+  clearProviderCache,
+  clearThoughtSignatureCache,
+} from "./providers";
 
 // Model access
 export { getModel } from "./registry";

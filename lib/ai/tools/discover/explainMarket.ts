@@ -21,7 +21,10 @@ interface KalshiMarketResponse {
   eventTicker?: string;
   category?: string;
   status: string;
-  accounts: Record<string, { yesMint: string; noMint: string; marketLedger: string }>;
+  accounts: Record<
+    string,
+    { yesMint: string; noMint: string; marketLedger: string }
+  >;
   volume?: number;
   openInterest?: number;
   openTime?: string;
@@ -102,19 +105,25 @@ interface PolymarketOrderbook {
 // Kalshi Helper Functions
 // ============================================================================
 
-async function fetchKalshiMarket(ticker: string): Promise<KalshiMarketResponse> {
+async function fetchKalshiMarket(
+  ticker: string
+): Promise<KalshiMarketResponse> {
   const response = await dflowMetadataFetch(`/market/${ticker}`);
   await assertResponseOk(response, "fetch Kalshi market");
   return response.json();
 }
 
-async function fetchKalshiEvent(eventTicker: string): Promise<KalshiEventResponse> {
+async function fetchKalshiEvent(
+  eventTicker: string
+): Promise<KalshiEventResponse> {
   const response = await dflowMetadataFetch(`/event/${eventTicker}`);
   await assertResponseOk(response, "fetch Kalshi event");
   return response.json();
 }
 
-async function fetchKalshiOrderbook(marketTicker: string): Promise<KalshiOrderbookResponse | null> {
+async function fetchKalshiOrderbook(
+  marketTicker: string
+): Promise<KalshiOrderbookResponse | null> {
   try {
     const response = await dflowMetadataFetch(`/orderbook/${marketTicker}`);
     if (!response.ok) return null;
@@ -128,21 +137,29 @@ async function fetchKalshiOrderbook(marketTicker: string): Promise<KalshiOrderbo
 // Polymarket Helper Functions
 // ============================================================================
 
-async function fetchPolymarketMarket(marketId: string): Promise<PolymarketMarket | null> {
+async function fetchPolymarketMarket(
+  marketId: string
+): Promise<PolymarketMarket | null> {
   const response = await gammaFetch(`/markets/${marketId}`);
   if (!response.ok) return null;
   return response.json();
 }
 
-async function fetchPolymarketEvent(eventId: string): Promise<PolymarketEvent | null> {
+async function fetchPolymarketEvent(
+  eventId: string
+): Promise<PolymarketEvent | null> {
   const response = await gammaFetch(`/events/${eventId}`);
   if (!response.ok) return null;
   return response.json();
 }
 
-async function fetchPolymarketOrderbook(tokenId: string): Promise<PolymarketOrderbook | null> {
+async function fetchPolymarketOrderbook(
+  tokenId: string
+): Promise<PolymarketOrderbook | null> {
   try {
-    const response = await fetch(`https://clob.polymarket.com/book?token_id=${tokenId}`);
+    const response = await fetch(
+      `https://clob.polymarket.com/book?token_id=${tokenId}`
+    );
     if (!response.ok) return null;
     return response.json();
   } catch {
@@ -156,7 +173,7 @@ async function fetchPolymarketOrderbook(tokenId: string): Promise<PolymarketOrde
 
 async function explainKalshiMarket(
   marketTicker: string,
-  includeRelated: boolean,
+  includeRelated: boolean
 ): Promise<ExplainMarketResult> {
   const market = await fetchKalshiMarket(marketTicker);
 
@@ -178,7 +195,8 @@ async function explainKalshiMarket(
   const orderbookData = await fetchKalshiOrderbook(marketTicker);
   let orderbook: RawOrderbook | undefined;
 
-  if (orderbookData) {
+  // Only build orderbook if we have valid bids and asks arrays
+  if (orderbookData?.bids && orderbookData?.asks) {
     orderbook = {
       market: marketTicker,
       asset_id: accounts.yesMint,
@@ -204,16 +222,17 @@ async function explainKalshiMarket(
   }
 
   // Related markets from event
-  const relatedMarkets = includeRelated && event?.markets
-    ? event.markets
-        .filter((m) => m.ticker !== marketTicker)
-        .slice(0, 5)
-        .map((m) => ({
-          id: m.ticker,
-          question: m.title,
-          price: { yes: 0, no: 0 },
-        }))
-    : undefined;
+  const relatedMarkets =
+    includeRelated && event?.markets
+      ? event.markets
+          .filter((m) => m.ticker !== marketTicker)
+          .slice(0, 5)
+          .map((m) => ({
+            id: m.ticker,
+            question: m.title,
+            price: { yes: 0, no: 0 },
+          }))
+      : undefined;
 
   return {
     success: true,
@@ -237,7 +256,12 @@ async function explainKalshiMarket(
     resolution: {
       end_date: market.expirationTime ?? market.closeTime,
       status,
-      outcome: market.result === "yes" ? "yes" : market.result === "no" ? "no" : undefined,
+      outcome:
+        market.result === "yes"
+          ? "yes"
+          : market.result === "no"
+          ? "no"
+          : undefined,
     },
     orderbook,
     related_markets: relatedMarkets,
@@ -246,7 +270,7 @@ async function explainKalshiMarket(
 
 async function explainPolymarketMarket(
   marketId: string,
-  includeRelated: boolean,
+  includeRelated: boolean
 ): Promise<ExplainMarketResult> {
   const market = await fetchPolymarketMarket(marketId);
 
@@ -314,19 +338,20 @@ async function explainPolymarketMarket(
   }
 
   // Related markets from event
-  const relatedMarkets = includeRelated && event?.markets
-    ? event.markets
-        .filter((m) => m.id !== marketId)
-        .slice(0, 5)
-        .map((m) => ({
-          id: m.id,
-          question: m.question,
-          price: {
-            yes: parseFloat(m.outcomePrices?.[0] ?? "0"),
-            no: parseFloat(m.outcomePrices?.[1] ?? "0"),
-          },
-        }))
-    : undefined;
+  const relatedMarkets =
+    includeRelated && event?.markets
+      ? event.markets
+          .filter((m) => m.id !== marketId)
+          .slice(0, 5)
+          .map((m) => ({
+            id: m.id,
+            question: m.question,
+            price: {
+              yes: parseFloat(m.outcomePrices?.[0] ?? "0"),
+              no: parseFloat(m.outcomePrices?.[1] ?? "0"),
+            },
+          }))
+      : undefined;
 
   return {
     success: true,
@@ -373,7 +398,9 @@ export const explainMarketTool = tool({
       .describe("Which exchange the market is on"),
     id: z
       .string()
-      .describe("Market identifier: market_ticker (Kalshi) or market_id (Polymarket)"),
+      .describe(
+        "Market identifier: market_ticker (Kalshi) or market_id (Polymarket)"
+      ),
     include_related: z
       .boolean()
       .optional()
@@ -385,7 +412,11 @@ export const explainMarketTool = tool({
     id,
     include_related = false,
   }): Promise<ExplainMarketResult> => {
-    console.log("[explainMarket] Executing:", { exchange, id, include_related });
+    console.log("[explainMarket] Executing:", {
+      exchange,
+      id,
+      include_related,
+    });
 
     try {
       if (exchange === "kalshi") {

@@ -179,8 +179,8 @@ export class PredictionMarketAgent {
           statusCode: error.statusCode,
           responseBody: error.responseBody,
           url: error.url,
-          requestBodyValues: error.requestBodyValues,
-          stack: error.stack,
+          requestBodyValues: JSON.stringify(error.requestBodyValues, null, 2),
+          // stack: error.stack,
         }
       );
       throw agentError;

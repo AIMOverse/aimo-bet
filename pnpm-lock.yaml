@@ -15,14 +15,14 @@ importers:
         specifier: 3.0.3
         version: 3.0.3(react@19.2.1)(zod@4.2.1)
       '@aimo.network/evm':
-        specifier: ^1.4.0
-        version: 1.4.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.2.1)
+        specifier: ^1.6.0
+        version: 1.6.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.2.1)
       '@aimo.network/provider':
-        specifier: ^1.4.0
-        version: 1.4.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.2.1)
+        specifier: ^1.6.0
+        version: 1.6.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.2.1)
       '@aimo.network/svm':
-        specifier: ^1.4.0
-        version: 1.4.0(@solana/sysvars@5.1.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3))(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)(ws@8.18.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))
+        specifier: ^1.6.0
+        version: 1.6.0(@solana/sysvars@5.1.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3))(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)(ws@8.18.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))
       '@polymarket/clob-client':
         specifier: ^5.2.0
         version: 5.2.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.2.1)
@@ -87,7 +87,7 @@ importers:
         specifier: 4.0.1-beta.38
         version: 4.0.1-beta.38(ai@6.0.3(zod@4.2.1))(workflow@4.0.1-beta.38(@aws-sdk/client-sts@3.955.0)(@babel/core@7.28.5)(@opentelemetry/api@1.9.0)(@types/react@19.2.7)(immer@11.1.0)(next@16.1.1(@babel/core@7.28.5)(@opentelemetry/api@1.9.0)(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(typescript@5.9.3))
       ai:
-        specifier: 6.0.3
+        specifier: ^6.0.3
         version: 6.0.3(zod@4.2.1)
       class-variance-authority:
         specifier: ^0.7.1
@@ -204,6 +204,12 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
+  '@ai-sdk/anthropic@3.0.9':
+    resolution: {integrity: sha512-QBD4qDnwIHd+N5PpjxXOaWJig1aRB43J0PM5ZUe6Yyl9Qq2bUmraQjvNznkuFKy+hMFDgj0AvgGogTiO5TC+qA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
   '@ai-sdk/gateway@3.0.2':
     resolution: {integrity: sha512-giJEg9ob45htbu3iautK+2kvplY2JnTj7ir4wZzYSQWvqGatWfBBfDuNCU5wSJt9BCGjymM5ZS9ziD42JGCZBw==}
     engines: {node: '>=18'}
@@ -212,6 +218,12 @@ packages:
 
   '@ai-sdk/google@3.0.1':
     resolution: {integrity: sha512-gh7i4lEvd1CElmefkq7+RoUhNkhP2OTshzVxSt7/Vh2AV5wTPLhduKJMg1c7SFwErytqffO3el/M/LlfCsqzEw==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/google@3.0.6':
+    resolution: {integrity: sha512-Nr7E+ouWd/bKO9SFlgLnJJ1+fiGHC07KAeFr08faT+lvkECWlxVox3aL0dec8uCgBDUghYbq7f4S5teUrCc+QQ==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -228,8 +240,8 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/openai@3.0.2':
-    resolution: {integrity: sha512-GONwavgSWtcWO+t9+GpGK8l7nIYh+zNtCL/NYDSeHxHiw6ksQS9XMRWrZyE5NpJ0EXNxSAWCHIDmb1WvTqhq9Q==}
+  '@ai-sdk/openai@3.0.7':
+    resolution: {integrity: sha512-CBoYn1U59Lop8yBL9KuVjHCKc/B06q9Qo0SasRwHoyMEq+X4I8LQZu3a8Ck1jwwcZTTxfyiExB70LtIRSynBDA==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -240,8 +252,8 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/provider-utils@4.0.2':
-    resolution: {integrity: sha512-KaykkuRBdF/ffpI5bwpL4aSCmO/99p8/ci+VeHwJO8tmvXtiVAb99QeyvvvXmL61e9Zrvv4GBGoajW19xdjkVQ==}
+  '@ai-sdk/provider-utils@4.0.4':
+    resolution: {integrity: sha512-VxhX0B/dWGbpNHxrKCWUAJKXIXV015J4e7qYjdIU9lLWeptk0KMLGcqkB4wFxff5Njqur8dt8wRi1MN9lZtDqg==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -252,6 +264,10 @@ packages:
 
   '@ai-sdk/provider@3.0.1':
     resolution: {integrity: sha512-2lR4w7mr9XrydzxBSjir4N6YMGdXD+Np1Sh0RXABh7tWdNFFwIeRI1Q+SaYZMbfL8Pg8RRLcrxQm51yxTLhokg==}
+    engines: {node: '>=18'}
+
+  '@ai-sdk/provider@3.0.2':
+    resolution: {integrity: sha512-HrEmNt/BH/hkQ7zpi2o6N3k1ZR1QTb7z85WYhYygiTxOQuaml4CMtHCWRbric5WPU+RNsYI7r1EpyVQMKO1pYw==}
     engines: {node: '>=18'}
 
   '@ai-sdk/react@3.0.3':
@@ -266,17 +282,17 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@aimo.network/client@1.4.0':
-    resolution: {integrity: sha512-PuRN2gIBamFIK7XAvBQP6Xqg2UGSJ83YCGRtai9Y3qg4zHC51qxgaTi1Q7vdW7sHqkgpPP7+yMg4sJ8htfg+/Q==}
+  '@aimo.network/client@1.6.0':
+    resolution: {integrity: sha512-jE0Z7CVrPrrf9CPOzNM0u0SPZPj7GrEYzJgnCIK68JbOFw1kucQgbatd6QBoa6aNljKERVnAQrAYNj46c0+7GA==}
 
-  '@aimo.network/evm@1.4.0':
-    resolution: {integrity: sha512-kzHw0P3ND+fj2C359z8cLZlw8KGG+2/LHvO66KRd3zunXcIk2RqCgW3uijyneIsXIlD2RtoBWbEKJlipET9maQ==}
+  '@aimo.network/evm@1.6.0':
+    resolution: {integrity: sha512-gQa0KuRK0psl9SxeOiZBXODsYkvnU3SpkNCTT6EF2CLavX4vpjBuAQpig+m8XVS2aYiSnxOL0v6Gc8Jfj5Kfsg==}
 
-  '@aimo.network/provider@1.4.0':
-    resolution: {integrity: sha512-pBDF6ISGbQ9HthDrO/RZWMPWZXag3GCdNjj89nzEQTXOBsW6EJkLsTnOyvd35R1TL1INZ0sMRMOhrMfuutGxCQ==}
+  '@aimo.network/provider@1.6.0':
+    resolution: {integrity: sha512-yaZkD5dyUFFaqSbvW8to4+74KZOqPJ9CPrSoLcVvrYqY3jyfyYQrEW9E8f8b7bnbMA7+pyTOccSVV9BKkLP/Zw==}
 
-  '@aimo.network/svm@1.4.0':
-    resolution: {integrity: sha512-v+Xh/vAxSv8l6aq5zVMjQ3UgCKlBp0aQ0wAujX/8tgabYMLMQ/2uzu9Gx7xBjCMySpTHeJ09af8RqAdDNw3eXw==}
+  '@aimo.network/svm@1.6.0':
+    resolution: {integrity: sha512-EGA1NyxGgseznzjqwJ6XKa/FUVSVHvtzczcvOGI49uiEjkNxpxMQIUXvp2/slvz9vOJU20J1CjdldNu2nWtd2A==}
 
   '@alloc/quick-lru@5.2.0':
     resolution: {integrity: sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw==}
@@ -5632,6 +5648,12 @@ snapshots:
       zod: 4.1.11
     optional: true
 
+  '@ai-sdk/anthropic@3.0.9(zod@4.2.1)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.2
+      '@ai-sdk/provider-utils': 4.0.4(zod@4.2.1)
+      zod: 4.2.1
+
   '@ai-sdk/gateway@3.0.2(zod@4.1.11)':
     dependencies:
       '@ai-sdk/provider': 3.0.0
@@ -5654,6 +5676,12 @@ snapshots:
       zod: 4.1.11
     optional: true
 
+  '@ai-sdk/google@3.0.6(zod@4.2.1)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.2
+      '@ai-sdk/provider-utils': 4.0.4(zod@4.2.1)
+      zod: 4.2.1
+
   '@ai-sdk/openai-compatible@2.0.1(zod@4.1.11)':
     dependencies:
       '@ai-sdk/provider': 3.0.0
@@ -5674,10 +5702,10 @@ snapshots:
       '@ai-sdk/provider-utils': 4.0.1(zod@4.2.1)
       zod: 4.2.1
 
-  '@ai-sdk/openai@3.0.2(zod@4.2.1)':
+  '@ai-sdk/openai@3.0.7(zod@4.2.1)':
     dependencies:
-      '@ai-sdk/provider': 3.0.1
-      '@ai-sdk/provider-utils': 4.0.2(zod@4.2.1)
+      '@ai-sdk/provider': 3.0.2
+      '@ai-sdk/provider-utils': 4.0.4(zod@4.2.1)
       zod: 4.2.1
 
   '@ai-sdk/provider-utils@4.0.1(zod@4.1.11)':
@@ -5695,9 +5723,9 @@ snapshots:
       eventsource-parser: 3.0.6
       zod: 4.2.1
 
-  '@ai-sdk/provider-utils@4.0.2(zod@4.2.1)':
+  '@ai-sdk/provider-utils@4.0.4(zod@4.2.1)':
     dependencies:
-      '@ai-sdk/provider': 3.0.1
+      '@ai-sdk/provider': 3.0.2
       '@standard-schema/spec': 1.1.0
       eventsource-parser: 3.0.6
       zod: 4.2.1
@@ -5707,6 +5735,10 @@ snapshots:
       json-schema: 0.4.0
 
   '@ai-sdk/provider@3.0.1':
+    dependencies:
+      json-schema: 0.4.0
+
+  '@ai-sdk/provider@3.0.2':
     dependencies:
       json-schema: 0.4.0
 
@@ -5728,7 +5760,7 @@ snapshots:
       zod: 4.1.11
     optional: true
 
-  '@aimo.network/client@1.4.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)':
+  '@aimo.network/client@1.6.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)':
     dependencies:
       '@x402/core': 2.1.0
       '@x402/fetch': 2.1.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
@@ -5737,9 +5769,9 @@ snapshots:
       - typescript
       - utf-8-validate
 
-  '@aimo.network/evm@1.4.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.2.1)':
+  '@aimo.network/evm@1.6.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.2.1)':
     dependencies:
-      '@aimo.network/client': 1.4.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
+      '@aimo.network/client': 1.6.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@x402/core': 2.1.0
       '@x402/evm': 2.1.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
       viem: 2.43.5(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.2.1)
@@ -5749,20 +5781,22 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@aimo.network/provider@1.4.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.2.1)':
+  '@aimo.network/provider@1.6.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.2.1)':
     dependencies:
-      '@ai-sdk/openai': 3.0.2(zod@4.2.1)
+      '@ai-sdk/anthropic': 3.0.9(zod@4.2.1)
+      '@ai-sdk/google': 3.0.6(zod@4.2.1)
+      '@ai-sdk/openai': 3.0.7(zod@4.2.1)
       '@ai-sdk/provider': 3.0.1
-      '@aimo.network/client': 1.4.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
+      '@aimo.network/client': 1.6.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
     transitivePeerDependencies:
       - bufferutil
       - typescript
       - utf-8-validate
       - zod
 
-  '@aimo.network/svm@1.4.0(@solana/sysvars@5.1.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3))(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)(ws@8.18.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))':
+  '@aimo.network/svm@1.6.0(@solana/sysvars@5.1.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3))(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)(ws@8.18.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))':
     dependencies:
-      '@aimo.network/client': 1.4.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
+      '@aimo.network/client': 1.6.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@solana/kit': 5.1.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(ws@8.18.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))
       '@x402/core': 2.1.0
       '@x402/svm': 2.1.0(@solana/sysvars@5.1.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3))(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(ws@8.18.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))
