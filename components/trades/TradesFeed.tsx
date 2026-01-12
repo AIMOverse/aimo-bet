@@ -39,6 +39,7 @@ const PLATFORM_CONFIG: Record<"kalshi" | "polymarket", PlatformConfig> = {
 // Map series to logo filename
 const SERIES_LOGO_MAP: Record<string, string> = {
   openai: "openai.svg",
+  gpt: "openai.svg",
   claude: "claude-color.svg",
   gemini: "gemini-color.svg",
   deepseek: "deepseek-color.svg",

@@ -1,9 +1,6 @@
 "use client";
 
-import { useChat as useAIChat } from "@ai-sdk/react";
-import { WorkflowChatTransport } from "@/lib/ai/workflows/workflowTransport";
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import type { UIMessage } from "ai";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type {
   ChatMessage,
   TriggerType,
@@ -19,28 +16,29 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 // Types
 // ============================================================================
 
+/** Number of messages to fetch per page */
+const PAGE_SIZE = 20;
+
 interface UseChatOptions {
   /** Trading session ID */
   sessionId: string | null;
+  /** Filter by model ID (optional) */
+  modelId?: string | null;
 }
 
 interface UseChatReturn {
-  /** All messages in the chat */
+  /** All messages in the chat (filtered if modelId provided) */
   messages: ChatMessage[];
-  /** Input value (managed locally) */
-  input: string;
-  /** Set input value */
-  setInput: (value: string) => void;
-  /** Whether the AI is generating */
+  /** Whether initial load is in progress */
   isLoading: boolean;
+  /** Whether loading more messages */
+  isLoadingMore: boolean;
+  /** Whether there are more messages to load */
+  hasMore: boolean;
   /** Error if any */
   error: Error | undefined;
-  /** Send a message */
-  sendMessage: (content: string) => Promise<void>;
-  /** Stop generation */
-  stop: () => void;
-  /** Append a message without sending (for model broadcasts) */
-  append: (message: ChatMessage) => void;
+  /** Load more older messages */
+  loadMore: () => Promise<void>;
 }
 
 /**
@@ -75,148 +73,243 @@ interface DecisionQueryResult {
 }
 
 // ============================================================================
+// Helper: Transform DB row to ChatMessage
+// ============================================================================
+
+function transformDecisionToMessage(
+  data: DecisionQueryResult
+): ChatMessage | null {
+  const agentSessions = data.agent_sessions;
+  const agentTrades = data.agent_trades || [];
+
+  // Transform to AgentDecision
+  const decision = {
+    id: data.id,
+    agentSessionId: data.agent_session_id,
+    triggerType: data.trigger_type,
+    triggerDetails: data.trigger_details ?? undefined,
+    marketTicker: data.market_ticker ?? undefined,
+    marketTitle: data.market_title ?? undefined,
+    decision: data.decision,
+    reasoning: data.reasoning,
+    confidence: data.confidence ?? undefined,
+    marketContext: data.market_context ?? undefined,
+    portfolioValueAfter: data.portfolio_value_after,
+    createdAt: new Date(data.created_at),
+  };
+
+  // Transform trades
+  const trades = agentTrades.map((t) => ({
+    id: t.id,
+    decisionId: data.id,
+    agentSessionId: data.agent_session_id,
+    marketTicker: data.market_ticker || "",
+    side: t.side,
+    action: t.action,
+    quantity: t.quantity,
+    price: t.price,
+    notional: t.notional,
+    createdAt: new Date(data.created_at),
+  }));
+
+  // Transform to ChatMessage
+  return decisionToChatMessage(
+    decision,
+    {
+      sessionId: agentSessions.session_id,
+      modelId: agentSessions.model_id,
+      modelName: agentSessions.model_name,
+    },
+    trades
+  );
+}
+
+// ============================================================================
 // Hook
 // ============================================================================
 
-export function useChat({ sessionId }: UseChatOptions): UseChatReturn {
-  const [initialMessages, setInitialMessages] = useState<ChatMessage[]>([]);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [input, setInput] = useState("");
-  const [localError, setLocalError] = useState<Error | undefined>(undefined);
+export function useChat({
+  sessionId,
+  modelId = null,
+}: UseChatOptions): UseChatReturn {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [error, setError] = useState<Error | undefined>(undefined);
 
   const hasLoadedRef = useRef<string | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
-  // Ref for session ID to use in transport (read at request time)
-  const sessionIdRef = useRef<string | null>(sessionId);
-  useEffect(() => {
-    sessionIdRef.current = sessionId;
-  }, [sessionId]);
+  // Track oldest message for pagination
+  const oldestTimestampRef = useRef<string | null>(null);
 
-  // Stable internal ID for useAIChat
-  const internalChatId = useMemo(
-    () => `chat-${sessionId ?? "none"}`,
-    [sessionId],
+  /**
+   * Fetch decisions from Supabase with optional pagination
+   */
+  const fetchDecisions = useCallback(
+    async (
+      client: ReturnType<typeof getSupabaseClient>,
+      options: { before?: string; limit: number }
+    ): Promise<{ data: DecisionQueryResult[]; hasMore: boolean }> => {
+      if (!client || !sessionId) {
+        return { data: [], hasMore: false };
+      }
+
+      let query = client
+        .from("agent_decisions")
+        .select(
+          `
+          *,
+          agent_sessions!inner(session_id, model_id, model_name),
+          agent_trades(id, side, action, quantity, price, notional)
+        `
+        )
+        .eq("agent_sessions.session_id", sessionId)
+        .order("created_at", { ascending: false })
+        .limit(options.limit + 1); // Fetch one extra to check if there's more
+
+      // Filter by model if specified
+      if (modelId) {
+        query = query.eq("agent_sessions.model_id", modelId);
+      }
+
+      // Pagination: fetch older than this timestamp
+      if (options.before) {
+        query = query.lt("created_at", options.before);
+      }
+
+      const { data, error: queryError } = await query;
+
+      if (queryError) {
+        throw new Error(`Failed to fetch decisions: ${queryError.message}`);
+      }
+
+      const results = (data || []) as unknown as DecisionQueryResult[];
+      const hasMoreResults = results.length > options.limit;
+
+      // Remove the extra item we fetched for pagination check
+      if (hasMoreResults) {
+        results.pop();
+      }
+
+      return { data: results, hasMore: hasMoreResults };
+    },
+    [sessionId, modelId]
   );
 
-  // WorkflowChatTransport for resumable streams
-  const transport = useMemo(
-    () =>
-      new WorkflowChatTransport({
-        api: "/api/chat",
-        onChatSendMessage: (response) => {
-          // Track workflow run ID from response headers for resumability
-          const runId = response.headers.get("x-workflow-run-id");
-          if (runId) {
-            console.log(`[useChat] Workflow run ID: ${runId}`);
-          }
-        },
-        prepareSendMessagesRequest: ({ messages }) => {
-          return {
-            body: {
-              message: messages[messages.length - 1],
-              sessionId: sessionIdRef.current,
-            },
-          };
-        },
-        prepareReconnectToStreamRequest: ({ id }) => {
-          // Enable stream resumption on reconnect
-          return {
-            api: `/api/chat?runId=${id}`,
-          };
-        },
-      }),
-    [],
-  );
-
-  // Load messages when session changes
+  /**
+   * Load initial messages (most recent)
+   */
   useEffect(() => {
-    if (!sessionId || hasLoadedRef.current === sessionId) {
+    // Reset when session or model filter changes
+    const cacheKey = `${sessionId}:${modelId}`;
+    if (hasLoadedRef.current === cacheKey) {
       return;
     }
 
-    const loadMessages = async () => {
-      setIsLoadingHistory(true);
-      setLocalError(undefined);
+    if (!sessionId) {
+      setMessages([]);
+      setHasMore(false);
+      hasLoadedRef.current = null;
+      return;
+    }
+
+    const client = getSupabaseClient();
+    if (!client) {
+      setError(new Error("Supabase client not configured"));
+      return;
+    }
+
+    const loadInitial = async () => {
+      setIsLoading(true);
+      setError(undefined);
+      setMessages([]);
+      oldestTimestampRef.current = null;
 
       try {
-        // Use the unified /api/chat endpoint with sessionId param
-        const response = await fetch(`/api/chat?sessionId=${sessionId}`);
-        if (response.ok) {
-          const messages = await response.json();
-          setInitialMessages(messages);
-        } else {
-          setInitialMessages([]);
+        const { data, hasMore: more } = await fetchDecisions(client, {
+          limit: PAGE_SIZE,
+        });
+
+        // Transform to ChatMessages (newest first)
+        const chatMessages = data
+          .map(transformDecisionToMessage)
+          .filter((m): m is ChatMessage => m !== null);
+
+        setMessages(chatMessages);
+        setHasMore(more);
+
+        // Track oldest timestamp for pagination
+        if (data.length > 0) {
+          oldestTimestampRef.current = data[data.length - 1].created_at;
         }
 
-        hasLoadedRef.current = sessionId;
+        hasLoadedRef.current = cacheKey;
       } catch (err) {
-        console.error("Failed to load messages:", err);
-        setLocalError(
-          err instanceof Error ? err : new Error("Failed to load messages"),
+        console.error("[useChat] Failed to load messages:", err);
+        setError(
+          err instanceof Error ? err : new Error("Failed to load messages")
         );
-        setInitialMessages([]);
+        setMessages([]);
       } finally {
-        setIsLoadingHistory(false);
+        setIsLoading(false);
       }
     };
 
-    loadMessages();
-  }, [sessionId]);
+    loadInitial();
+  }, [sessionId, modelId, fetchDecisions]);
 
-  // Reset when session changes
-  useEffect(() => {
-    if (sessionId !== hasLoadedRef.current) {
-      setInitialMessages([]);
-      hasLoadedRef.current = null;
+  /**
+   * Load more older messages
+   */
+  const loadMore = useCallback(async () => {
+    if (
+      !sessionId ||
+      !hasMore ||
+      isLoadingMore ||
+      !oldestTimestampRef.current
+    ) {
+      return;
     }
-  }, [sessionId]);
 
-  const {
-    messages,
-    status,
-    error: chatError,
-    sendMessage: aiSendMessage,
-    stop,
-    setMessages,
-  } = useAIChat({
-    id: internalChatId,
-    messages: initialMessages,
-    transport,
-    onError: (err) => {
-      setLocalError(err);
-    },
-  });
+    const client = getSupabaseClient();
+    if (!client) return;
 
-  // Sync initial messages to useAIChat when they load
-  const setMessagesRef = useRef(setMessages);
-  setMessagesRef.current = setMessages;
+    setIsLoadingMore(true);
 
-  useEffect(() => {
-    if (initialMessages.length > 0) {
-      setMessagesRef.current(initialMessages);
+    try {
+      const { data, hasMore: more } = await fetchDecisions(client, {
+        before: oldestTimestampRef.current,
+        limit: PAGE_SIZE,
+      });
+
+      // Transform to ChatMessages (newest first within batch)
+      const chatMessages = data
+        .map(transformDecisionToMessage)
+        .filter((m): m is ChatMessage => m !== null);
+
+      // Append older messages (they go at the bottom)
+      setMessages((prev) => [...prev, ...chatMessages]);
+      setHasMore(more);
+
+      // Update oldest timestamp
+      if (data.length > 0) {
+        oldestTimestampRef.current = data[data.length - 1].created_at;
+      }
+    } catch (err) {
+      console.error("[useChat] Failed to load more messages:", err);
+      setError(
+        err instanceof Error ? err : new Error("Failed to load more messages")
+      );
+    } finally {
+      setIsLoadingMore(false);
     }
-  }, [initialMessages]);
+  }, [sessionId, hasMore, isLoadingMore, fetchDecisions]);
 
-  const sendMessage = useCallback(
-    async (content: string) => {
-      if (!content.trim() || !sessionId) return;
-
-      const parts: UIMessage["parts"] = [{ type: "text", text: content }];
-      aiSendMessage({ parts });
-    },
-    [aiSendMessage, sessionId],
-  );
-
-  // Append message locally (for model broadcasts via realtime)
-  const append = useCallback(
-    (message: ChatMessage) => {
-      setMessages((prev) => [...prev, message]);
-    },
-    [setMessages],
-  );
-
-  // Realtime subscription for agent decisions
+  /**
+   * Realtime subscription for new agent decisions
+   */
   useEffect(() => {
     if (!sessionId) return;
 
@@ -227,7 +320,7 @@ export function useChat({ sessionId }: UseChatOptions): UseChatReturn {
     }
 
     console.log(
-      `[useChat:realtime] Subscribing to decisions for session: ${sessionId}`,
+      `[useChat:realtime] Subscribing to decisions for session: ${sessionId}`
     );
 
     const channel = client
@@ -249,7 +342,7 @@ export function useChat({ sessionId }: UseChatOptions): UseChatReturn {
                 *,
                 agent_sessions!inner(session_id, model_id, model_name),
                 agent_trades(id, side, action, quantity, price, notional)
-              `,
+              `
               )
               .eq("id", payload.new.id)
               .single();
@@ -259,82 +352,34 @@ export function useChat({ sessionId }: UseChatOptions): UseChatReturn {
               const agentSessions = typedData.agent_sessions;
 
               // Only process if it's for our session
-              if (agentSessions.session_id === sessionId) {
-                const agentTrades = typedData.agent_trades || [];
-
-                // Transform to AgentDecision
-                const decision = {
-                  id: typedData.id,
-                  agentSessionId: typedData.agent_session_id,
-                  triggerType: typedData.trigger_type,
-                  triggerDetails: typedData.trigger_details ?? undefined,
-                  marketTicker: typedData.market_ticker ?? undefined,
-                  marketTitle: typedData.market_title ?? undefined,
-                  decision: typedData.decision,
-                  reasoning: typedData.reasoning,
-                  confidence: typedData.confidence ?? undefined,
-                  marketContext: typedData.market_context ?? undefined,
-                  portfolioValueAfter: typedData.portfolio_value_after,
-                  createdAt: new Date(typedData.created_at),
-                };
-
-                // Transform trades
-                const trades = agentTrades.map((t) => ({
-                  id: t.id,
-                  decisionId: typedData.id,
-                  agentSessionId: typedData.agent_session_id,
-                  marketTicker: typedData.market_ticker || "",
-                  side: t.side,
-                  action: t.action,
-                  quantity: t.quantity,
-                  price: t.price,
-                  notional: t.notional,
-                  createdAt: new Date(typedData.created_at),
-                }));
-
-                // Transform to ChatMessage
-                const chatMessage = decisionToChatMessage(
-                  decision,
-                  {
-                    sessionId: agentSessions.session_id,
-                    modelId: agentSessions.model_id,
-                    modelName: agentSessions.model_name,
-                  },
-                  trades,
-                );
-
-                console.log(
-                  `[useChat:realtime] New decision from ${agentSessions.model_id}: ${decision.decision}`,
-                );
-
-                // Add to messages (dedupe check)
-                setMessagesRef.current((prev) => {
-                  if (prev.some((m) => m.id === chatMessage.id)) {
-                    return prev;
-                  }
-                  return [...prev, chatMessage];
-                });
+              if (agentSessions.session_id !== sessionId) {
+                return;
               }
+
+              // Filter by model if specified
+              if (modelId && agentSessions.model_id !== modelId) {
+                return;
+              }
+
+              const chatMessage = transformDecisionToMessage(typedData);
+              if (!chatMessage) return;
+
+              console.log(
+                `[useChat:realtime] New decision from ${agentSessions.model_id}: ${typedData.decision}`
+              );
+
+              // Add new message at the top (dedupe check)
+              setMessages((prev) => {
+                if (prev.some((m) => m.id === chatMessage.id)) {
+                  return prev;
+                }
+                return [chatMessage, ...prev];
+              });
             }
-          } catch (error) {
-            console.error(
-              "[useChat:realtime] Error processing decision:",
-              error,
-            );
+          } catch (err) {
+            console.error("[useChat:realtime] Error processing decision:", err);
           }
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "agent_trades",
-        },
-        async () => {
-          // Trade inserted - trades are included when decision is fetched
-          // Could update existing message if needed
-        },
+        }
       )
       .subscribe((status) => {
         console.log(`[useChat:realtime] Subscription status: ${status}`);
@@ -344,24 +389,19 @@ export function useChat({ sessionId }: UseChatOptions): UseChatReturn {
 
     return () => {
       console.log(
-        `[useChat:realtime] Unsubscribing from session: ${sessionId}`,
+        `[useChat:realtime] Unsubscribing from session: ${sessionId}`
       );
       channel.unsubscribe();
       channelRef.current = null;
     };
-  }, [sessionId]);
-
-  const isLoading =
-    status === "streaming" || status === "submitted" || isLoadingHistory;
+  }, [sessionId, modelId]);
 
   return {
-    messages: isLoadingHistory ? [] : (messages as ChatMessage[]),
-    input,
-    setInput,
+    messages,
     isLoading,
-    error: chatError || localError,
-    sendMessage,
-    stop,
-    append,
+    isLoadingMore,
+    hasMore,
+    error,
+    loadMore,
   };
 }
