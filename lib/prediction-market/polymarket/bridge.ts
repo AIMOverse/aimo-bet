@@ -6,7 +6,10 @@
 
 import type { KeyPairSigner } from "@solana/kit";
 import { getUsdcBalance } from "@/lib/crypto/polygon/client";
-import { getTokenBalanceByOwner, TOKEN_MINTS } from "@/lib/crypto/solana/client";
+import {
+  getTokenBalanceByOwner,
+  TOKEN_MINTS,
+} from "@/lib/crypto/solana/client";
 import { monitorTransactionConfirmation } from "@/lib/crypto/solana/transactions";
 import { sendUSDC } from "@/lib/crypto/solana/transfer";
 
@@ -17,7 +20,7 @@ import { sendUSDC } from "@/lib/crypto/solana/transfer";
 const BRIDGE_API = "https://bridge.polymarket.com";
 const POLL_INTERVAL_MS = 10_000; // 10 seconds
 const MAX_WAIT_MS = 10 * 60_000; // 10 minutes
-const MIN_BRIDGE_AMOUNT = 50; // Polymarket minimum ~$45, using $50 for safety
+// const MIN_BRIDGE_AMOUNT = 50; // Polymarket minimum ~$45, using $50 for safety
 
 // ============================================================================
 // Types
@@ -152,6 +155,7 @@ export async function getSolanaUSDCBalance(
  * @param amount - Amount in USDC to bridge (minimum $50)
  * @param svmSigner - Solana KeyPairSigner with USDC balance
  * @param polygonAddress - Polygon EOA address to receive USDC.e
+ * @param feePayer - Optional separate fee payer for gas sponsorship
  * @returns Bridge result with success status and new balance
  *
  * @example
@@ -174,23 +178,27 @@ export async function getSolanaUSDCBalance(
 export async function bridgeUSDCToPolygon(
   amount: number,
   svmSigner: KeyPairSigner,
-  polygonAddress: string
+  polygonAddress: string,
+  feePayer?: KeyPairSigner
 ): Promise<BridgeResult> {
   const logPrefix = "[polymarket/bridge]";
 
   console.log(`${logPrefix} Starting bridge: $${amount} to ${polygonAddress}`);
+  if (feePayer) {
+    console.log(`${logPrefix} Gas sponsored by: ${feePayer.address}`);
+  }
 
   // -------------------------------------------------------------------------
-  // Step 1: Validate minimum amount
+  // Step 1: Validate minimum amount (disabled)
   // -------------------------------------------------------------------------
-  if (amount < MIN_BRIDGE_AMOUNT) {
-    return {
-      success: false,
-      txSignature: "",
-      amountBridged: 0,
-      error: `Minimum bridge amount is $${MIN_BRIDGE_AMOUNT}. Requested: $${amount}`,
-    };
-  }
+  // if (amount < MIN_BRIDGE_AMOUNT) {
+  //   return {
+  //     success: false,
+  //     txSignature: "",
+  //     amountBridged: 0,
+  //     error: `Minimum bridge amount is $${MIN_BRIDGE_AMOUNT}. Requested: $${amount}`,
+  //   };
+  // }
 
   // -------------------------------------------------------------------------
   // Step 2: Check Solana balance
@@ -201,7 +209,9 @@ export async function bridgeUSDCToPolygon(
       success: false,
       txSignature: "",
       amountBridged: 0,
-      error: `Insufficient Solana USDC balance. Have: $${solanaBalance.toFixed(2)}, Need: $${amount}`,
+      error: `Insufficient Solana USDC balance. Have: $${solanaBalance.toFixed(
+        2
+      )}, Need: $${amount}`,
     };
   }
 
@@ -213,7 +223,9 @@ export async function bridgeUSDCToPolygon(
     // -----------------------------------------------------------------------
     const initialBalance = await getPolygonUSDCBalance(polygonAddress);
     console.log(
-      `${logPrefix} Initial Polygon balance: $${initialBalance.balanceUSDC.toFixed(2)}`
+      `${logPrefix} Initial Polygon balance: $${initialBalance.balanceUSDC.toFixed(
+        2
+      )}`
     );
 
     // -----------------------------------------------------------------------
@@ -243,7 +255,8 @@ export async function bridgeUSDCToPolygon(
     const transferResult = await sendUSDC(
       svmSigner,
       svmDepositAddress,
-      amount
+      amount,
+      feePayer
     );
 
     if (!transferResult.success || !transferResult.signature) {
@@ -292,12 +305,16 @@ export async function bridgeUSDCToPolygon(
       const elapsed = Math.round((Date.now() - startTime) / 1000);
 
       console.log(
-        `${logPrefix} [${elapsed}s] Polygon balance: $${currentBalance.balanceUSDC.toFixed(2)} (waiting for ~$${targetBalance.toFixed(2)})`
+        `${logPrefix} [${elapsed}s] Polygon balance: $${currentBalance.balanceUSDC.toFixed(
+          2
+        )} (waiting for ~$${targetBalance.toFixed(2)})`
       );
 
       if (currentBalance.balanceUSDC >= targetBalance) {
         console.log(
-          `${logPrefix} Bridge complete! New balance: $${currentBalance.balanceUSDC.toFixed(2)}`
+          `${logPrefix} Bridge complete! New balance: $${currentBalance.balanceUSDC.toFixed(
+            2
+          )}`
         );
 
         return {
@@ -311,7 +328,9 @@ export async function bridgeUSDCToPolygon(
 
     // Timeout - funds may still arrive
     console.warn(
-      `${logPrefix} Bridge timeout after ${MAX_WAIT_MS / 1000}s. Funds may still be in transit.`
+      `${logPrefix} Bridge timeout after ${
+        MAX_WAIT_MS / 1000
+      }s. Funds may still be in transit.`
     );
 
     return {

@@ -20,3 +20,12 @@ export { createGetBalanceTool, getBalanceTool } from "./getBalance";
 
 // Positions Tool
 export { createGetPositionsTool, getPositionsTool } from "./getPositions";
+
+// Withdrawal Tool (Polygon -> Solana via Wormhole)
+export {
+  createWithdrawToSolanaTool,
+  withdrawToSolanaTool,
+  type WithdrawSigners,
+  type WithdrawResult,
+  type QuoteResult,
+} from "./withdrawToSolana";

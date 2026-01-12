@@ -48,6 +48,8 @@ export {
   getBalanceTool,
   createGetPositionsTool,
   getPositionsTool,
+  createWithdrawToSolanaTool,
+  withdrawToSolanaTool,
 } from "./management";
 
 export type {
@@ -59,6 +61,9 @@ export type {
   Position,
   PositionSummary,
   GetPositionsResult,
+  WithdrawSigners,
+  WithdrawResult,
+  QuoteResult,
 } from "./management";
 
 // Analysis Tools - Parallel AI powered research

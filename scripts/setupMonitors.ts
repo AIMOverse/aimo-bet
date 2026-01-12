@@ -1,13 +1,13 @@
-#!/usr/bin/env npx ts-node
+#!/usr/bin/env npx tsx
 /**
  * Setup Monitors Script
  *
  * Creates/syncs Parallel AI monitors based on configuration in lib/parallel/monitors.ts
  *
  * Usage:
- *   npx ts-node scripts/setupMonitors.ts
- *   npx ts-node scripts/setupMonitors.ts --list
- *   npx ts-node scripts/setupMonitors.ts --delete-all
+ *   npx tsx scripts/setupMonitors.ts
+ *   npx tsx scripts/setupMonitors.ts --list
+ *   npx tsx scripts/setupMonitors.ts --delete-all
  */
 
 import "dotenv/config";

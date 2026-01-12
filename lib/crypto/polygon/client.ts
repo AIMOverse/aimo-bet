@@ -22,28 +22,48 @@ export function getPolygonProvider(): JsonRpcProvider {
 }
 
 // ============================================================================
-// Wallet Creation
+// Wallet Creation with ethers v5 compatibility
 // ============================================================================
+
+/**
+ * Add ethers v5 compatibility shim for _signTypedData.
+ * The Polymarket CLOB client expects ethers v5's _signTypedData method,
+ * but ethers v6 renamed it to signTypedData.
+ */
+function addV5Compatibility(wallet: Wallet): Wallet {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const walletWithShim = wallet as any;
+
+  // Add _signTypedData as an alias for signTypedData (ethers v5 → v6 compat)
+  if (!walletWithShim._signTypedData) {
+    walletWithShim._signTypedData = wallet.signTypedData.bind(wallet);
+  }
+
+  return walletWithShim;
+}
 
 /**
  * Create an ethers Wallet from a hex private key.
  * Used for Polymarket CLOB and other Polygon operations.
+ * Includes ethers v5 compatibility shim for _signTypedData.
  *
  * @param privateKeyHex - Private key in hex format (with or without 0x prefix)
- * @returns ethers Wallet instance
+ * @returns ethers Wallet instance with v5 compatibility
  */
 export function createPolygonWallet(privateKeyHex: string): Wallet {
   const formattedKey = privateKeyHex.startsWith("0x")
     ? privateKeyHex
     : `0x${privateKeyHex}`;
-  return new Wallet(formattedKey);
+  const wallet = new Wallet(formattedKey);
+  return addV5Compatibility(wallet);
 }
 
 /**
  * Get the default Polygon wallet from environment.
  * Falls back to PRIVATE_KEY if POLYGON_PRIVATE_KEY is not set.
+ * Includes ethers v5 compatibility shim for _signTypedData.
  *
- * @returns ethers Wallet instance
+ * @returns ethers Wallet instance with v5 compatibility
  * @throws Error if no private key is configured
  */
 export function getDefaultPolygonWallet(): Wallet {
@@ -51,7 +71,7 @@ export function getDefaultPolygonWallet(): Wallet {
 
   if (!privateKey) {
     throw new Error(
-      "No Polygon private key configured. Set POLYGON_PRIVATE_KEY or PRIVATE_KEY environment variable.",
+      "No Polygon private key configured. Set POLYGON_PRIVATE_KEY or PRIVATE_KEY environment variable."
     );
   }
 
@@ -82,14 +102,22 @@ export async function getUsdcBalance(address: string): Promise<{
 } | null> {
   try {
     const provider = getPolygonProvider();
-    const usdcContract = new Contract(POLYGON_USDC_ADDRESS, ERC20_ABI, provider);
+    const usdcContract = new Contract(
+      POLYGON_USDC_ADDRESS,
+      ERC20_ABI,
+      provider
+    );
 
     const [rawBalance, decimals] = await Promise.all([
       usdcContract.balanceOf(address) as Promise<bigint>,
       usdcContract.decimals() as Promise<number>,
     ]);
 
-    const balance = Number(rawBalance) / Math.pow(10, decimals);
+    // Convert BigInt to number safely (USDC has 6 decimals)
+    const divisor = 10n ** BigInt(decimals);
+    const balance =
+      Number(rawBalance / divisor) +
+      Number(rawBalance % divisor) / Number(divisor);
 
     return {
       address,

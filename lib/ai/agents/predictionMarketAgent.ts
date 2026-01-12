@@ -18,9 +18,8 @@ import { nanoid } from "nanoid";
 import { type KeyPairSigner } from "@solana/kit";
 import { type Wallet } from "ethers";
 import { getModel } from "@/lib/ai/models";
-import { createSignerFromBase58SecretKey } from "@/lib/crypto/solana/wallets";
-import { createPolygonWallet } from "@/lib/crypto/polygon/client";
 import { TRADING_SYSTEM_PROMPT } from "@/lib/ai/prompts/systemPrompt";
+import { createAgentSigners } from "@/lib/crypto/signers";
 
 // Direct tool imports
 import {
@@ -28,8 +27,7 @@ import {
   explainMarketTool,
 } from "@/lib/ai/tools/discover";
 import { createPlaceOrderTool } from "@/lib/ai/tools/trade/placeOrder";
-// DISABLED: Polymarket tools temporarily disabled
-// import { createCancelOrderTool } from "@/lib/ai/tools/trade/cancelOrder";
+import { createCancelOrderTool } from "@/lib/ai/tools/trade/cancelOrder";
 
 // Analysis tools (Parallel AI)
 import { webSearchTool, deepResearchTool } from "@/lib/ai/tools/analysis";
@@ -38,7 +36,9 @@ import { webSearchTool, deepResearchTool } from "@/lib/ai/tools/analysis";
 import {
   createGetBalanceTool,
   createGetPositionsTool,
+  createWithdrawToSolanaTool,
   type ToolSigners,
+  type WithdrawSigners,
 } from "@/lib/ai/tools/management";
 
 import type {
@@ -74,31 +74,43 @@ export class PredictionMarketAgent {
    * - User prompt is static ("Analyze markets...")
    */
   async run(_input: AgentRunInput): Promise<TradingResult> {
-    // Create Kalshi signer from private key if available
-    let kalshiSigner: KeyPairSigner | undefined;
-    if (this.config.privateKey) {
-      kalshiSigner = await createSignerFromBase58SecretKey(
-        this.config.privateKey
-      );
-    }
+    // Create unified signers for this agent (SVM + EVM)
+    // Uses wallet registry to get per-model keys from env vars
+    const agentSigners = await createAgentSigners(this.config.modelId);
 
-    // DISABLED: Polymarket wallet creation temporarily disabled
-    // Create Polymarket wallet from environment if available
-    // let polymarketWallet: Wallet | undefined;
-    // const polygonKey =
-    //   process.env.POLYGON_PRIVATE_KEY || process.env.PRIVATE_KEY;
-    // if (polygonKey) {
-    //   try {
-    //     polymarketWallet = createPolygonWallet(polygonKey);
-    //   } catch (e) {
-    //     console.warn("[PredictionMarketAgent] Failed to create Polygon wallet");
-    //   }
-    // }
+    // Extract signers for tools
+    const kalshiSigner: KeyPairSigner | undefined =
+      agentSigners.svm?.keyPairSigner;
+    const polymarketWallet: Wallet | undefined = agentSigners.evm?.wallet;
 
-    // Create signers for management tools (Kalshi/SVM only for now)
+    // Log wallet availability
+    console.log(`[PredictionMarketAgent:${this.config.modelId}] Signers:`, {
+      hasSvm: !!agentSigners.svm,
+      svmAddress: agentSigners.svm?.address,
+      hasEvm: !!agentSigners.evm,
+      evmAddress: agentSigners.evm?.address,
+    });
+
+    // Create signers for management tools (multi-chain)
     const signers: ToolSigners = {
-      svm: { address: this.config.walletAddress },
-      evm: { address: "" }, // Polymarket disabled
+      svm: { address: agentSigners.svm?.address || this.config.walletAddress },
+      evm: { address: agentSigners.evm?.address || "" },
+    };
+
+    // Create withdrawal signers (needs full signer objects for Wormhole bridge)
+    const withdrawSigners: WithdrawSigners = {
+      svm: agentSigners.svm
+        ? {
+            address: agentSigners.svm.address,
+            keyPairSigner: agentSigners.svm.keyPairSigner,
+          }
+        : undefined,
+      evm: agentSigners.evm
+        ? {
+            address: agentSigners.evm.address,
+            wallet: agentSigners.evm.wallet,
+          }
+        : undefined,
     };
 
     // Create tools directly with wallet context
@@ -108,12 +120,12 @@ export class PredictionMarketAgent {
       discoverMarkets: discoverMarketsTool,
       explainMarket: explainMarketTool,
       placeOrder: createPlaceOrderTool(
-        this.config.walletAddress,
+        agentSigners.svm?.address || this.config.walletAddress,
         kalshiSigner,
-        undefined // polymarketWallet disabled
+        polymarketWallet
       ),
-      // DISABLED: Polymarket-only tools
-      // cancelOrder: createCancelOrderTool(polymarketWallet),
+      cancelOrder: createCancelOrderTool(polymarketWallet),
+      withdrawToSolana: createWithdrawToSolanaTool(withdrawSigners),
       webSearch: webSearchTool,
       deepResearch: deepResearchTool,
     };
