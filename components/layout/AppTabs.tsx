@@ -55,8 +55,8 @@ export function AppTabs({
     : "All";
 
   return (
-    <div className="border-b">
-      <div className="flex items-center justify-between">
+    <div className="border-b relative z-10">
+      <div className="flex items-center justify-between px-2 py-1">
         {/* Tabs */}
         <Tabs
           value={activeTab}
@@ -83,11 +83,11 @@ export function AppTabs({
             onModelChange(value === "all" ? null : value)
           }
         >
-          <SelectTrigger className="w-28 h-9 text-xs">
+          <SelectTrigger className="w-28 h-8 text-xs">
             <Filter className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="truncate">{displayValue}</span>
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent position="popper" align="end">
             <SelectItem value="all">All</SelectItem>
             {MODELS.filter((m) => m.enabled).map((model) => (
               <SelectItem key={model.id} value={model.id}>
