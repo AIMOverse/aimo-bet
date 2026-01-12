@@ -4,6 +4,10 @@
     {
       "path": "/api/agents/cron",
       "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/agents/balances",
+      "schedule": "*/5 * * * *"
     }
   ]
 }
