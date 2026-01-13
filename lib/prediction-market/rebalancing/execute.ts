@@ -23,7 +23,10 @@ export async function checkAndTriggerRebalance(
   const check = checkRebalanceNeeded(balances);
 
   if (!check.needed) {
-    console.log(`${logPrefix} No rebalance needed: ${check.reason}`);
+    // Only log if balances are actually problematic (not just "OK")
+    if (check.reason !== "Balances OK") {
+      console.log(`${logPrefix} ${check.reason}`);
+    }
     return { triggered: false, reason: check.reason };
   }
 
