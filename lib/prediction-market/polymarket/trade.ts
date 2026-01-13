@@ -42,9 +42,21 @@ export interface PolymarketOrderRequest {
  */
 export async function executeMarketOrder(
   client: ClobClient,
-  request: PolymarketOrderRequest,
+  request: PolymarketOrderRequest
 ): Promise<PolymarketTradeResult> {
   const logPrefix = "[polymarket/trade:market]";
+
+  // Validate tokenId before making API calls
+  if (!request.tokenId || typeof request.tokenId !== "string") {
+    return {
+      success: false,
+      orderId: "",
+      status: "UNMATCHED",
+      filledSize: 0,
+      avgPrice: 0,
+      error: "Token ID is required",
+    };
+  }
 
   try {
     console.log(`${logPrefix} Executing:`, {
@@ -67,7 +79,7 @@ export async function executeMarketOrder(
         amount: request.size,
       },
       options,
-      ClobOrderType.FOK,
+      ClobOrderType.FOK
     );
 
     console.log(`${logPrefix} Response:`, {
@@ -95,10 +107,8 @@ export async function executeMarketOrder(
 
     // For BUY: takingAmount = tokens received, makingAmount = USDC spent
     // For SELL: takingAmount = USDC received, makingAmount = tokens sold
-    const filledSize =
-      request.side === "BUY" ? takingAmount : makingAmount;
-    const costOrProceeds =
-      request.side === "BUY" ? makingAmount : takingAmount;
+    const filledSize = request.side === "BUY" ? takingAmount : makingAmount;
+    const costOrProceeds = request.side === "BUY" ? makingAmount : takingAmount;
     const avgPrice = filledSize > 0 ? costOrProceeds / filledSize : 0;
 
     return {
@@ -135,9 +145,21 @@ export async function executeMarketOrder(
  */
 export async function executeLimitOrder(
   client: ClobClient,
-  request: PolymarketOrderRequest,
+  request: PolymarketOrderRequest
 ): Promise<PolymarketTradeResult> {
   const logPrefix = "[polymarket/trade:limit]";
+
+  // Validate tokenId before making API calls
+  if (!request.tokenId || typeof request.tokenId !== "string") {
+    return {
+      success: false,
+      orderId: "",
+      status: "UNMATCHED",
+      filledSize: 0,
+      avgPrice: 0,
+      error: "Token ID is required",
+    };
+  }
 
   if (request.price === undefined) {
     return {
@@ -186,7 +208,7 @@ export async function executeLimitOrder(
         price: request.price,
       },
       options,
-      ClobOrderType.GTC,
+      ClobOrderType.GTC
     );
 
     console.log(`${logPrefix} Response:`, {
@@ -211,16 +233,15 @@ export async function executeLimitOrder(
     const takingAmount = parseFloat(response.takingAmount || "0");
     const makingAmount = parseFloat(response.makingAmount || "0");
 
-    const filledSize =
-      request.side === "BUY" ? takingAmount : makingAmount;
+    const filledSize = request.side === "BUY" ? takingAmount : makingAmount;
 
     // Determine status: MATCHED = fully filled, LIVE = resting on book
     const status =
       response.status === "MATCHED"
         ? "MATCHED"
         : response.status === "LIVE"
-          ? "LIVE"
-          : "DELAYED";
+        ? "LIVE"
+        : "DELAYED";
 
     return {
       success: true,
@@ -255,7 +276,7 @@ export async function executeLimitOrder(
  */
 export async function cancelOrder(
   client: ClobClient,
-  orderId: string,
+  orderId: string
 ): Promise<{ success: boolean; error?: string }> {
   const logPrefix = "[polymarket/trade:cancel]";
 
@@ -288,7 +309,7 @@ export async function cancelOrder(
  */
 export async function getOrderStatus(
   client: ClobClient,
-  orderId: string,
+  orderId: string
 ): Promise<{ status: string; filledSize: number; error?: string }> {
   const logPrefix = "[polymarket/trade:status]";
 

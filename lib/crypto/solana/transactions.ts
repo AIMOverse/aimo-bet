@@ -42,6 +42,73 @@ const DEFAULT_POLL_INTERVAL = 1000;
 const DEFAULT_MAX_ATTEMPTS = 30;
 
 // ============================================================================
+// Error Parsing
+// ============================================================================
+
+/**
+ * Known Solana program error codes and their meanings
+ * These are common across various AMM/DEX programs
+ */
+const PROGRAM_ERROR_MESSAGES: Record<number, string> = {
+  0: "Generic program error",
+  1: "Slippage tolerance exceeded - price moved too much during execution",
+  2: "Insufficient funds for transaction",
+  3: "Invalid account data",
+  4: "Account not initialized",
+  5: "Insufficient liquidity in market",
+  6: "Invalid instruction data",
+  // Jupiter/AMM specific
+  6000: "Slippage tolerance exceeded",
+  6001: "Insufficient output amount",
+};
+
+/**
+ * Parse Solana program errors into user-friendly messages
+ */
+export function parseSolanaError(error: unknown): string {
+  if (!error || typeof error !== "object") {
+    return "Unknown Solana error";
+  }
+
+  const err = error as {
+    message?: string;
+    context?: { code?: number; __code?: number };
+    cause?: { message?: string };
+  };
+
+  // Check for custom program error code
+  const code = err.context?.code ?? err.context?.__code;
+  if (code !== undefined && PROGRAM_ERROR_MESSAGES[code]) {
+    return PROGRAM_ERROR_MESSAGES[code];
+  }
+
+  // Check message for common patterns
+  const message = err.message || err.cause?.message || "";
+
+  if (message.includes("custom program error: #1")) {
+    return "Slippage tolerance exceeded - try increasing slippage_bps or reducing quantity";
+  }
+  if (message.includes("custom program error: #2")) {
+    return "Insufficient funds - check wallet balance";
+  }
+  if (
+    message.includes("insufficient funds") ||
+    message.includes("Insufficient")
+  ) {
+    return "Insufficient funds for transaction";
+  }
+  if (message.includes("slippage") || message.includes("Slippage")) {
+    return "Slippage tolerance exceeded - try increasing slippage_bps";
+  }
+  if (message.includes("blockhash")) {
+    return "Transaction expired - please retry";
+  }
+
+  // Return original message if no pattern matched
+  return message || "Transaction failed";
+}
+
+// ============================================================================
 // Transaction Signing
 // ============================================================================
 
@@ -55,7 +122,7 @@ const DEFAULT_MAX_ATTEMPTS = 30;
  */
 export async function signTransactionToBase64(
   transactionBase64: string,
-  signer: KeyPairSigner,
+  signer: KeyPairSigner
 ): Promise<string> {
   // Decode the base64 transaction to bytes
   const base64Encoder = getBase64Encoder();
@@ -68,7 +135,7 @@ export async function signTransactionToBase64(
   // Sign the transaction
   const signedTransaction = await signTransaction(
     [signer.keyPair],
-    transaction,
+    transaction
   );
 
   // Encode back to base64
@@ -84,7 +151,7 @@ export async function signTransactionToBase64(
  */
 export async function signAndSubmitTransaction(
   transactionBase64: string,
-  signer: KeyPairSigner,
+  signer: KeyPairSigner
 ): Promise<string> {
   // Decode the base64 transaction to bytes
   const base64Encoder = getBase64Encoder();
@@ -97,7 +164,7 @@ export async function signAndSubmitTransaction(
   // Sign the transaction with the signer's keyPair
   const signedTransaction = await signTransaction(
     [signer.keyPair],
-    transaction,
+    transaction
   );
 
   // Get signature for logging/tracking
@@ -106,15 +173,20 @@ export async function signAndSubmitTransaction(
   // Encode to base64 wire format for RPC
   const encodedTransaction = getBase64EncodedWireTransaction(signedTransaction);
 
-  // Send via RPC
+  // Send via RPC with error handling
   const rpc = getRpc();
-  await rpc
-    .sendTransaction(encodedTransaction, {
-      encoding: "base64",
-      skipPreflight: false,
-      preflightCommitment: "confirmed",
-    })
-    .send();
+  try {
+    await rpc
+      .sendTransaction(encodedTransaction, {
+        encoding: "base64",
+        skipPreflight: false,
+        preflightCommitment: "confirmed",
+      })
+      .send();
+  } catch (error) {
+    const friendlyMessage = parseSolanaError(error);
+    throw new Error(friendlyMessage);
+  }
 
   return signature;
 }
@@ -129,7 +201,7 @@ export async function signAndSubmitTransaction(
  */
 export async function signWithMultipleSignersAndSubmit(
   transactionBase64: string,
-  signers: KeyPairSigner[],
+  signers: KeyPairSigner[]
 ): Promise<string> {
   // Decode the base64 transaction to bytes
   const base64Encoder = getBase64Encoder();
@@ -149,15 +221,20 @@ export async function signWithMultipleSignersAndSubmit(
   // Encode to base64 wire format for RPC
   const encodedTransaction = getBase64EncodedWireTransaction(signedTransaction);
 
-  // Send via RPC
+  // Send via RPC with error handling
   const rpc = getRpc();
-  await rpc
-    .sendTransaction(encodedTransaction, {
-      encoding: "base64",
-      skipPreflight: false,
-      preflightCommitment: "confirmed",
-    })
-    .send();
+  try {
+    await rpc
+      .sendTransaction(encodedTransaction, {
+        encoding: "base64",
+        skipPreflight: false,
+        preflightCommitment: "confirmed",
+      })
+      .send();
+  } catch (error) {
+    const friendlyMessage = parseSolanaError(error);
+    throw new Error(friendlyMessage);
+  }
 
   return signature;
 }
@@ -175,7 +252,7 @@ export async function signWithMultipleSignersAndSubmit(
  */
 export async function monitorTransactionConfirmation(
   signatureStr: string,
-  options: MonitorOptions = {},
+  options: MonitorOptions = {}
 ): Promise<ConfirmationResult> {
   const {
     pollInterval = DEFAULT_POLL_INTERVAL,
@@ -251,7 +328,7 @@ export async function monitorTransactionConfirmation(
  * @returns Confirmation result
  */
 export async function getTransactionStatus(
-  signatureStr: string,
+  signatureStr: string
 ): Promise<ConfirmationResult> {
   const rpc = getRpc();
   const sig: Signature = toSignature(signatureStr);

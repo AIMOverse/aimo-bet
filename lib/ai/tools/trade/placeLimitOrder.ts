@@ -28,6 +28,23 @@ async function executePolymarketLimitOrder(params: {
   const { tokenId, side, quantity, price, timeInForce, wallet } = params;
   const logPrefix = "[placeLimitOrder:polymarket]";
 
+  // Validate tokenId - must be a valid Polymarket CLOB token ID
+  // These are large numeric strings (77 digits), not market IDs or condition IDs
+  if (!tokenId || tokenId.length < 50) {
+    return {
+      success: false,
+      order_id: "",
+      exchange: "polymarket",
+      status: "failed",
+      filled_quantity: 0,
+      avg_price: 0,
+      total_cost: 0,
+      error: `Invalid token ID: "${
+        tokenId || "undefined"
+      }". Use explainMarket first to get the yes_token_id or no_token_id.`,
+    };
+  }
+
   try {
     // Create trading client with auto-allowance
     const { client, allowanceApproved } = await createTradingClient(wallet);
