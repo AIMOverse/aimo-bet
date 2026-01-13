@@ -1,28 +1,28 @@
 // ============================================================================
-// Polymarket Tool Checker Script
+// Polymarket Trade Checker Script
 // Tests Polymarket trading on Polygon
-// Usage: bun scripts/checkPolymarket.ts [--deposit|--trade] [amount]
+// Usage:
+//   bun scripts/checkPolymarket.ts buy [amount]   - Buy tokens
+//   bun scripts/checkPolymarket.ts sell           - Sell existing positions
+//   bun scripts/checkPolymarket.ts [amount]       - Buy & sell roundtrip (legacy)
 //
-// NOTE: For bridging, use scripts/checkBridge.ts instead
-// WARNING: This script moves REAL MONEY! Default amount is $10.
+// NOTE: For bridging, use scripts/checkBridge.ts
+// WARNING: This script moves REAL MONEY! Default amount is $5.
 // ============================================================================
 
 // Load environment variables FIRST
 import "dotenv/config";
 
-import { getCurrencyBalance } from "@/lib/crypto/solana/client";
 import {
   getUsdcBalance,
   createPolygonWallet,
 } from "@/lib/crypto/polygon/client";
-import { bridgeUSDCToPolygon } from "@/lib/prediction-market/polymarket/bridge";
-import { createSignerFromBase58SecretKey } from "@/lib/crypto/solana/wallets";
-import { getSponsorSigner } from "@/lib/crypto/solana/sponsor";
-import { createClobClient } from "@/lib/prediction-market/polymarket/clob";
+import { createTradingClient } from "@/lib/prediction-market/polymarket/clob";
 import {
   executeMarketOrder,
   type PolymarketOrderRequest,
 } from "@/lib/prediction-market/polymarket/trade";
+import { getPositions } from "@/lib/prediction-market/polymarket/positions";
 
 // ============================================================================
 // Types
@@ -57,13 +57,8 @@ function formatDuration(ms: number): string {
 }
 
 // ============================================================================
-// Balance Check Functions
+// Balance Check
 // ============================================================================
-
-async function getSolanaBalance(address: string): Promise<number> {
-  const result = await getCurrencyBalance(address, "USDC");
-  return result ? Number(result.formatted) : 0;
-}
 
 async function getPolygonBalance(address: string): Promise<number> {
   const result = await getUsdcBalance(address);
@@ -71,107 +66,34 @@ async function getPolygonBalance(address: string): Promise<number> {
 }
 
 // ============================================================================
-// Step 1: Deposit (Solana → Polygon)
+// BUY: Find market and buy tokens
 // ============================================================================
 
-async function runDeposit(
-  amount: number,
-  svmSigner: Awaited<ReturnType<typeof createSignerFromBase58SecretKey>>,
-  evmPublicKey: string,
-  sponsorSigner: Awaited<ReturnType<typeof getSponsorSigner>>
-): Promise<StepResult> {
-  console.log("═".repeat(60));
-  console.log("  💰 Deposit: Solana → Polygon (Polymarket Bridge)");
-  console.log("═".repeat(60));
-  console.log(`  Bridging $${amount}...`);
-  if (sponsorSigner) {
-    console.log(
-      `  ${colors.cyan}Gas sponsored by platform wallet${colors.reset}`
-    );
-  }
-
-  const startTime = Date.now();
-
-  const bridgeResult = await bridgeUSDCToPolygon(
-    amount,
-    svmSigner,
-    evmPublicKey,
-    sponsorSigner ?? undefined
-  );
-
-  if (!bridgeResult.success) {
-    console.error(
-      `  ${colors.red}✗ Bridge failed: ${bridgeResult.error}${colors.reset}`
-    );
-    return {
-      step: "Deposit to Polygon",
-      success: false,
-      duration: Date.now() - startTime,
-      error: bridgeResult.error,
-    };
-  }
-
-  console.log(`  ${colors.green}✓${colors.reset} Bridge successful!`);
-  console.log(`  TX: ${bridgeResult.txSignature.slice(0, 20)}...`);
-  console.log(`  Amount bridged: $${bridgeResult.amountBridged}`);
-  console.log(`  New Polygon balance: $${bridgeResult.newBalance?.toFixed(2)}`);
-  console.log(`  Duration: ${formatDuration(Date.now() - startTime)}`);
-  console.log();
-
-  return {
-    step: "Deposit to Polygon",
-    success: true,
-    duration: Date.now() - startTime,
-    data: {
-      tx_signature: bridgeResult.txSignature,
-      amount_bridged: bridgeResult.amountBridged,
-      new_balance: bridgeResult.newBalance,
-    },
-  };
-}
-
-// ============================================================================
-// Step 2: Trade on Polymarket
-// ============================================================================
-
-// Market response type from CLOB API
-interface ClobMarket {
-  condition_id: string;
-  question: string;
-  tokens: Array<{
-    token_id: string;
-    outcome: string;
-    price: number;
-    winner: boolean;
-  }>;
-  min_incentive_size: string;
-  max_incentive_spread: string;
-  active: boolean;
-  closed: boolean;
-  neg_risk: boolean;
-  archived: boolean;
-}
-
-interface ClobMarketsResponse {
-  data: ClobMarket[];
-  next_cursor: string;
-}
-
-async function runTrade(
+async function runBuy(
   tradeAmount: number,
   evmPrivateKey: string
 ): Promise<StepResult> {
   console.log("═".repeat(60));
-  console.log("  📈 Trade: Buy & Sell on Polymarket");
+  console.log("  📈 BUY: Purchase tokens on Polymarket");
   console.log("═".repeat(60));
 
   const startTime = Date.now();
-  const evmWallet = createPolygonWallet(evmPrivateKey);
 
   try {
-    // Create CLOB client
-    console.log(`  Creating CLOB client...`);
-    const clobClient = await createClobClient(evmWallet);
+    // Create trading client with auto-allowance
+    console.log(`  Creating trading client (with auto-allowance)...`);
+    const evmWallet = createPolygonWallet(evmPrivateKey);
+    const { client: clobClient, allowanceApproved } = await createTradingClient(
+      evmWallet
+    );
+
+    if (allowanceApproved) {
+      console.log(
+        `  ${colors.green}✓${colors.reset} Auto-approved USDC + CTF for Polymarket`
+      );
+    } else {
+      console.log(`  ${colors.green}✓${colors.reset} Allowances already set`);
+    }
 
     // Use Gamma API for open markets (CLOB API returns stale data)
     console.log(`  Fetching markets from Gamma API...`);
@@ -181,14 +103,425 @@ async function runTrade(
     const gammaMarketsRaw = (await gammaResponse.json()) as Array<{
       id: string;
       question: string;
-      clobTokenIds: string; // JSON string, e.g. '["token1","token2"]'
-      outcomes: string; // JSON string
-      outcomePrices: string; // JSON string
+      clobTokenIds: string;
+      outcomes: string;
+      outcomePrices: string;
       active: boolean;
       closed: boolean;
     }>;
 
-    // Parse JSON string fields
+    const gammaMarkets = gammaMarketsRaw.map((m) => ({
+      ...m,
+      clobTokenIds: JSON.parse(m.clobTokenIds || "[]") as string[],
+      outcomes: JSON.parse(m.outcomes || "[]") as string[],
+      outcomePrices: JSON.parse(m.outcomePrices || "[]") as string[],
+    }));
+
+    console.log(`  Found ${gammaMarkets.length} open markets from Gamma API`);
+
+    if (gammaMarkets.length === 0) {
+      return {
+        step: "Buy on Polymarket",
+        success: false,
+        duration: Date.now() - startTime,
+        error: "No open markets found",
+      };
+    }
+
+    // Find a market with orderbook liquidity
+    console.log(`  Verifying orderbooks...`);
+    let selectedMarket: (typeof gammaMarkets)[0] | null = null;
+    let selectedTokenId: string | null = null;
+
+    for (const market of gammaMarkets) {
+      if (!market.clobTokenIds || market.clobTokenIds.length === 0) continue;
+
+      const yesTokenId = market.clobTokenIds[0];
+
+      try {
+        const orderbook = await clobClient.getOrderBook(yesTokenId);
+        if (orderbook && orderbook.asks && orderbook.asks.length > 0) {
+          const bestAskEntry = orderbook.asks[orderbook.asks.length - 1];
+          const bestAsk = parseFloat(bestAskEntry.price);
+
+          if (bestAsk >= 0.02 && bestAsk <= 0.98) {
+            console.log(`  ✓ Found market: ${market.question.slice(0, 45)}...`);
+            console.log(`    YES token: ${yesTokenId.slice(0, 16)}...`);
+            console.log(`    Best ask: $${bestAsk.toFixed(3)}`);
+            selectedMarket = market;
+            selectedTokenId = yesTokenId;
+            break;
+          }
+        }
+      } catch {
+        // Skip markets without orderbooks
+      }
+    }
+
+    if (!selectedMarket || !selectedTokenId) {
+      return {
+        step: "Buy on Polymarket",
+        success: false,
+        duration: Date.now() - startTime,
+        error: "No markets with suitable liquidity found",
+      };
+    }
+
+    const marketTitle = selectedMarket.question;
+
+    console.log(`  Selected: ${marketTitle.slice(0, 50)}...`);
+    console.log();
+    console.log(
+      `  ${colors.cyan}Buying $${tradeAmount} YES tokens...${colors.reset}`
+    );
+
+    const buyRequest: PolymarketOrderRequest = {
+      tokenId: selectedTokenId,
+      side: "BUY",
+      size: tradeAmount,
+    };
+
+    const buyResult = await executeMarketOrder(clobClient, buyRequest);
+
+    if (!buyResult.success) {
+      return {
+        step: "Buy on Polymarket",
+        success: false,
+        duration: Date.now() - startTime,
+        error: `Buy failed: ${buyResult.error}`,
+        data: { market: marketTitle },
+      };
+    }
+
+    console.log(
+      `  ${colors.green}✓${
+        colors.reset
+      } Buy successful: ${buyResult.filledSize.toFixed(
+        2
+      )} tokens @ $${buyResult.avgPrice.toFixed(4)}`
+    );
+    console.log();
+    console.log(`  ${colors.cyan}Token ID: ${selectedTokenId}${colors.reset}`);
+    console.log(
+      `  ${colors.yellow}Run 'bun scripts/checkPolymarket.ts sell' to sell${colors.reset}`
+    );
+
+    return {
+      step: "Buy on Polymarket",
+      success: true,
+      duration: Date.now() - startTime,
+      data: {
+        market: marketTitle,
+        tokenId: selectedTokenId,
+        order_id: buyResult.orderId,
+        filled: buyResult.filledSize,
+        price: buyResult.avgPrice,
+        cost: buyResult.filledSize * buyResult.avgPrice,
+      },
+    };
+  } catch (error) {
+    console.error(`  ${colors.red}✗ Buy error:${colors.reset}`, error);
+    return {
+      step: "Buy on Polymarket",
+      success: false,
+      duration: Date.now() - startTime,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+// ============================================================================
+// SELL: Fetch positions and sell existing holdings
+// ============================================================================
+
+async function runSell(
+  evmPrivateKey: string,
+  evmPublicKey: string
+): Promise<StepResult> {
+  console.log("═".repeat(60));
+  console.log("  📉 SELL: Liquidate positions on Polymarket");
+  console.log("═".repeat(60));
+
+  const startTime = Date.now();
+
+  try {
+    // Create trading client with auto-allowance
+    console.log(`  Creating trading client (with auto-allowance)...`);
+    const evmWallet = createPolygonWallet(evmPrivateKey);
+    const { client: clobClient, allowanceApproved } = await createTradingClient(
+      evmWallet
+    );
+
+    if (allowanceApproved) {
+      console.log(
+        `  ${colors.green}✓${colors.reset} Auto-approved USDC + CTF for Polymarket`
+      );
+    } else {
+      console.log(`  ${colors.green}✓${colors.reset} Allowances already set`);
+    }
+
+    // Fetch existing positions from Polymarket Data API
+    console.log(`  Fetching positions for ${evmPublicKey.slice(0, 10)}...`);
+    const positions = await getPositions(evmPublicKey, { sizeThreshold: 0.01 });
+
+    console.log(`  Found ${positions.length} positions`);
+
+    if (positions.length === 0) {
+      console.log(`  ${colors.yellow}No positions to sell${colors.reset}`);
+      return {
+        step: "Sell on Polymarket",
+        success: true,
+        duration: Date.now() - startTime,
+        data: { message: "No positions found" },
+      };
+    }
+
+    // Display positions
+    console.log();
+    console.log("  Current positions:");
+    for (const pos of positions) {
+      console.log(`    • ${pos.title.slice(0, 40)}...`);
+      console.log(
+        `      ${pos.outcome}: ${pos.size.toFixed(
+          2
+        )} tokens @ $${pos.curPrice.toFixed(4)}`
+      );
+      console.log(`      Token: ${pos.asset.slice(0, 16)}...`);
+    }
+    console.log();
+
+    // Pick the first position with size > 0
+    const positionToSell = positions.find((p) => p.size > 0);
+
+    if (!positionToSell) {
+      console.log(
+        `  ${colors.yellow}No positions with size > 0${colors.reset}`
+      );
+      return {
+        step: "Sell on Polymarket",
+        success: true,
+        duration: Date.now() - startTime,
+        data: { message: "All positions have zero size" },
+      };
+    }
+
+    console.log(`  Selling position: ${positionToSell.title.slice(0, 45)}...`);
+    console.log(`  Token ID: ${positionToSell.asset}`);
+    console.log(`  Size: ${positionToSell.size.toFixed(2)} tokens`);
+    console.log();
+
+    // Check orderbook liquidity before selling
+    console.log(
+      `  ${colors.cyan}Checking orderbook liquidity...${colors.reset}`
+    );
+    const orderbook = await clobClient.getOrderBook(positionToSell.asset);
+
+    // For SELL, we need BUY orders (bids) in the orderbook
+    const bids = orderbook?.bids || [];
+    let availableLiquidity = 0;
+    let weightedPrice = 0;
+
+    for (const bid of bids) {
+      const price = parseFloat(bid.price);
+      const size = parseFloat(bid.size);
+      availableLiquidity += size;
+      weightedPrice += price * size;
+    }
+
+    if (availableLiquidity > 0) {
+      weightedPrice = weightedPrice / availableLiquidity;
+    }
+
+    console.log(
+      `    Orderbook bids: ${bids.length} levels, ${availableLiquidity.toFixed(
+        2
+      )} tokens available`
+    );
+    console.log(`    Weighted avg bid: $${weightedPrice.toFixed(4)}`);
+
+    if (availableLiquidity < 1) {
+      console.log(
+        `  ${colors.yellow}⚠ Very low liquidity - sell may not fill${colors.reset}`
+      );
+    }
+
+    // Determine sell size: sell min of position size and 80% of available liquidity
+    // Use 80% to account for slippage and other orders
+    const maxSellable = Math.min(positionToSell.size, availableLiquidity * 0.8);
+
+    // For FOK orders, we need whole numbers. If position < 1 token, sell entire position.
+    // If position >= 1, round down to nearest integer.
+    let sellSize: number;
+    if (positionToSell.size < 1) {
+      // Position is dust - try to sell it all (may fail if market doesn't accept fractional)
+      sellSize = positionToSell.size;
+      console.log(
+        `  ${colors.yellow}⚠ Dust position (${sellSize.toFixed(
+          2
+        )} tokens) - attempting to sell all${colors.reset}`
+      );
+    } else {
+      // Normal position - round down to avoid "not enough balance"
+      sellSize = Math.floor(maxSellable);
+      if (sellSize < 1) {
+        console.log(
+          `  ${colors.yellow}⚠ Insufficient liquidity to sell even 1 token${colors.reset}`
+        );
+        return {
+          step: "Sell on Polymarket",
+          success: false,
+          duration: Date.now() - startTime,
+          error: "Insufficient liquidity",
+          data: { availableLiquidity, positionSize: positionToSell.size },
+        };
+      }
+    }
+
+    if (sellSize < positionToSell.size) {
+      console.log(
+        `  ${
+          colors.yellow
+        }⚠ Reducing sell size due to liquidity: ${positionToSell.size.toFixed(
+          2
+        )} → ${sellSize}${colors.reset}`
+      );
+    }
+
+    console.log(
+      `  ${colors.cyan}Selling ${sellSize} ${positionToSell.outcome} tokens...${colors.reset}`
+    );
+
+    const sellRequest: PolymarketOrderRequest = {
+      tokenId: positionToSell.asset,
+      side: "SELL",
+      size: sellSize,
+    };
+
+    const sellResult = await executeMarketOrder(clobClient, sellRequest);
+
+    if (!sellResult.success) {
+      console.warn(
+        `  ${colors.red}✗ Sell failed: ${sellResult.error}${colors.reset}`
+      );
+      return {
+        step: "Sell on Polymarket",
+        success: false,
+        duration: Date.now() - startTime,
+        error: `Sell failed: ${sellResult.error}`,
+        data: {
+          market: positionToSell.title,
+          tokenId: positionToSell.asset,
+          size: sellSize,
+          availableLiquidity,
+        },
+      };
+    }
+
+    console.log(
+      `  ${colors.green}✓${
+        colors.reset
+      } Sell successful: ${sellResult.filledSize.toFixed(
+        2
+      )} tokens @ $${sellResult.avgPrice.toFixed(4)}`
+    );
+
+    const proceeds = sellResult.filledSize * sellResult.avgPrice;
+    const costBasis =
+      (positionToSell.initialValue / positionToSell.size) *
+      sellResult.filledSize;
+    const pnl = proceeds - costBasis;
+
+    console.log();
+    console.log(`  Cost basis:    $${costBasis.toFixed(4)}`);
+    console.log(`  Sell proceeds: $${proceeds.toFixed(4)}`);
+    console.log(
+      `  P&L:           ${pnl >= 0 ? colors.green : colors.red}$${pnl.toFixed(
+        4
+      )}${colors.reset}`
+    );
+
+    const remaining = positionToSell.size - sellResult.filledSize;
+    if (remaining > 0.01) {
+      console.log();
+      console.log(
+        `  ${colors.yellow}Remaining: ${remaining.toFixed(
+          2
+        )} tokens still held${colors.reset}`
+      );
+    }
+
+    return {
+      step: "Sell on Polymarket",
+      success: true,
+      duration: Date.now() - startTime,
+      data: {
+        market: positionToSell.title,
+        tokenId: positionToSell.asset,
+        order_id: sellResult.orderId,
+        filled: sellResult.filledSize,
+        price: sellResult.avgPrice,
+        proceeds,
+        pnl,
+        remaining,
+      },
+    };
+  } catch (error) {
+    console.error(`  ${colors.red}✗ Sell error:${colors.reset}`, error);
+    return {
+      step: "Sell on Polymarket",
+      success: false,
+      duration: Date.now() - startTime,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+// ============================================================================
+// ROUNDTRIP: Buy then sell (legacy behavior)
+// ============================================================================
+
+async function runRoundtrip(
+  tradeAmount: number,
+  evmPrivateKey: string,
+  evmPublicKey: string
+): Promise<StepResult> {
+  console.log("═".repeat(60));
+  console.log("  📈 Trade: Buy & Sell Roundtrip on Polymarket");
+  console.log("═".repeat(60));
+
+  const startTime = Date.now();
+
+  try {
+    // Create trading client with auto-allowance
+    console.log(`  Creating trading client (with auto-allowance)...`);
+    const evmWallet = createPolygonWallet(evmPrivateKey);
+    const { client: clobClient, allowanceApproved } = await createTradingClient(
+      evmWallet
+    );
+
+    if (allowanceApproved) {
+      console.log(
+        `  ${colors.green}✓${colors.reset} Auto-approved USDC + CTF for Polymarket`
+      );
+    } else {
+      console.log(`  ${colors.green}✓${colors.reset} Allowances already set`);
+    }
+
+    // Use Gamma API for open markets (CLOB API returns stale data)
+    console.log(`  Fetching markets from Gamma API...`);
+    const gammaResponse = await fetch(
+      "https://gamma-api.polymarket.com/markets?closed=false&limit=50"
+    );
+    const gammaMarketsRaw = (await gammaResponse.json()) as Array<{
+      id: string;
+      question: string;
+      clobTokenIds: string;
+      outcomes: string;
+      outcomePrices: string;
+      active: boolean;
+      closed: boolean;
+    }>;
+
     const gammaMarkets = gammaMarketsRaw.map((m) => ({
       ...m,
       clobTokenIds: JSON.parse(m.clobTokenIds || "[]") as string[],
@@ -211,61 +544,27 @@ async function runTrade(
     console.log(`  Verifying orderbooks...`);
     let selectedMarket: (typeof gammaMarkets)[0] | null = null;
     let selectedTokenId: string | null = null;
-    let selectedPrice: number | null = null;
 
     for (const market of gammaMarkets) {
-      if (!market.clobTokenIds || market.clobTokenIds.length === 0) {
-        continue;
-      }
+      if (!market.clobTokenIds || market.clobTokenIds.length === 0) continue;
 
-      // Get YES token (first outcome)
       const yesTokenId = market.clobTokenIds[0];
 
       try {
         const orderbook = await clobClient.getOrderBook(yesTokenId);
         if (orderbook && orderbook.asks && orderbook.asks.length > 0) {
-          // Polymarket orderbooks: asks sorted descending, so last = lowest (best) ask
           const bestAskEntry = orderbook.asks[orderbook.asks.length - 1];
           const bestAsk = parseFloat(bestAskEntry.price);
 
-          // Skip markets that are essentially resolved (99%+ or 1%-)
           if (bestAsk >= 0.02 && bestAsk <= 0.98) {
-            console.log(
-              `  ✓ Found market with liquidity: ${market.question.slice(
-                0,
-                45
-              )}...`
-            );
-            console.log(`    YES token: ${yesTokenId.slice(0, 16)}...`);
-            console.log(
-              `    Best ask: $${bestAsk.toFixed(3)} (${
-                orderbook.asks.length
-              } asks)`
-            );
+            console.log(`  ✓ Found market: ${market.question.slice(0, 45)}...`);
             selectedMarket = market;
             selectedTokenId = yesTokenId;
-            selectedPrice = bestAsk;
             break;
-          } else {
-            console.log(
-              `    Skipping ${market.question.slice(
-                0,
-                30
-              )}... (price ${bestAsk.toFixed(3)} out of range)`
-            );
           }
         }
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        // Only log unexpected errors, not "no orderbook" errors
-        if (!errMsg.includes("404") && !errMsg.includes("orderbook")) {
-          console.log(
-            `    Error fetching orderbook for ${market.question.slice(
-              0,
-              25
-            )}...: ${errMsg}`
-          );
-        }
+      } catch {
+        // Skip
       }
     }
 
@@ -274,32 +573,24 @@ async function runTrade(
         step: "Trade on Polymarket",
         success: false,
         duration: Date.now() - startTime,
-        error:
-          "No markets with suitable liquidity found (all either resolved or illiquid)",
+        error: "No markets with suitable liquidity found",
       };
     }
 
     const marketTitle = selectedMarket.question;
-    const yesTokenId = selectedTokenId;
 
-    console.log(`  Selected market: ${marketTitle.slice(0, 50)}...`);
+    console.log(`  Selected: ${marketTitle.slice(0, 50)}...`);
     console.log();
 
-    // Calculate size based on current price (buy $5 worth)
-    // Market orders don't need a price, just the dollar amount
-    const buySize = tradeAmount;
-
-    // BUY YES tokens
+    // BUY
     console.log(
-      `  ${colors.cyan}Buying $${buySize} YES tokens...${colors.reset}`
+      `  ${colors.cyan}Buying $${tradeAmount} YES tokens...${colors.reset}`
     );
-    const buyRequest: PolymarketOrderRequest = {
-      tokenId: yesTokenId,
+    const buyResult = await executeMarketOrder(clobClient, {
+      tokenId: selectedTokenId,
       side: "BUY",
-      size: buySize,
-    };
-
-    const buyResult = await executeMarketOrder(clobClient, buyRequest);
+      size: tradeAmount,
+    });
 
     if (!buyResult.success) {
       return {
@@ -307,76 +598,117 @@ async function runTrade(
         success: false,
         duration: Date.now() - startTime,
         error: `Buy failed: ${buyResult.error}`,
-        data: { market: marketTitle },
       };
     }
 
     console.log(
-      `  ${colors.green}✓${
-        colors.reset
-      } Buy successful: ${buyResult.filledSize.toFixed(
+      `  ${colors.green}✓${colors.reset} Buy: ${buyResult.filledSize.toFixed(
         2
       )} tokens @ $${buyResult.avgPrice.toFixed(4)}`
     );
 
-    // Wait a moment before selling
-    await new Promise((r) => setTimeout(r, 2000));
-
-    // SELL the tokens we just bought
+    // Wait for tokens to settle on-chain before selling
+    // Polymarket needs time to register the tokens in the account
     console.log(
-      `  ${colors.cyan}Selling ${buyResult.filledSize.toFixed(
-        2
-      )} YES tokens...${colors.reset}`
+      `  ${colors.gray}Waiting for token settlement...${colors.reset}`
     );
-    const sellRequest: PolymarketOrderRequest = {
-      tokenId: yesTokenId,
-      side: "SELL",
-      size: buyResult.filledSize,
-    };
 
-    const sellResult = await executeMarketOrder(clobClient, sellRequest);
+    // Poll for position to appear (max 30 seconds)
+    let actualPosition = 0;
+    const maxWaitMs = 30000;
+    const pollIntervalMs = 3000;
+    const startWait = Date.now();
+
+    while (Date.now() - startWait < maxWaitMs) {
+      await new Promise((r) => setTimeout(r, pollIntervalMs));
+
+      // Check positions API for the token
+      const positions = await getPositions(evmPublicKey, {
+        sizeThreshold: 0.01,
+      });
+      const pos = positions.find((p) => p.asset === selectedTokenId);
+
+      if (pos && pos.size >= buyResult.filledSize * 0.95) {
+        // Found position with at least 95% of expected size
+        actualPosition = pos.size;
+        console.log(
+          `  ${colors.green}✓${
+            colors.reset
+          } Position confirmed: ${actualPosition.toFixed(2)} tokens`
+        );
+        break;
+      }
+
+      console.log(
+        `  ${colors.gray}...still waiting (${Math.floor(
+          (Date.now() - startWait) / 1000
+        )}s)${colors.reset}`
+      );
+    }
+
+    if (actualPosition < 1) {
+      console.log(
+        `  ${colors.yellow}⚠ Position not confirmed, attempting sell anyway${colors.reset}`
+      );
+      actualPosition = buyResult.filledSize;
+    }
+
+    // Round down to avoid "not enough balance" errors
+    const sellSize = Math.floor(actualPosition);
+
+    if (sellSize < 1) {
+      console.log(
+        `  ${
+          colors.yellow
+        }⚠ Position too small to sell (${actualPosition.toFixed(2)} tokens)${
+          colors.reset
+        }`
+      );
+      return {
+        step: "Trade on Polymarket",
+        success: true, // Buy succeeded
+        duration: Date.now() - startTime,
+        data: {
+          market: marketTitle,
+          buy_filled: buyResult.filledSize,
+          sell_skipped: "Position too small",
+        },
+      };
+    }
+
+    console.log(`  ${colors.cyan}Selling ${sellSize} tokens...${colors.reset}`);
+    const sellResult = await executeMarketOrder(clobClient, {
+      tokenId: selectedTokenId,
+      side: "SELL",
+      size: sellSize,
+    });
 
     if (!sellResult.success) {
-      console.warn(
-        `  ${colors.yellow}⚠ Sell failed: ${sellResult.error}${colors.reset}`
-      );
-      console.log(`  You still hold ${buyResult.filledSize.toFixed(2)} tokens`);
       return {
         step: "Trade on Polymarket",
         success: false,
         duration: Date.now() - startTime,
         error: `Sell failed: ${sellResult.error}`,
-        data: {
-          market: marketTitle,
-          buy_filled: buyResult.filledSize,
-          buy_price: buyResult.avgPrice,
-        },
+        data: { buy_filled: buyResult.filledSize },
       };
     }
 
     console.log(
-      `  ${colors.green}✓${
-        colors.reset
-      } Sell successful: ${sellResult.filledSize.toFixed(
+      `  ${colors.green}✓${colors.reset} Sell: ${sellResult.filledSize.toFixed(
         2
       )} tokens @ $${sellResult.avgPrice.toFixed(4)}`
     );
 
-    // Calculate P&L
     const buyCost = buyResult.filledSize * buyResult.avgPrice;
     const sellProceeds = sellResult.filledSize * sellResult.avgPrice;
     const pnl = sellProceeds - buyCost;
 
     console.log();
-    console.log(`  Buy cost:     $${buyCost.toFixed(4)}`);
-    console.log(`  Sell proceeds: $${sellProceeds.toFixed(4)}`);
     console.log(
-      `  P&L:          ${pnl >= 0 ? colors.green : colors.red}$${pnl.toFixed(
-        4
-      )}${colors.reset}`
+      `  P&L: ${pnl >= 0 ? colors.green : colors.red}$${pnl.toFixed(4)}${
+        colors.reset
+      }`
     );
-    console.log(`  Duration: ${formatDuration(Date.now() - startTime)}`);
-    console.log();
 
     return {
       step: "Trade on Polymarket",
@@ -384,17 +716,13 @@ async function runTrade(
       duration: Date.now() - startTime,
       data: {
         market: marketTitle,
-        buy_order_id: buyResult.orderId,
         buy_filled: buyResult.filledSize,
-        buy_price: buyResult.avgPrice,
-        sell_order_id: sellResult.orderId,
         sell_filled: sellResult.filledSize,
-        sell_price: sellResult.avgPrice,
         pnl,
       },
     };
   } catch (error) {
-    console.error(`  ${colors.red}✗ Trade error:${colors.reset}`, error);
+    console.error(`  ${colors.red}✗ Error:${colors.reset}`, error);
     return {
       step: "Trade on Polymarket",
       success: false,
@@ -405,106 +733,12 @@ async function runTrade(
 }
 
 // ============================================================================
-// Step 3: Withdraw (Polygon → Solana) - REMOVED
-// Use scripts/checkBridge.ts for bridging instead
-// ============================================================================
-
-// ============================================================================
-// Full Test (Deposit + Trade)
-// ============================================================================
-
-async function runFullTest(amount: number): Promise<void> {
-  console.log("═".repeat(60));
-  console.log("  🎰 Polymarket Tool Checker - Full Test");
-  console.log("═".repeat(60));
-  console.log();
-  console.log(
-    `  ${colors.yellow}⚠ WARNING: This script moves REAL MONEY!${colors.reset}`
-  );
-  console.log(`  ${colors.cyan}Amount: $${amount}${colors.reset}`);
-  console.log();
-
-  const { svmSigner, svmPublicKey, evmPublicKey, sponsorSigner } =
-    await setupWallets();
-
-  const results: StepResult[] = [];
-
-  // Check initial balances
-  console.log("═".repeat(60));
-  console.log("  Step 0: Check Initial Balances");
-  console.log("═".repeat(60));
-
-  const initialSolanaBalance = await getSolanaBalance(svmPublicKey);
-  const initialPolygonBalance = await getPolygonBalance(evmPublicKey);
-
-  console.log(`  Solana USDC:  $${initialSolanaBalance.toFixed(2)}`);
-  console.log(`  Polygon USDC: $${initialPolygonBalance.toFixed(2)}`);
-  console.log();
-
-  if (initialSolanaBalance < amount) {
-    console.error(
-      `${
-        colors.red
-      }✗ Insufficient Solana balance. Have: $${initialSolanaBalance.toFixed(
-        2
-      )}, Need: $${amount}${colors.reset}`
-    );
-    process.exit(1);
-  }
-
-  // Step 1: Deposit
-  const depositResult = await runDeposit(
-    amount,
-    svmSigner,
-    evmPublicKey,
-    sponsorSigner
-  );
-  results.push(depositResult);
-
-  if (!depositResult.success) {
-    printSummary(results);
-    process.exit(1);
-  }
-
-  // Step 2: Trade (buy $5, sell immediately)
-  const tradeResult = await runTrade(5, process.env.WALLET_GPT_EVM_PRIVATE!);
-  results.push(tradeResult);
-
-  // Final balances
-  console.log("═".repeat(60));
-  console.log("  Final Balances");
-  console.log("═".repeat(60));
-
-  const finalSolanaBalance = await getSolanaBalance(svmPublicKey);
-  const finalPolygonBalance = await getPolygonBalance(evmPublicKey);
-
-  console.log(`  Final Solana USDC:  $${finalSolanaBalance.toFixed(2)}`);
-  console.log(`  Final Polygon USDC: $${finalPolygonBalance.toFixed(2)}`);
-  console.log();
-  console.log(
-    `  ${colors.cyan}TIP: Use 'bun scripts/checkBridge.ts --to-solana' to bridge back${colors.reset}`
-  );
-  console.log();
-
-  printSummary(results);
-}
-
-// ============================================================================
 // Wallet Setup
 // ============================================================================
 
-async function setupWallets() {
-  const svmPrivateKey = process.env.WALLET_GPT_SVM_PRIVATE;
-  const svmPublicKey = process.env.WALLET_GPT_SVM_PUBLIC;
+function setupWallet() {
   const evmPrivateKey = process.env.WALLET_GPT_EVM_PRIVATE;
   const evmPublicKey = process.env.WALLET_GPT_EVM_PUBLIC;
-
-  if (!svmPrivateKey || !svmPublicKey) {
-    console.error(
-      `${colors.red}✗ Missing WALLET_GPT_SVM_PRIVATE or WALLET_GPT_SVM_PUBLIC${colors.reset}`
-    );
-    process.exit(1);
-  }
 
   if (!evmPrivateKey || !evmPublicKey) {
     console.error(
@@ -513,33 +747,12 @@ async function setupWallets() {
     process.exit(1);
   }
 
-  console.log(`  Solana wallet: ${svmPublicKey.slice(0, 8)}...`);
   console.log(`  Polygon wallet: ${evmPublicKey.slice(0, 10)}...`);
-
-  const sponsorSigner = await getSponsorSigner();
-  if (sponsorSigner) {
-    console.log(
-      `  ${colors.green}✓${
-        colors.reset
-      } Gas sponsor: ${sponsorSigner.address.slice(0, 8)}...`
-    );
-  } else {
-    console.log(
-      `  ${colors.yellow}○${colors.reset} No gas sponsor (agent pays own fees)`
-    );
-  }
   console.log();
 
-  const svmSigner = await createSignerFromBase58SecretKey(svmPrivateKey);
-  const evmWallet = createPolygonWallet(evmPrivateKey);
-
   return {
-    svmSigner,
-    evmWallet,
-    svmPublicKey,
-    evmPublicKey,
     evmPrivateKey,
-    sponsorSigner,
+    evmPublicKey,
   };
 }
 
@@ -588,31 +801,29 @@ const args = process.argv.slice(2);
 
 if (args.includes("--help") || args.includes("-h")) {
   console.log(`
-Polymarket Tool Checker
+Polymarket Trade Checker
 
-Tests Polymarket trading on Polygon:
-
-Modes:
-  --deposit   Bridge USDC from Solana to Polygon (Polymarket bridge)
-  --trade     Buy and sell on Polymarket (requires Polygon balance)
-  (no flag)   Run all steps: deposit → trade
-
-For bridging back to Solana, use: bun scripts/checkBridge.ts --to-solana
+Tests Polymarket trading on Polygon.
 
 Usage:
-  bun scripts/checkPolymarket.ts [--deposit|--trade] [amount]
+  bun scripts/checkPolymarket.ts buy [amount]   Buy tokens on Polymarket
+  bun scripts/checkPolymarket.ts sell           Sell existing positions
+  bun scripts/checkPolymarket.ts [amount]       Buy & sell roundtrip (legacy)
+
+Commands:
+  buy     Find a market and buy YES tokens
+  sell    Fetch existing positions and sell one
 
 Arguments:
-  amount    Amount in USD (default: 10 for deposit, 5 for trade)
+  amount    Amount in USD to trade (default: 5)
 
 Examples:
-  bun scripts/checkPolymarket.ts                # Full test: deposit $10, trade $5
-  bun scripts/checkPolymarket.ts --deposit 20   # Deposit $20 to Polygon
-  bun scripts/checkPolymarket.ts --trade 5      # Buy & sell $5 on Polymarket  
+  bun scripts/checkPolymarket.ts buy        # Buy $5 worth of tokens
+  bun scripts/checkPolymarket.ts buy 10     # Buy $10 worth
+  bun scripts/checkPolymarket.ts sell       # Sell an existing position
+  bun scripts/checkPolymarket.ts            # Buy & sell roundtrip
 
 Environment variables required:
-  WALLET_GPT_SVM_PRIVATE   Solana wallet private key (base58)
-  WALLET_GPT_SVM_PUBLIC    Solana wallet public key
   WALLET_GPT_EVM_PRIVATE   Polygon wallet private key (hex)
   WALLET_GPT_EVM_PUBLIC    Polygon wallet address
 
@@ -621,49 +832,74 @@ Environment variables required:
   process.exit(0);
 }
 
-// Parse mode and amount
-const isDeposit = args.includes("--deposit");
-const isTrade = args.includes("--trade");
-const isFullTest = !isDeposit && !isTrade;
+// Parse command
+const command = args[0];
+const isBuy = command === "buy";
+const isSell = command === "sell";
+const isRoundtrip = !isBuy && !isSell;
 
-// Get amount from non-flag args
-const amountArg = args.find((a) => !a.startsWith("--"));
-const defaultAmount = isTrade ? 5 : 10;
-const amount = Math.max(1, parseInt(amountArg || String(defaultAmount), 10));
+// Get amount (skip command if present)
+const amountArg = isBuy || isSell ? args[1] : args[0];
+const amount = Math.max(1, parseInt(amountArg || "5", 10));
 
 async function main() {
-  if (isFullTest) {
-    await runFullTest(amount);
+  console.log("═".repeat(60));
+  console.log("  🎰 Polymarket Trade Checker");
+  console.log("═".repeat(60));
+  console.log();
+  console.log(
+    `  ${colors.yellow}⚠ WARNING: This script moves REAL MONEY!${colors.reset}`
+  );
+  if (isBuy) {
+    console.log(`  ${colors.cyan}Mode: BUY $${amount}${colors.reset}`);
+  } else if (isSell) {
+    console.log(`  ${colors.cyan}Mode: SELL existing positions${colors.reset}`);
   } else {
-    const {
-      svmSigner,
-      svmPublicKey,
-      evmPublicKey,
-      evmPrivateKey,
-      sponsorSigner,
-    } = await setupWallets();
+    console.log(
+      `  ${colors.cyan}Mode: ROUNDTRIP (buy $${amount} then sell)${colors.reset}`
+    );
+  }
+  console.log();
 
-    const results: StepResult[] = [];
+  const { evmPrivateKey, evmPublicKey } = setupWallet();
 
-    if (isDeposit) {
-      const result = await runDeposit(
-        amount,
-        svmSigner,
-        evmPublicKey,
-        sponsorSigner
+  // Check balance
+  const balance = await getPolygonBalance(evmPublicKey);
+  console.log(`  Polygon USDC balance: $${balance.toFixed(2)}`);
+  console.log();
+
+  // Run appropriate mode
+  let result: StepResult;
+
+  if (isSell) {
+    result = await runSell(evmPrivateKey, evmPublicKey);
+  } else if (isBuy) {
+    if (balance < amount) {
+      console.error(
+        `${colors.red}✗ Insufficient balance. Have: $${balance.toFixed(
+          2
+        )}, Need: $${amount}${colors.reset}`
       );
-      results.push(result);
+      process.exit(1);
     }
-
-    if (isTrade) {
-      const result = await runTrade(amount, evmPrivateKey);
-      results.push(result);
+    result = await runBuy(amount, evmPrivateKey);
+  } else {
+    // Roundtrip
+    if (balance < amount) {
+      console.error(
+        `${colors.red}✗ Insufficient balance. Have: $${balance.toFixed(
+          2
+        )}, Need: $${amount}${colors.reset}`
+      );
+      process.exit(1);
     }
+    result = await runRoundtrip(amount, evmPrivateKey, evmPublicKey);
+  }
 
-    printSummary(results);
+  printSummary([result]);
 
-    const failed = results.filter((r) => !r.success).length;
-    if (failed > 0) process.exit(1);
+  if (!result.success) {
+    process.exit(1);
   }
 }
 

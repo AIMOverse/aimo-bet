@@ -20,7 +20,7 @@ import {
 } from "@/lib/prediction-market/kalshi/dflow/resolveMints";
 
 // Polymarket imports
-import { createClobClient } from "@/lib/prediction-market/polymarket/clob";
+import { createTradingClient } from "@/lib/prediction-market/polymarket/clob";
 import { executeMarketOrder } from "@/lib/prediction-market/polymarket/trade";
 
 import type { PlaceOrderResult, Outcome, OrderSide } from "./types";
@@ -185,19 +185,79 @@ async function executePolymarketMarketOrder(params: {
   const logPrefix = "[placeMarketOrder:polymarket]";
 
   try {
-    // Create CLOB client
-    const client = await createClobClient(wallet);
+    // Create trading client with auto-allowance
+    // This ensures USDC + CTF are approved for Polymarket contracts before trading
+    const { client, allowanceApproved } = await createTradingClient(wallet);
+
+    if (allowanceApproved) {
+      console.log(`${logPrefix} Auto-approved allowances for trading`);
+    }
+
+    // For SELL orders, check orderbook liquidity first
+    // FOK orders will fail if there's not enough liquidity
+    let adjustedQuantity = quantity;
+
+    if (side === "sell") {
+      try {
+        const orderbook = await client.getOrderBook(tokenId);
+        const bids = orderbook?.bids || [];
+        let availableLiquidity = 0;
+
+        for (const bid of bids) {
+          availableLiquidity += parseFloat(bid.size);
+        }
+
+        // Use 80% of available liquidity to account for slippage
+        const maxSellable = availableLiquidity * 0.8;
+
+        if (quantity > maxSellable) {
+          console.log(
+            `${logPrefix} Reducing sell size: ${quantity} → ${Math.floor(
+              maxSellable
+            )} (liquidity: ${availableLiquidity.toFixed(2)})`
+          );
+          adjustedQuantity = Math.floor(maxSellable);
+
+          if (adjustedQuantity < 1) {
+            return {
+              success: false,
+              order_id: "",
+              exchange: "polymarket",
+              status: "failed",
+              filled_quantity: 0,
+              avg_price: 0,
+              total_cost: 0,
+              error: `Insufficient liquidity. Only ${availableLiquidity.toFixed(
+                2
+              )} tokens available in orderbook.`,
+            };
+          }
+        }
+      } catch (orderbookError) {
+        console.warn(
+          `${logPrefix} Could not check orderbook, proceeding with original quantity`
+        );
+      }
+    }
+
+    // Round quantity to avoid precision issues with FOK orders
+    // FOK requires exact amounts; decimals can cause "not enough balance"
+    const roundedQuantity =
+      side === "sell"
+        ? Math.floor(adjustedQuantity) // Sell: round down to avoid over-selling
+        : Math.ceil(adjustedQuantity); // Buy: round up for minimum purchase
 
     console.log(`${logPrefix} Executing:`, {
       tokenId: tokenId.slice(0, 16) + "...",
       side,
-      quantity,
+      originalQuantity: quantity,
+      roundedQuantity,
     });
 
     const result = await executeMarketOrder(client, {
       tokenId,
       side: side === "buy" ? "BUY" : "SELL",
-      size: quantity,
+      size: roundedQuantity,
     });
 
     if (!result.success) {
@@ -230,6 +290,15 @@ async function executePolymarketMarketOrder(params: {
     };
   } catch (error) {
     console.error(`${logPrefix} Error:`, error);
+
+    // Provide helpful error message for common issues
+    const errorMsg = error instanceof Error ? error.message : "Unknown error";
+    let userError = errorMsg;
+
+    if (errorMsg.includes("allowance") || errorMsg.includes("POL")) {
+      userError = `${errorMsg}. Ensure the wallet has POL (MATIC) for gas fees.`;
+    }
+
     return {
       success: false,
       order_id: "",
@@ -238,7 +307,7 @@ async function executePolymarketMarketOrder(params: {
       filled_quantity: 0,
       avg_price: 0,
       total_cost: 0,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: userError,
     };
   }
 }

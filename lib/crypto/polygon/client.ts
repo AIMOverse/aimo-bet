@@ -58,6 +58,8 @@ export function getWalletClient(account: Account): WalletClient {
  */
 export interface PolygonWallet {
   address: string;
+  /** Get address (ethers v5 compat) - used by Polymarket CLOB */
+  getAddress: () => Promise<string>;
   /** Sign typed data (EIP-712) - used by Polymarket CLOB */
   signTypedData: (
     domain: object,
@@ -112,6 +114,7 @@ export function createPolygonWallet(privateKeyHex: string): PolygonWallet {
 
   return {
     address: account.address,
+    getAddress: async () => account.address, // ethers v5 compat
     signTypedData,
     _signTypedData: signTypedData, // ethers v5 compat alias
     _viemAccount: account,

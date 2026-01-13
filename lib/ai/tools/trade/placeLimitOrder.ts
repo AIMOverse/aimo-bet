@@ -1,6 +1,6 @@
 // ============================================================================
 // Place Limit Order Tool
-// Limit order execution on Polymarket
+// Limit order execution on Polymarket with auto-allowance
 // ============================================================================
 
 import { tool } from "ai";
@@ -8,7 +8,7 @@ import { z } from "zod";
 import { type PolygonWallet } from "@/lib/crypto/polygon/client";
 
 // Polymarket imports
-import { createClobClient } from "@/lib/prediction-market/polymarket/clob";
+import { createTradingClient } from "@/lib/prediction-market/polymarket/clob";
 import { executeLimitOrder } from "@/lib/prediction-market/polymarket/trade";
 
 import type { PlaceOrderResult, OrderSide, TimeInForce } from "./types";
@@ -29,8 +29,12 @@ async function executePolymarketLimitOrder(params: {
   const logPrefix = "[placeLimitOrder:polymarket]";
 
   try {
-    // Create CLOB client
-    const client = await createClobClient(wallet);
+    // Create trading client with auto-allowance
+    const { client, allowanceApproved } = await createTradingClient(wallet);
+
+    if (allowanceApproved) {
+      console.log(`${logPrefix} Auto-approved USDC allowance for trading`);
+    }
 
     console.log(`${logPrefix} Executing:`, {
       tokenId: tokenId.slice(0, 16) + "...",
@@ -83,6 +87,15 @@ async function executePolymarketLimitOrder(params: {
     };
   } catch (error) {
     console.error(`${logPrefix} Error:`, error);
+
+    // Provide helpful error message for common issues
+    const errorMsg = error instanceof Error ? error.message : "Unknown error";
+    let userError = errorMsg;
+
+    if (errorMsg.includes("allowance") || errorMsg.includes("POL")) {
+      userError = `${errorMsg}. Ensure the wallet has POL (MATIC) for gas fees.`;
+    }
+
     return {
       success: false,
       order_id: "",
@@ -91,7 +104,7 @@ async function executePolymarketLimitOrder(params: {
       filled_quantity: 0,
       avg_price: 0,
       total_cost: 0,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: userError,
     };
   }
 }
