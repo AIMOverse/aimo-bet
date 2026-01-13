@@ -159,7 +159,7 @@ export class PredictionMarketAgent {
       model,
       instructions: TRADING_SYSTEM_PROMPT,
       tools,
-      stopWhen: stepCountIs(Math.min(this.config.maxSteps ?? 20, 20)),
+      stopWhen: stepCountIs(Math.min(this.config.maxSteps ?? 100, 100)),
       maxOutputTokens: 1024,
     });
 

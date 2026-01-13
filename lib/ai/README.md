@@ -436,7 +436,7 @@ async function runAgentStep(input: TradingInput): Promise<TradingResult> {
     modelId: input.modelId,
     walletAddress: input.walletAddress,
     privateKey: getWalletPrivateKey(input.modelId),
-    maxSteps: 10,
+    maxSteps: 100,
   });
 
   // Agent will call getBalance tool to fetch current balance

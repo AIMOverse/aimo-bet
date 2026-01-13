@@ -84,7 +84,7 @@ export type { TradingResult };
  *   → agent_sessions (update value)
  */
 export async function tradingAgentWorkflow(
-  input: TradingInput,
+  input: TradingInput
 ): Promise<TradingResult> {
   console.log(`[tradingAgent:${input.modelId}] Starting trading workflow`);
 
@@ -96,7 +96,7 @@ export async function tradingAgentWorkflow(
     const agentSession = await getAgentSessionStep(
       session.id,
       input.modelId,
-      input.walletAddress,
+      input.walletAddress
     );
 
     // Step 3: Run AI agent (durable wrapper, agent inside is NOT durable)
@@ -116,7 +116,7 @@ export async function tradingAgentWorkflow(
     await checkAndRebalanceStep(input.modelId);
 
     console.log(
-      `[tradingAgent:${input.modelId}] Completed: ${result.decision}, ${result.trades.length} trades`,
+      `[tradingAgent:${input.modelId}] Completed: ${result.decision}, ${result.trades.length} trades`
     );
 
     return result;
@@ -146,7 +146,7 @@ async function getSessionStep() {
 async function getAgentSessionStep(
   sessionId: string,
   modelId: string,
-  walletAddress: string,
+  walletAddress: string
 ): Promise<AgentSession> {
   "use step";
   const modelName = getModelName(modelId) || modelId;
@@ -154,7 +154,7 @@ async function getAgentSessionStep(
     sessionId,
     modelId,
     modelName,
-    walletAddress,
+    walletAddress
   );
 }
 
@@ -180,7 +180,7 @@ async function runAgentStep(input: TradingInput): Promise<TradingResult> {
     modelId: input.modelId,
     walletAddress: input.walletAddress,
     privateKey: getWalletPrivateKey(input.modelId),
-    maxSteps: 20,
+    maxSteps: 100,
     researchContext: input.research,
   });
 
@@ -197,7 +197,7 @@ async function runAgentStep(input: TradingInput): Promise<TradingResult> {
  */
 async function recordResultsStep(
   agentSession: AgentSession,
-  result: TradingResult,
+  result: TradingResult
 ): Promise<void> {
   "use step";
 
@@ -215,7 +215,7 @@ async function recordResultsStep(
   });
 
   console.log(
-    `[tradingAgent] Recorded decision: ${result.decision} (id: ${decision.id})`,
+    `[tradingAgent] Recorded decision: ${result.decision} (id: ${decision.id})`
   );
 
   // 2. Record trades + update positions
@@ -255,14 +255,14 @@ async function recordResultsStep(
   await updateAgentSessionValue(
     agentSession.id,
     portfolioValue,
-    portfolioValue - agentSession.startingCapital,
+    portfolioValue - agentSession.startingCapital
   );
 
   // 4. Update token usage if available
   if (result.tokenUsage?.totalTokens) {
     await incrementAgentTokens(agentSession.id, result.tokenUsage.totalTokens);
     console.log(
-      `[tradingAgent] Recorded ${result.tokenUsage.totalTokens} tokens for ${agentSession.modelName}`,
+      `[tradingAgent] Recorded ${result.tokenUsage.totalTokens} tokens for ${agentSession.modelName}`
     );
   }
 }
@@ -289,7 +289,7 @@ async function updateAllBalancesStep(session: TradingSession): Promise<void> {
 
   // Fetch USDC balance from Solana for each agent
   const fetchBalance = async (
-    walletAddress: string,
+    walletAddress: string
   ): Promise<number | null> => {
     const result = await getCurrencyBalance(walletAddress, "USDC");
     if (result === null) return null;
@@ -299,7 +299,7 @@ async function updateAllBalancesStep(session: TradingSession): Promise<void> {
   const updated = await updateAllAgentBalances(
     session.id,
     models,
-    fetchBalance,
+    fetchBalance
   );
   console.log(`[tradingAgent] Updated ${updated.length} agent balances`);
 }
@@ -335,7 +335,7 @@ async function checkAndRebalanceStep(modelId: string): Promise<void> {
     };
 
     console.log(
-      `${logPrefix} Balances: Solana=$${balances.solana}, Polygon=$${balances.polygon}`,
+      `${logPrefix} Balances: Solana=$${balances.solana}, Polygon=$${balances.polygon}`
     );
 
     // 3. Check and trigger rebalance (non-blocking)
