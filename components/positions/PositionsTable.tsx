@@ -13,7 +13,6 @@ const DEFAULT_CHART_COLOR = "#6366f1";
 
 const SERIES_LOGO_MAP: Record<string, string> = {
   openai: "openai.svg",
-  gpt: "openai.svg",
   claude: "claude-color.svg",
   gemini: "gemini-color.svg",
   deepseek: "deepseek-color.svg",
@@ -56,7 +55,9 @@ interface ModelGroup {
 }
 
 function getMockPrice(ticker: string, side: "yes" | "no"): number {
-  const hash = ticker.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const hash = ticker
+    .split("")
+    .reduce((acc, char) => acc + char.charCodeAt(0), 0);
   const basePrice = 35 + (hash % 50);
   return side === "yes" ? basePrice / 100 : (100 - basePrice) / 100;
 }
@@ -89,7 +90,12 @@ function Badge({
     >
       <span className="uppercase">{side}</span>
       {price !== undefined && (
-        <span className={cn("text-[10px] mt-0.5", isSelected ? "text-white/80" : "text-muted-foreground")}>
+        <span
+          className={cn(
+            "text-[10px] mt-0.5",
+            isSelected ? "text-white/80" : "text-muted-foreground",
+          )}
+        >
           {formatCents(price)}
         </span>
       )}
@@ -103,50 +109,10 @@ function ModelRow({ modelGroup }: { modelGroup: ModelGroup }) {
 
   return (
     <div className="p-4 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
-<<<<<<< HEAD
       <div className="flex items-center gap-2 mb-3">
         <Avatar
           className="size-5 ring-[1.5px] ring-offset-0 bg-background shrink-0"
           style={{ ["--tw-ring-color" as string]: modelGroup.modelColor }}
-=======
-      {/* Model avatar and name */}
-      {position.modelName && (
-        <div className="flex items-center gap-2 mb-2">
-          <Avatar
-            className="size-5 ring-[1.5px] ring-offset-0 bg-background shrink-0"
-            style={{ ["--tw-ring-color" as string]: chartColor }}
-          >
-            {logoPath ? (
-              <AvatarImage
-                src={logoPath}
-                alt={`${modelName} logo`}
-                className="p-0.5"
-              />
-            ) : null}
-            <AvatarFallback
-              className="text-[10px] font-semibold text-foreground"
-              style={{ backgroundColor: `${chartColor}20` }}
-            >
-              {initial}
-            </AvatarFallback>
-          </Avatar>
-          <span className="font-medium text-sm">{modelName}</span>
-        </div>
-      )}
-
-      {/* Market ticker and side badge */}
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <p className="text-sm font-medium font-mono line-clamp-2 flex-1">
-          {position.marketTicker}
-        </p>
-        <span
-          className={cn(
-            "px-2 py-0.5 rounded text-xs font-medium shrink-0",
-            isYes
-              ? "bg-blue-500/10 text-blue-500"
-              : "bg-orange-500/10 text-orange-500"
-          )}
->>>>>>> 06fafd4586d582fbbfb6b4ec26b17cd2a27e39e9
         >
           {logoPath ? (
             <AvatarImage

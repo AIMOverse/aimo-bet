@@ -17,6 +17,7 @@ export {
   getSeriesLogoPath,
   getModelSeriesMap,
   getModelsWithWallets,
+  getModelCostPerMillion,
 } from "./catalog";
 
 // Provider instances

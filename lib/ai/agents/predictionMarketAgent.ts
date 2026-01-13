@@ -122,7 +122,7 @@ export class PredictionMarketAgent {
       placeOrder: createPlaceOrderTool(
         agentSigners.svm?.address || this.config.walletAddress,
         kalshiSigner,
-        polymarketWallet
+        polymarketWallet,
       ),
       cancelOrder: createCancelOrderTool(polymarketWallet),
       withdrawToSolana: createWithdrawToSolanaTool(withdrawSigners),
@@ -132,19 +132,19 @@ export class PredictionMarketAgent {
 
     // Get the model instance with detailed error logging
     console.log(
-      `[PredictionMarketAgent:${this.config.modelId}] Getting model instance...`
+      `[PredictionMarketAgent:${this.config.modelId}] Getting model instance...`,
     );
 
     let model;
     try {
       model = await getModel(this.config.modelId);
       console.log(
-        `[PredictionMarketAgent:${this.config.modelId}] Model instance created successfully`
+        `[PredictionMarketAgent:${this.config.modelId}] Model instance created successfully`,
       );
     } catch (modelError) {
       console.error(
         `[PredictionMarketAgent:${this.config.modelId}] Failed to get model:`,
-        modelError
+        modelError,
       );
       throw modelError;
     }
@@ -165,7 +165,7 @@ export class PredictionMarketAgent {
     const prompt = this.buildPrompt();
 
     console.log(
-      `[PredictionMarketAgent:${this.config.modelId}] Starting agent run`
+      `[PredictionMarketAgent:${this.config.modelId}] Starting agent run`,
     );
 
     // Run the agent with ToolLoopAgent.generate()
@@ -193,13 +193,13 @@ export class PredictionMarketAgent {
           url: error.url,
           requestBodyValues: JSON.stringify(error.requestBodyValues, null, 2),
           // stack: error.stack,
-        }
+        },
       );
       throw agentError;
     }
 
     console.log(
-      `[PredictionMarketAgent:${this.config.modelId}] Completed with ${result.steps.length} steps`
+      `[PredictionMarketAgent:${this.config.modelId}] Completed with ${result.steps.length} steps`,
     );
 
     // Extract trades from tool call results
@@ -218,6 +218,9 @@ export class PredictionMarketAgent {
     // Extract reasoning: use result.text or gather text from steps
     const reasoning = this.extractReasoning(result.text, result.steps);
 
+    // Extract token usage from all steps
+    const tokenUsage = this.extractTokenUsage(result.steps);
+
     return {
       reasoning,
       trades,
@@ -226,6 +229,7 @@ export class PredictionMarketAgent {
       portfolioValue,
       marketTicker,
       marketTitle,
+      tokenUsage,
     };
   }
 
@@ -264,7 +268,7 @@ export class PredictionMarketAgent {
    */
   private extractReasoning(
     finalText: string | undefined,
-    steps: Array<{ text?: string }>
+    steps: Array<{ text?: string }>,
   ): string {
     // If we have final text, use it
     if (finalText && finalText.trim()) {
@@ -296,7 +300,7 @@ export class PredictionMarketAgent {
         input: unknown;
       }>;
       toolResults?: Array<{ toolCallId: string; output?: unknown }>;
-    }>
+    }>,
   ): ExecutedTrade[] {
     const trades: ExecutedTrade[] = [];
 
@@ -307,7 +311,7 @@ export class PredictionMarketAgent {
         // Handle placeOrder tool (unified across exchanges)
         if (call.toolName === "placeOrder") {
           const resultEntry = step.toolResults.find(
-            (r) => r.toolCallId === call.toolCallId
+            (r) => r.toolCallId === call.toolCallId,
           );
 
           const typedOutput = resultEntry?.output as
@@ -356,7 +360,7 @@ export class PredictionMarketAgent {
    */
   private determineDecision(
     text: string | undefined,
-    trades: ExecutedTrade[]
+    trades: ExecutedTrade[],
   ): DecisionType {
     if (trades.length > 0) {
       return trades[0].action === "buy" ? "buy" : "sell";
@@ -386,7 +390,7 @@ export class PredictionMarketAgent {
         input: unknown;
       }>;
       toolResults?: Array<{ toolCallId: string; output?: unknown }>;
-    }>
+    }>,
   ): number {
     for (const step of steps) {
       if (!step.toolCalls || !step.toolResults) continue;
@@ -394,7 +398,7 @@ export class PredictionMarketAgent {
       for (const call of step.toolCalls) {
         if (call.toolName === "getBalance") {
           const resultEntry = step.toolResults.find(
-            (r) => r.toolCallId === call.toolCallId
+            (r) => r.toolCallId === call.toolCallId,
           );
 
           const typedOutput = resultEntry?.output as
@@ -412,5 +416,29 @@ export class PredictionMarketAgent {
     }
 
     return 0;
+  }
+
+  /**
+   * Extract total token usage from all agent steps.
+   * Sums up inputTokens and outputTokens from each step's usage.
+   */
+  private extractTokenUsage(
+    steps: Array<{
+      usage?: {
+        inputTokens?: number;
+        outputTokens?: number;
+      };
+    }>,
+  ): { totalTokens: number } {
+    let totalTokens = 0;
+
+    for (const step of steps) {
+      if (step.usage) {
+        totalTokens +=
+          (step.usage.inputTokens ?? 0) + (step.usage.outputTokens ?? 0);
+      }
+    }
+
+    return { totalTokens };
   }
 }
