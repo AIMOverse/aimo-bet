@@ -1,10 +1,20 @@
 // ============================================================================
-// Trade Tools - Multi-exchange unified trading
+// Trade Tools - Multi-exchange trading
 // ============================================================================
 
 // Tools
-export { createPlaceOrderTool, placeOrderTool } from "./placeOrder";
-export { createCancelOrderTool, cancelOrderTool } from "./cancelOrder";
+export {
+  createPlaceMarketOrderTool,
+  placeMarketOrderTool,
+} from "./placeMarketOrder";
+export {
+  createPlaceLimitOrderTool,
+  placeLimitOrderTool,
+} from "./placeLimitOrder";
+export {
+  createCancelLimitOrderTool,
+  cancelLimitOrderTool,
+} from "./cancelLimitOrder";
 
 // Types
 export type {

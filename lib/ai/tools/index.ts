@@ -22,12 +22,14 @@ export type {
   RawOrderbook,
 } from "./discover";
 
-// Trade Tools - Multi-exchange unified trading
+// Trade Tools - Multi-exchange trading
 export {
-  createPlaceOrderTool,
-  placeOrderTool,
-  createCancelOrderTool,
-  cancelOrderTool,
+  createPlaceMarketOrderTool,
+  placeMarketOrderTool,
+  createPlaceLimitOrderTool,
+  placeLimitOrderTool,
+  createCancelLimitOrderTool,
+  cancelLimitOrderTool,
 } from "./trade";
 
 export type {

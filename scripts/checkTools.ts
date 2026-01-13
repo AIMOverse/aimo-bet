@@ -59,7 +59,7 @@ const colors = {
 function log(
   color: keyof typeof colors,
   prefix: string,
-  message: string
+  message: string,
 ): void {
   console.log(`${colors[color]}[${prefix}]${colors.reset} ${message}`);
 }
@@ -125,11 +125,11 @@ function checkEnvVars(): void {
 
   if (missingRequired > 0) {
     console.log(
-      `\n${colors.red}⚠ ${missingRequired} required env vars missing${colors.reset}\n`
+      `\n${colors.red}⚠ ${missingRequired} required env vars missing${colors.reset}\n`,
     );
   } else {
     console.log(
-      `\n${colors.green}✓ All required env vars present${colors.reset}\n`
+      `\n${colors.green}✓ All required env vars present${colors.reset}\n`,
     );
   }
 }
@@ -250,7 +250,7 @@ async function testDiscoverMarkets(): Promise<ToolTestResult> {
         question: market.title,
         volume_24h: market.volume,
         status: market.status,
-      }))
+      })),
     );
 
     return {
@@ -327,7 +327,7 @@ async function testExplainMarket(): Promise<ToolTestResult> {
     let orderbookStatus = "none";
     try {
       const orderbookResponse = await dflowMetadataFetch(
-        `/orderbook/${marketTicker}`
+        `/orderbook/${marketTicker}`,
       );
       if (orderbookResponse.ok) {
         const orderbook = (await orderbookResponse.json()) as {
@@ -519,7 +519,7 @@ async function testPlaceOrder(skip: boolean): Promise<ToolTestResult> {
     }
 
     // Import tool factory
-    const { createPlaceOrderTool } = await import("@/lib/ai/tools/trade");
+    const { createPlaceMarketOrderTool } = await import("@/lib/ai/tools/trade");
     const { createSignerFromBase58SecretKey } = await import(
       "@/lib/crypto/solana/wallets"
     );
@@ -527,7 +527,7 @@ async function testPlaceOrder(skip: boolean): Promise<ToolTestResult> {
     const walletAddress = process.env.WALLET_GPT_SVM_PUBLIC!;
     const signer = await createSignerFromBase58SecretKey(privateKey);
 
-    const tool = createPlaceOrderTool(walletAddress, signer, undefined);
+    const tool = createPlaceMarketOrderTool(walletAddress, signer, undefined);
 
     // NOTE: This would execute a real trade!
     // For testing, we verify the tool can be created but don't execute
@@ -698,10 +698,10 @@ async function testCancelOrder(skip: boolean): Promise<ToolTestResult> {
     }
 
     // Import tool factory
-    const { createCancelOrderTool } = await import("@/lib/ai/tools/trade");
+    const { createCancelLimitOrderTool } = await import("@/lib/ai/tools/trade");
 
     const wallet = createPolygonWallet(privateKey);
-    const tool = createCancelOrderTool(wallet);
+    const tool = createCancelLimitOrderTool(wallet);
 
     // NOTE: This would cancel a real order!
     // For testing, we verify the tool can be created but don't execute
@@ -823,7 +823,7 @@ async function runAllTests(config: TestConfig = {}): Promise<void> {
       const resultStr = JSON.stringify(
         result.result,
         (_, v) => (typeof v === "bigint" ? v.toString() : v),
-        2
+        2,
       )
         .split("\n")
         .map((line) => `    ${line}`)
@@ -848,10 +848,10 @@ async function runAllTests(config: TestConfig = {}): Promise<void> {
 
   if (failed > 0) {
     console.log(
-      `\n${colors.yellow}Note: Some failures may be expected (missing env vars, network issues).${colors.reset}`
+      `\n${colors.yellow}Note: Some failures may be expected (missing env vars, network issues).${colors.reset}`,
     );
     console.log(
-      `${colors.yellow}Re-run this script to verify network-related failures.${colors.reset}\n`
+      `${colors.yellow}Re-run this script to verify network-related failures.${colors.reset}\n`,
     );
   }
 }
@@ -882,7 +882,7 @@ Tests included:
   Polygon/Polymarket: polygonBalance, bridgeDepositAddresses, wormholeQuote
   Research:          webSearch, deepResearch*
   Trading:           placeOrder*, cancelOrder*
-  
+
   * = skipped by default (use --with-trade or --with-research to enable)
 
 By default, destructive (placeOrder, cancelOrder) and async (deepResearch) tests are skipped.

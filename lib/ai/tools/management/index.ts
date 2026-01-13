@@ -10,6 +10,9 @@ export type {
   ToolSigners,
   ChainBalance,
   GetBalanceResult,
+  Trade,
+  TradeSummary,
+  GetTradesResult,
   Position,
   PositionSummary,
   GetPositionsResult,
@@ -20,6 +23,9 @@ export { createGetBalanceTool, getBalanceTool } from "./getBalance";
 
 // Positions Tool
 export { createGetPositionsTool, getPositionsTool } from "./getPositions";
+
+// Trades Tool
+export { createGetTradesTool, getTradesTool } from "./getTrades";
 
 // Withdrawal Tool (Polygon -> Solana via Wormhole)
 export {

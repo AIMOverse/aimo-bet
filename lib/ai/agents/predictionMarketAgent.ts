@@ -26,8 +26,9 @@ import {
   discoverMarketsTool,
   explainMarketTool,
 } from "@/lib/ai/tools/discover";
-import { createPlaceOrderTool } from "@/lib/ai/tools/trade/placeOrder";
-import { createCancelOrderTool } from "@/lib/ai/tools/trade/cancelOrder";
+import { createPlaceMarketOrderTool } from "@/lib/ai/tools/trade/placeMarketOrder";
+import { createPlaceLimitOrderTool } from "@/lib/ai/tools/trade/placeLimitOrder";
+import { createCancelLimitOrderTool } from "@/lib/ai/tools/trade/cancelLimitOrder";
 
 // Analysis tools (Parallel AI)
 import { webSearchTool, deepResearchTool } from "@/lib/ai/tools/analysis";
@@ -119,12 +120,13 @@ export class PredictionMarketAgent {
       getPositions: createGetPositionsTool(signers),
       discoverMarkets: discoverMarketsTool,
       explainMarket: explainMarketTool,
-      placeOrder: createPlaceOrderTool(
+      placeMarketOrder: createPlaceMarketOrderTool(
         agentSigners.svm?.address || this.config.walletAddress,
         kalshiSigner,
         polymarketWallet,
       ),
-      cancelOrder: createCancelOrderTool(polymarketWallet),
+      placeLimitOrder: createPlaceLimitOrderTool(polymarketWallet),
+      cancelLimitOrder: createCancelLimitOrderTool(polymarketWallet),
       withdrawToSolana: createWithdrawToSolanaTool(withdrawSigners),
       webSearch: webSearchTool,
       deepResearch: deepResearchTool,
@@ -308,8 +310,11 @@ export class PredictionMarketAgent {
       if (!step.toolCalls || !step.toolResults) continue;
 
       for (const call of step.toolCalls) {
-        // Handle placeOrder tool (unified across exchanges)
-        if (call.toolName === "placeOrder") {
+        // Handle placeMarketOrder and placeLimitOrder tools
+        if (
+          call.toolName === "placeMarketOrder" ||
+          call.toolName === "placeLimitOrder"
+        ) {
           const resultEntry = step.toolResults.find(
             (r) => r.toolCallId === call.toolCallId,
           );
