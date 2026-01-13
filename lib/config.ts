@@ -94,7 +94,7 @@ export const TRADING_CONFIG = {
   lookbackMinutes: 5, // Compare to price N minutes ago
 
   // Agent execution
-  maxStepsPerAgent: 15, // Max tool calls per agent run
+  maxStepsPerAgent: 20, // Max tool calls per agent run
 
   // Risk limits (enforced in prompt, can add code checks)
   maxPositionPercent: 0.2, // Max 20% of portfolio per position
