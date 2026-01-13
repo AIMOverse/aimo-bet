@@ -1,12 +1,12 @@
 // ============================================================================
-// Place Order Tool
-// Unified order placement across Kalshi and Polymarket exchanges
+// Place Market Order Tool
+// Market order execution across Kalshi and Polymarket exchanges
 // ============================================================================
 
 import { tool } from "ai";
 import { z } from "zod";
 import { type KeyPairSigner } from "@solana/kit";
-import { type Wallet } from "ethers";
+import { type PolygonWallet } from "@/lib/crypto/polygon/client";
 
 // Kalshi imports
 import {
@@ -20,13 +20,10 @@ import {
 } from "@/lib/prediction-market/kalshi/dflow/resolveMints";
 
 // Polymarket imports
-import { createClobClient } from "@/lib/prediction-market/polymarket/clob";
-import {
-  executeMarketOrder,
-  executeLimitOrder,
-} from "@/lib/prediction-market/polymarket/trade";
+import { createTradingClient } from "@/lib/prediction-market/polymarket/clob";
+import { executeMarketOrder } from "@/lib/prediction-market/polymarket/trade";
 
-import type { PlaceOrderResult, Exchange, Outcome, OrderSide } from "./types";
+import type { PlaceOrderResult, Outcome, OrderSide } from "./types";
 
 // ============================================================================
 // Constants
@@ -37,10 +34,10 @@ const OUTCOME_DECIMALS = 6;
 const DEFAULT_SLIPPAGE_BPS = 200;
 
 // ============================================================================
-// Kalshi Trade Execution
+// Kalshi Market Order Execution
 // ============================================================================
 
-async function placeKalshiOrder(params: {
+async function executeKalshiMarketOrder(params: {
   marketTicker: string;
   side: OrderSide;
   outcome: Outcome;
@@ -58,7 +55,7 @@ async function placeKalshiOrder(params: {
     walletAddress,
     signer,
   } = params;
-  const logPrefix = "[placeOrder:kalshi]";
+  const logPrefix = "[placeMarketOrder:kalshi]";
 
   try {
     // Resolve market to mints
@@ -123,7 +120,7 @@ async function placeKalshiOrder(params: {
     if (!result.success) {
       return {
         success: false,
-        order_id: `kalshi:${result.signature}`,
+        order_id: result.signature ? `kalshi:${result.signature}` : "",
         exchange: "kalshi",
         status: "failed",
         filled_quantity: 0,
@@ -175,116 +172,21 @@ async function placeKalshiOrder(params: {
 }
 
 // ============================================================================
-// Polymarket Trade Execution
+// Polymarket Market Order Execution
 // ============================================================================
 
-async function placePolymarketOrder(params: {
+async function executePolymarketMarketOrder(params: {
   tokenId: string;
   side: OrderSide;
-  orderType: "market" | "limit";
   quantity: number;
-  price?: number;
-  timeInForce: "GTC" | "FOK" | "IOC";
-  wallet: Wallet;
+  wallet: PolygonWallet;
 }): Promise<PlaceOrderResult> {
-  const { tokenId, side, orderType, quantity, price, timeInForce, wallet } =
-    params;
-  const logPrefix = "[placeOrder:polymarket]";
+  const { tokenId, side, quantity, wallet } = params;
+  const logPrefix = "[placeMarketOrder:polymarket]";
 
-  try {
-    // Create CLOB client
-    const client = await createClobClient(wallet);
-
-    console.log(`${logPrefix} Executing:`, {
-      tokenId: tokenId.slice(0, 16) + "...",
-      side,
-      orderType,
-      quantity,
-      price,
-    });
-
-    // Execute based on order type
-    if (orderType === "market") {
-      const result = await executeMarketOrder(client, {
-        tokenId,
-        side: side === "buy" ? "BUY" : "SELL",
-        size: quantity,
-      });
-
-      if (!result.success) {
-        return {
-          success: false,
-          order_id: result.orderId ? `polymarket:${result.orderId}` : "",
-          exchange: "polymarket",
-          status: "failed",
-          filled_quantity: 0,
-          avg_price: 0,
-          total_cost: 0,
-          error: result.error,
-        };
-      }
-
-      return {
-        success: true,
-        order_id: `polymarket:${result.orderId}`,
-        exchange: "polymarket",
-        status: result.status === "MATCHED" ? "filled" : "partial",
-        filled_quantity: result.filledSize,
-        avg_price: result.avgPrice,
-        total_cost: result.filledSize * result.avgPrice,
-      };
-    } else {
-      // Limit order
-      if (price === undefined) {
-        return {
-          success: false,
-          order_id: "",
-          exchange: "polymarket",
-          status: "failed",
-          filled_quantity: 0,
-          avg_price: 0,
-          total_cost: 0,
-          error: "Price required for limit orders",
-        };
-      }
-
-      // Map time in force (IOC maps to FAK in Polymarket)
-      const clobTimeInForce =
-        timeInForce === "FOK" ? "FOK" : timeInForce === "IOC" ? "FAK" : "GTC";
-
-      const result = await executeLimitOrder(client, {
-        tokenId,
-        side: side === "buy" ? "BUY" : "SELL",
-        size: quantity,
-        price,
-        orderType: clobTimeInForce,
-      });
-
-      if (!result.success) {
-        return {
-          success: false,
-          order_id: result.orderId ? `polymarket:${result.orderId}` : "",
-          exchange: "polymarket",
-          status: "failed",
-          filled_quantity: 0,
-          avg_price: 0,
-          total_cost: 0,
-          error: result.error,
-        };
-      }
-
-      return {
-        success: true,
-        order_id: `polymarket:${result.orderId}`,
-        exchange: "polymarket",
-        status: result.status === "MATCHED" ? "filled" : "open",
-        filled_quantity: result.filledSize,
-        avg_price: result.avgPrice,
-        total_cost: result.filledSize * result.avgPrice,
-      };
-    }
-  } catch (error) {
-    console.error(`${logPrefix} Error:`, error);
+  // Validate tokenId - must be a valid Polymarket CLOB token ID
+  // These are large numeric strings (77 digits), not market IDs or condition IDs
+  if (!tokenId || tokenId.length < 50) {
     return {
       success: false,
       order_id: "",
@@ -293,7 +195,136 @@ async function placePolymarketOrder(params: {
       filled_quantity: 0,
       avg_price: 0,
       total_cost: 0,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: `Invalid token ID: "${
+        tokenId || "undefined"
+      }". Use explainMarket first to get the yes_token_id or no_token_id.`,
+    };
+  }
+
+  try {
+    // Create trading client with auto-allowance
+    // This ensures USDC + CTF are approved for Polymarket contracts before trading
+    const { client, allowanceApproved } = await createTradingClient(wallet);
+
+    if (allowanceApproved) {
+      console.log(`${logPrefix} Auto-approved allowances for trading`);
+    }
+
+    // For SELL orders, check orderbook liquidity first
+    // FOK orders will fail if there's not enough liquidity
+    let adjustedQuantity = quantity;
+
+    if (side === "sell") {
+      try {
+        const orderbook = await client.getOrderBook(tokenId);
+        const bids = orderbook?.bids || [];
+        let availableLiquidity = 0;
+
+        for (const bid of bids) {
+          availableLiquidity += parseFloat(bid.size);
+        }
+
+        // Use 80% of available liquidity to account for slippage
+        const maxSellable = availableLiquidity * 0.8;
+
+        if (quantity > maxSellable) {
+          console.log(
+            `${logPrefix} Reducing sell size: ${quantity} → ${Math.floor(
+              maxSellable
+            )} (liquidity: ${availableLiquidity.toFixed(2)})`
+          );
+          adjustedQuantity = Math.floor(maxSellable);
+
+          if (adjustedQuantity < 1) {
+            return {
+              success: false,
+              order_id: "",
+              exchange: "polymarket",
+              status: "failed",
+              filled_quantity: 0,
+              avg_price: 0,
+              total_cost: 0,
+              error: `Insufficient liquidity. Only ${availableLiquidity.toFixed(
+                2
+              )} tokens available in orderbook.`,
+            };
+          }
+        }
+      } catch (orderbookError) {
+        console.warn(
+          `${logPrefix} Could not check orderbook, proceeding with original quantity`
+        );
+      }
+    }
+
+    // Round quantity to avoid precision issues with FOK orders
+    // FOK requires exact amounts; decimals can cause "not enough balance"
+    const roundedQuantity =
+      side === "sell"
+        ? Math.floor(adjustedQuantity) // Sell: round down to avoid over-selling
+        : Math.ceil(adjustedQuantity); // Buy: round up for minimum purchase
+
+    console.log(`${logPrefix} Executing:`, {
+      tokenId: tokenId.slice(0, 16) + "...",
+      side,
+      originalQuantity: quantity,
+      roundedQuantity,
+    });
+
+    const result = await executeMarketOrder(client, {
+      tokenId,
+      side: side === "buy" ? "BUY" : "SELL",
+      size: roundedQuantity,
+    });
+
+    if (!result.success) {
+      return {
+        success: false,
+        order_id: result.orderId ? `polymarket:${result.orderId}` : "",
+        exchange: "polymarket",
+        status: "failed",
+        filled_quantity: 0,
+        avg_price: 0,
+        total_cost: 0,
+        error: result.error,
+      };
+    }
+
+    console.log(`${logPrefix} Success:`, {
+      orderId: result.orderId,
+      filledSize: result.filledSize,
+      avgPrice: result.avgPrice,
+    });
+
+    return {
+      success: true,
+      order_id: `polymarket:${result.orderId}`,
+      exchange: "polymarket",
+      status: result.status === "MATCHED" ? "filled" : "partial",
+      filled_quantity: result.filledSize,
+      avg_price: result.avgPrice,
+      total_cost: result.filledSize * result.avgPrice,
+    };
+  } catch (error) {
+    console.error(`${logPrefix} Error:`, error);
+
+    // Provide helpful error message for common issues
+    const errorMsg = error instanceof Error ? error.message : "Unknown error";
+    let userError = errorMsg;
+
+    if (errorMsg.includes("allowance") || errorMsg.includes("POL")) {
+      userError = `${errorMsg}. Ensure the wallet has POL (MATIC) for gas fees.`;
+    }
+
+    return {
+      success: false,
+      order_id: "",
+      exchange: "polymarket",
+      status: "failed",
+      filled_quantity: 0,
+      avg_price: 0,
+      total_cost: 0,
+      error: userError,
     };
   }
 }
@@ -303,22 +334,27 @@ async function placePolymarketOrder(params: {
 // ============================================================================
 
 /**
- * Create placeOrder tool bound to wallet signers
+ * Create placeMarketOrder tool bound to wallet signers
+ *
+ * Market orders execute immediately at the best available price.
+ * Supported on both Kalshi and Polymarket.
  *
  * @param kalshiWalletAddress - Solana wallet address for Kalshi
  * @param kalshiSigner - KeyPairSigner for Kalshi trades (optional)
  * @param polymarketWallet - ethers Wallet for Polymarket trades (optional)
  */
-export function createPlaceOrderTool(
+export function createPlaceMarketOrderTool(
   kalshiWalletAddress: string,
   kalshiSigner?: KeyPairSigner,
-  polymarketWallet?: Wallet
+  polymarketWallet?: PolygonWallet
 ) {
   return tool({
     description:
-      "Place buy or sell orders on prediction markets. " +
-      "Supports market orders on both Kalshi and Polymarket, limit orders on Polymarket only. " +
-      "Use explainMarket first to get the correct id (market_ticker for Kalshi, token_id for Polymarket).",
+      "Place a market order on prediction markets. " +
+      "Market orders execute immediately at the best available price. " +
+      "Supported on both Kalshi and Polymarket. " +
+      "Use explainMarket first to get the correct id (market_ticker for Kalshi, token_id for Polymarket). " +
+      "Note: Market orders cannot be cancelled after execution.",
     inputSchema: z.object({
       exchange: z.enum(["kalshi", "polymarket"]).describe("Target exchange"),
       id: z
@@ -328,83 +364,35 @@ export function createPlaceOrderTool(
         ),
       side: z.enum(["buy", "sell"]).describe("Trade direction"),
       outcome: z.enum(["yes", "no"]).describe("Outcome to trade"),
-      order_type: z
-        .enum(["market", "limit"])
-        .describe("Order type. Limit orders only supported on Polymarket"),
       quantity: z
         .number()
         .min(1)
         .describe("Number of outcome tokens to trade (must be >= 1)"),
-      price: z
-        .number()
-        .min(0)
-        .max(1)
-        .optional()
-        .describe("Price per token (0-1). Required for limit orders"),
       slippage_bps: z
         .number()
         .min(0)
         .max(1000)
         .optional()
         .default(DEFAULT_SLIPPAGE_BPS)
-        .describe(
-          "Slippage tolerance in basis points for market orders (default: 200)"
-        ),
-      time_in_force: z
-        .enum(["GTC", "FOK", "IOC"])
-        .optional()
-        .default("GTC")
-        .describe("Time in force for limit orders (default: GTC)"),
+        .describe("Slippage tolerance in basis points (default: 200 = 2%)"),
     }),
     execute: async ({
       exchange,
       id,
       side,
       outcome,
-      order_type,
       quantity,
-      price,
       slippage_bps = DEFAULT_SLIPPAGE_BPS,
-      time_in_force = "GTC",
     }): Promise<PlaceOrderResult> => {
-      console.log("[placeOrder] Executing:", {
+      console.log("[placeMarketOrder] Executing:", {
         exchange,
         id,
         side,
         outcome,
-        order_type,
         quantity,
-        price,
+        slippage_bps,
       });
 
-      // Validate exchange-specific constraints
-      if (exchange === "kalshi" && order_type === "limit") {
-        return {
-          success: false,
-          order_id: "",
-          exchange: "kalshi",
-          status: "failed",
-          filled_quantity: 0,
-          avg_price: 0,
-          total_cost: 0,
-          error: "Kalshi only supports market orders. Use order_type: 'market'",
-        };
-      }
-
-      if (order_type === "limit" && price === undefined) {
-        return {
-          success: false,
-          order_id: "",
-          exchange,
-          status: "failed",
-          filled_quantity: 0,
-          avg_price: 0,
-          total_cost: 0,
-          error: "Price is required for limit orders",
-        };
-      }
-
-      // Route to exchange-specific handler
       if (exchange === "kalshi") {
         if (!kalshiSigner) {
           return {
@@ -419,7 +407,7 @@ export function createPlaceOrderTool(
           };
         }
 
-        return placeKalshiOrder({
+        return executeKalshiMarketOrder({
           marketTicker: id,
           side,
           outcome,
@@ -443,13 +431,10 @@ export function createPlaceOrderTool(
           };
         }
 
-        return placePolymarketOrder({
+        return executePolymarketMarketOrder({
           tokenId: id,
           side,
-          orderType: order_type,
           quantity,
-          price,
-          timeInForce: time_in_force,
           wallet: polymarketWallet,
         });
       }
@@ -461,4 +446,4 @@ export function createPlaceOrderTool(
 // Export
 // ============================================================================
 
-export const placeOrderTool = createPlaceOrderTool;
+export const placeMarketOrderTool = createPlaceMarketOrderTool;

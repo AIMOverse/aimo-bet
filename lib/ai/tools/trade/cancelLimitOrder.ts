@@ -1,14 +1,14 @@
 // ============================================================================
-// Cancel Order Tool
-// Cancel open orders (Polymarket only)
+// Cancel Limit Order Tool
+// Cancel open limit orders on Polymarket
 // ============================================================================
 
 import { tool } from "ai";
 import { z } from "zod";
-import { type Wallet } from "ethers";
+import { type PolygonWallet } from "@/lib/crypto/polygon/client";
 
 import { createClobClient } from "@/lib/prediction-market/polymarket/clob";
-import { cancelOrder as cancelPolymarketOrder } from "@/lib/prediction-market/polymarket/trade";
+import { cancelOrder } from "@/lib/prediction-market/polymarket/trade";
 
 import type { CancelOrderResult, Exchange } from "./types";
 
@@ -23,7 +23,7 @@ import type { CancelOrderResult, Exchange } from "./types";
  * @returns Parsed exchange and order ID, or null if invalid format
  */
 function parseOrderId(
-  prefixedOrderId: string,
+  prefixedOrderId: string
 ): { exchange: Exchange; orderId: string } | null {
   if (prefixedOrderId.startsWith("kalshi:")) {
     return { exchange: "kalshi", orderId: prefixedOrderId.slice(7) };
@@ -39,25 +39,30 @@ function parseOrderId(
 // ============================================================================
 
 /**
- * Create cancelOrder tool bound to Polymarket wallet
+ * Create cancelLimitOrder tool bound to Polymarket wallet
  *
- * @param polymarketWallet - ethers Wallet for Polymarket trades (optional)
+ * Only Polymarket limit orders can be cancelled. Kalshi orders execute
+ * immediately and cannot be cancelled.
+ *
+ * @param polymarketWallet - Polygon wallet for Polymarket trades (optional)
  */
-export function createCancelOrderTool(polymarketWallet?: Wallet) {
+export function createCancelLimitOrderTool(polymarketWallet?: PolygonWallet) {
   return tool({
     description:
-      "Cancel an open order. Only Polymarket orders can be cancelled. " +
-      "Kalshi orders are executed immediately and cannot be cancelled. " +
-      "Use the order_id returned from placeOrder.",
+      "Cancel an open limit order on Polymarket. " +
+      "Only unfilled or partially filled limit orders can be cancelled. " +
+      "Kalshi orders execute immediately and cannot be cancelled. " +
+      "Use the order_id returned from placeLimitOrder.",
     inputSchema: z.object({
       order_id: z
         .string()
         .describe(
-          "Prefixed order ID from placeOrder (e.g., 'polymarket:abc123')",
+          "Prefixed order ID from placeLimitOrder (e.g., 'polymarket:abc123')"
         ),
     }),
     execute: async ({ order_id }): Promise<CancelOrderResult> => {
-      console.log("[cancelOrder] Executing:", { order_id });
+      const logPrefix = "[cancelLimitOrder]";
+      console.log(`${logPrefix} Executing:`, { order_id });
 
       // Parse order ID
       const parsed = parseOrderId(order_id);
@@ -68,7 +73,7 @@ export function createCancelOrderTool(polymarketWallet?: Wallet) {
           order_id,
           exchange: "polymarket",
           error:
-            "Invalid order_id format. Expected 'kalshi:{id}' or 'polymarket:{id}'",
+            "Invalid order_id format. Expected 'polymarket:{id}' (e.g., 'polymarket:abc123')",
         };
       }
 
@@ -81,7 +86,8 @@ export function createCancelOrderTool(polymarketWallet?: Wallet) {
           order_id,
           exchange: "kalshi",
           error:
-            "Kalshi does not support order cancellation. Orders are executed immediately.",
+            "Kalshi orders execute immediately as market orders and cannot be cancelled. " +
+            "Only Polymarket limit orders support cancellation.",
         };
       }
 
@@ -97,7 +103,7 @@ export function createCancelOrderTool(polymarketWallet?: Wallet) {
 
       try {
         const client = await createClobClient(polymarketWallet);
-        const result = await cancelPolymarketOrder(client, orderId);
+        const result = await cancelOrder(client, orderId);
 
         if (!result.success) {
           return {
@@ -108,7 +114,7 @@ export function createCancelOrderTool(polymarketWallet?: Wallet) {
           };
         }
 
-        console.log("[cancelOrder] Success:", { order_id });
+        console.log(`${logPrefix} Success:`, { order_id });
 
         return {
           success: true,
@@ -116,7 +122,7 @@ export function createCancelOrderTool(polymarketWallet?: Wallet) {
           exchange: "polymarket",
         };
       } catch (error) {
-        console.error("[cancelOrder] Error:", error);
+        console.error(`${logPrefix} Error:`, error);
         return {
           success: false,
           order_id,
@@ -132,4 +138,4 @@ export function createCancelOrderTool(polymarketWallet?: Wallet) {
 // Export
 // ============================================================================
 
-export const cancelOrderTool = createCancelOrderTool;
+export const cancelLimitOrderTool = createCancelLimitOrderTool;

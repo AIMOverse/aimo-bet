@@ -67,6 +67,8 @@ interface PolymarketMarket {
   description: string | null;
   outcomes: string[];
   outcomePrices: string[];
+  /** CLOB token IDs as JSON string array, e.g. '["12345...", "67890..."]' */
+  clobTokenIds?: string;
   active: boolean;
   closed: boolean;
   volume: number;
@@ -303,12 +305,22 @@ async function explainPolymarketMarket(
   const yesPrice = parseFloat(market.outcomePrices?.[0] ?? "0");
   const noPrice = parseFloat(market.outcomePrices?.[1] ?? "0");
 
-  // Token IDs are typically derived from conditionId + outcome index
-  // The outcomes array usually contains the outcome names, not token IDs
-  // For binary markets, we need the CLOB token_id from the tokens endpoint
-  // For now, we'll use conditionId as a reference
-  const yesTokenId = market.conditionId ? `${market.conditionId}:0` : "";
-  const noTokenId = market.conditionId ? `${market.conditionId}:1` : "";
+  // Parse actual CLOB token IDs from API response
+  // clobTokenIds is a JSON string array: '["yesTokenId", "noTokenId"]'
+  let yesTokenId = "";
+  let noTokenId = "";
+
+  if (market.clobTokenIds) {
+    try {
+      const tokenIds = JSON.parse(market.clobTokenIds) as string[];
+      yesTokenId = tokenIds[0] ?? "";
+      noTokenId = tokenIds[1] ?? "";
+    } catch {
+      console.warn(
+        `[explainMarket] Failed to parse clobTokenIds for market ${marketId}`
+      );
+    }
+  }
 
   // Fetch orderbook for YES token
   let orderbook: RawOrderbook | undefined;

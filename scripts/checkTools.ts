@@ -17,6 +17,14 @@ import { dflowMetadataFetch } from "@/lib/prediction-market/kalshi/dflow/client"
 import { assertResponseOk } from "@/lib/prediction-market/kalshi/dflow/utils";
 import { search } from "@/lib/parallel/client";
 
+// Polymarket/Polygon imports
+import {
+  getUsdcBalance,
+  createPolygonWallet,
+} from "@/lib/crypto/polygon/client";
+import { getDepositAddresses } from "@/lib/prediction-market/polymarket/bridge";
+import { getVaultBalances } from "@/lib/prediction-market/rebalancing/manualBridge";
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -80,6 +88,14 @@ function checkEnvVars(): void {
   const optionalVars = [
     { name: "POLYGON_RPC_URL", description: "Polygon RPC for Polymarket" },
     { name: "POLYGON_PRIVATE_KEY", description: "Polygon wallet for trading" },
+    {
+      name: "WALLET_GPT_EVM_PUBLIC",
+      description: "GPT model EVM wallet address",
+    },
+    {
+      name: "WALLET_CLAUDE_EVM_PUBLIC",
+      description: "Claude model EVM wallet address",
+    },
     { name: "PARALLEL_WEBHOOK_SECRET", description: "Webhook verification" },
   ];
 
@@ -503,7 +519,7 @@ async function testPlaceOrder(skip: boolean): Promise<ToolTestResult> {
     }
 
     // Import tool factory
-    const { createPlaceOrderTool } = await import("@/lib/ai/tools/trade");
+    const { createPlaceMarketOrderTool } = await import("@/lib/ai/tools/trade");
     const { createSignerFromBase58SecretKey } = await import(
       "@/lib/crypto/solana/wallets"
     );
@@ -511,7 +527,7 @@ async function testPlaceOrder(skip: boolean): Promise<ToolTestResult> {
     const walletAddress = process.env.WALLET_GPT_SVM_PUBLIC!;
     const signer = await createSignerFromBase58SecretKey(privateKey);
 
-    const tool = createPlaceOrderTool(walletAddress, signer, undefined);
+    const tool = createPlaceMarketOrderTool(walletAddress, signer, undefined);
 
     // NOTE: This would execute a real trade!
     // For testing, we verify the tool can be created but don't execute
@@ -524,6 +540,195 @@ async function testPlaceOrder(skip: boolean): Promise<ToolTestResult> {
         reason:
           "Tool created successfully but execution skipped (would place real order)",
         tool_created: !!tool,
+      },
+    };
+  } catch (error) {
+    return {
+      name,
+      success: false,
+      duration: Date.now() - start,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+// ============================================================================
+// Polymarket / Polygon Tool Tests
+// ============================================================================
+
+/**
+ * Test Polygon USDC.e balance check
+ * Directly calls the Polygon client
+ */
+async function testPolygonBalance(): Promise<ToolTestResult> {
+  const name = "polygonBalance";
+  const start = Date.now();
+
+  try {
+    // Get a sample EVM wallet address from env
+    const walletAddress = process.env.WALLET_GPT_EVM_PUBLIC!;
+
+    // Directly call the Polygon balance fetcher
+    const result = await getUsdcBalance(walletAddress);
+
+    if (!result) {
+      return {
+        name,
+        success: false,
+        duration: Date.now() - start,
+        error: "Failed to fetch Polygon balance",
+      };
+    }
+
+    return {
+      name,
+      success: true,
+      duration: Date.now() - start,
+      result: {
+        address: walletAddress.slice(0, 10) + "...",
+        balance_usdc: result.balance.toFixed(2),
+        decimals: result.decimals,
+      },
+    };
+  } catch (error) {
+    return {
+      name,
+      success: false,
+      duration: Date.now() - start,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Test Polymarket bridge deposit address API
+ * Gets deposit addresses for bridging to Polygon
+ */
+async function testBridgeDeposit(): Promise<ToolTestResult> {
+  const name = "bridgeDepositAddresses";
+  const start = Date.now();
+
+  try {
+    // Get a sample EVM wallet address from env
+    const walletAddress = process.env.WALLET_GPT_EVM_PUBLIC!;
+
+    // Get deposit addresses from Polymarket bridge API
+    const addresses = await getDepositAddresses(walletAddress);
+
+    return {
+      name,
+      success: true,
+      duration: Date.now() - start,
+      result: {
+        evm_deposit: addresses.evm?.slice(0, 10) + "...",
+        svm_deposit: addresses.svm?.slice(0, 10) + "...",
+        btc_deposit: addresses.btc ? addresses.btc.slice(0, 10) + "..." : null,
+      },
+    };
+  } catch (error) {
+    return {
+      name,
+      success: false,
+      duration: Date.now() - start,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Test bridge vault balances
+ * Gets current liquidity in the manual bridge vaults
+ */
+async function testBridgeVaultBalances(): Promise<ToolTestResult> {
+  const name = "bridgeVaultBalances";
+  const start = Date.now();
+
+  try {
+    const vaults = await getVaultBalances();
+
+    if (!vaults) {
+      return {
+        name,
+        success: false,
+        duration: Date.now() - start,
+        error: "Bridge vaults not configured",
+      };
+    }
+
+    return {
+      name,
+      success: true,
+      duration: Date.now() - start,
+      result: {
+        svm_vault: {
+          address: vaults.svm.address.slice(0, 8) + "...",
+          usdc: `$${vaults.svm.usdc.toFixed(2)}`,
+          sol: `${vaults.svm.sol.toFixed(4)} SOL`,
+        },
+        evm_vault: {
+          address: vaults.evm.address.slice(0, 10) + "...",
+          usdc: `$${vaults.evm.usdc.toFixed(2)}`,
+          pol: `${vaults.evm.pol.toFixed(4)} POL`,
+        },
+      },
+    };
+  } catch (error) {
+    return {
+      name,
+      success: false,
+      duration: Date.now() - start,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Test cancelOrder tool (dry run - doesn't execute real cancellation)
+ */
+async function testCancelOrder(skip: boolean): Promise<ToolTestResult> {
+  const name = "cancelOrder";
+  const start = Date.now();
+
+  if (skip) {
+    return {
+      name,
+      success: true,
+      duration: 0,
+      result: { skipped: true, reason: "Destructive tool - skipped by config" },
+    };
+  }
+
+  try {
+    // Check for EVM wallet private key
+    const privateKey = process.env.WALLET_GPT_EVM_PRIVATE;
+    if (!privateKey) {
+      return {
+        name,
+        success: false,
+        duration: Date.now() - start,
+        error:
+          "No EVM wallet private key configured (WALLET_GPT_EVM_PRIVATE). Cannot test cancelOrder without signing capability.",
+      };
+    }
+
+    // Import tool factory
+    const { createCancelLimitOrderTool } = await import("@/lib/ai/tools/trade");
+
+    const wallet = createPolygonWallet(privateKey);
+    const tool = createCancelLimitOrderTool(wallet);
+
+    // NOTE: This would cancel a real order!
+    // For testing, we verify the tool can be created but don't execute
+    return {
+      name,
+      success: true,
+      duration: Date.now() - start,
+      result: {
+        skipped: true,
+        reason:
+          "Tool created successfully but execution skipped (would cancel real order)",
+        tool_created: !!tool,
+        wallet_address: wallet.address.slice(0, 10) + "...",
       },
     };
   } catch (error) {
@@ -557,18 +762,32 @@ async function runAllTests(config: TestConfig = {}): Promise<void> {
 
   // Run tests sequentially with small delays to avoid rate limiting
   const tests = [
+    // Solana/Kalshi tools
     { name: "getBalance", fn: () => testGetBalance() },
     { name: "getPositions", fn: () => testGetPositions() },
     { name: "discoverMarkets", fn: () => testDiscoverMarkets() },
     { name: "explainMarket", fn: () => testExplainMarket() },
+
+    // Polygon/Polymarket tools
+    { name: "polygonBalance", fn: () => testPolygonBalance() },
+    { name: "bridgeDepositAddresses", fn: () => testBridgeDeposit() },
+    { name: "bridgeVaultBalances", fn: () => testBridgeVaultBalances() },
+
+    // Research tools
     { name: "webSearch", fn: () => testWebSearch() },
     {
       name: "deepResearch",
       fn: () => testDeepResearch(config.skipAsync ?? true),
     },
+
+    // Trading tools (destructive)
     {
       name: "placeOrder",
       fn: () => testPlaceOrder(config.skipDestructive ?? true),
+    },
+    {
+      name: "cancelOrder",
+      fn: () => testCancelOrder(config.skipDestructive ?? true),
     },
   ];
 
@@ -614,7 +833,12 @@ async function runAllTests(config: TestConfig = {}): Promise<void> {
 
     if (result.result) {
       console.log(`  ${colors.gray}Result:${colors.reset}`);
-      const resultStr = JSON.stringify(result.result, null, 2)
+      // Handle BigInt serialization
+      const resultStr = JSON.stringify(
+        result.result,
+        (_, v) => (typeof v === "bigint" ? v.toString() : v),
+        2
+      )
         .split("\n")
         .map((line) => `    ${line}`)
         .join("\n");
@@ -663,11 +887,21 @@ Tool Availability Checker
 Usage: bun scripts/checkTools.ts [options]
 
 Options:
-  --with-trade     Include placeOrder test (will create real order!)
+  --with-trade     Include placeOrder and cancelOrder tests (real orders!)
   --with-research  Include deepResearch test (async, costs money)
   --help           Show this help message
 
-By default, destructive (placeOrder) and async (deepResearch) tests are skipped.
+Tests included:
+  Solana/Kalshi:     getBalance, getPositions, discoverMarkets, explainMarket
+  Polygon/Polymarket: polygonBalance, bridgeDepositAddresses, bridgeVaultBalances
+  Research:          webSearch, deepResearch*
+  Trading:           placeOrder*, cancelOrder*
+
+  * = skipped by default (use --with-trade or --with-research to enable)
+
+By default, destructive (placeOrder, cancelOrder) and async (deepResearch) tests are skipped.
+
+For bridge testing, use: bun scripts/checkBridge.ts
 `);
   process.exit(0);
 }

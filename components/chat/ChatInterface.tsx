@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { useChat } from "@/hooks/chat/useChat";
 import { MODELS } from "@/lib/ai/models";
 import type { ChatMessage as ChatMessageType } from "@/lib/supabase/types";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 // Map series to logo filename
 const SERIES_LOGO_MAP: Record<string, string> = {
@@ -45,7 +47,78 @@ function formatTimeAgo(timestamp: number): string {
   return `${diffDays}d ago`;
 }
 
-// Simple message bubble - just avatar, name, time, and text
+function MarkdownContent({ children }: { children: string }) {
+  return (
+    <div className="prose prose-sm prose-slate max-w-none dark:prose-invert">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          h1: ({ ...props }) => (
+            <h1 className="text-lg font-semibold mt-4 mb-2" {...props} />
+          ),
+          h2: ({ ...props }) => (
+            <h2 className="text-base font-semibold mt-3 mb-2" {...props} />
+          ),
+          h3: ({ ...props }) => (
+            <h3 className="text-sm font-semibold mt-2 mb-1" {...props} />
+          ),
+          p: ({ ...props }) => (
+            <p className="my-2 leading-relaxed" {...props} />
+          ),
+          ul: ({ ...props }) => (
+            <ul className="my-2 ml-4 list-disc space-y-1" {...props} />
+          ),
+          ol: ({ ...props }) => (
+            <ol className="my-2 ml-4 list-decimal space-y-1" {...props} />
+          ),
+          li: ({ ...props }) => (
+            <li className="text-sm" {...props} />
+          ),
+          a: ({ ...props }) => (
+            <a className="text-blue-500 hover:underline" {...props} />
+          ),
+          strong: ({ ...props }) => (
+            <strong className="font-semibold" {...props} />
+          ),
+          em: ({ ...props }) => (
+            <em className="italic" {...props} />
+          ),
+          blockquote: ({ ...props }) => (
+            <blockquote className="border-l-2 border-muted-foreground pl-3 my-2 text-muted-foreground" {...props} />
+          ),
+          code: (props) => {
+            const inline = !props.className;
+            return inline ? (
+              <code className="px-1.5 py-0.5 rounded bg-muted text-xs font-mono" {...props} />
+            ) : (
+              <code className="block px-3 py-2 rounded bg-muted text-xs font-mono overflow-x-auto my-2" {...props} />
+            );
+          },
+          pre: ({ ...props }) => (
+            <pre className="rounded-lg bg-muted/50 p-3 overflow-x-auto my-2" {...props} />
+          ),
+          table: ({ ...props }) => (
+            <div className="my-3 overflow-x-auto">
+              <table className="min-w-full divide-y divide-border" {...props} />
+            </div>
+          ),
+          thead: ({ ...props }) => (
+            <thead className="bg-muted/30" {...props} />
+          ),
+          th: ({ ...props }) => (
+            <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider" {...props} />
+          ),
+          td: ({ ...props }) => (
+            <td className="px-3 py-2 text-sm whitespace-nowrap" {...props} />
+          ),
+        }}
+      >
+        {children}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
 function MessageBubble({
   message,
   modelInfo,
@@ -83,9 +156,7 @@ function MessageBubble({
             {formatTimeAgo(createdAt)}
           </span>
         </div>
-        <div className="text-sm leading-relaxed whitespace-pre-wrap">
-          {text}
-        </div>
+        <MarkdownContent>{text}</MarkdownContent>
       </div>
     </div>
   );

@@ -80,6 +80,13 @@ export interface ExecutedTrade {
 }
 
 /**
+ * Token usage from LLM calls
+ */
+export interface TokenUsage {
+  totalTokens: number;
+}
+
+/**
  * Result returned from PredictionMarketAgent.run()
  */
 export interface TradingResult {
@@ -91,4 +98,6 @@ export interface TradingResult {
   confidence?: number;
   marketTicker?: string;
   marketTitle?: string;
+  /** Token usage from this agent run */
+  tokenUsage?: TokenUsage;
 }

@@ -211,7 +211,7 @@ export function getArenaModel(id: string): ModelDefinition | undefined {
  * Get a specific arena model by short ID (e.g., "gpt-5.2" instead of "openai/gpt-5.2")
  */
 export function getArenaModelByShortId(
-  shortId: string
+  shortId: string,
 ): ModelDefinition | undefined {
   return MODELS.find((m) => m.id.endsWith(`/${shortId}`) || m.id === shortId);
 }
@@ -322,9 +322,19 @@ export function getWalletPrivateKey(modelId: string): string | undefined {
   if (!privateKey) {
     console.warn(
       `[Catalog] No private key found for model "${modelId}". Available keys: ${Object.keys(
-        WALLET_PRIVATE_KEY_MAP
-      ).join(", ")}`
+        WALLET_PRIVATE_KEY_MAP,
+      ).join(", ")}`,
     );
   }
   return privateKey;
+}
+
+/**
+ * Get cost per million tokens for a model (completion/output price).
+ * Uses completion pricing as it's the primary cost driver.
+ */
+export function getModelCostPerMillion(modelName: string): number {
+  const model = MODELS.find((m) => m.name === modelName);
+  if (!model) return 0;
+  return model.pricing.completion;
 }

@@ -16,20 +16,19 @@
 import { ToolLoopAgent, stepCountIs } from "ai";
 import { nanoid } from "nanoid";
 import { type KeyPairSigner } from "@solana/kit";
-import { type Wallet } from "ethers";
+import { type PolygonWallet } from "@/lib/crypto/polygon/client";
 import { getModel } from "@/lib/ai/models";
-import { createSignerFromBase58SecretKey } from "@/lib/crypto/solana/wallets";
-import { createPolygonWallet } from "@/lib/crypto/polygon/client";
 import { TRADING_SYSTEM_PROMPT } from "@/lib/ai/prompts/systemPrompt";
+import { createAgentSigners } from "@/lib/crypto/signers";
 
 // Direct tool imports
 import {
   discoverMarketsTool,
   explainMarketTool,
 } from "@/lib/ai/tools/discover";
-import { createPlaceOrderTool } from "@/lib/ai/tools/trade/placeOrder";
-// DISABLED: Polymarket tools temporarily disabled
-// import { createCancelOrderTool } from "@/lib/ai/tools/trade/cancelOrder";
+import { createPlaceMarketOrderTool } from "@/lib/ai/tools/trade/placeMarketOrder";
+import { createPlaceLimitOrderTool } from "@/lib/ai/tools/trade/placeLimitOrder";
+import { createCancelLimitOrderTool } from "@/lib/ai/tools/trade/cancelLimitOrder";
 
 // Analysis tools (Parallel AI)
 import { webSearchTool, deepResearchTool } from "@/lib/ai/tools/analysis";
@@ -38,7 +37,9 @@ import { webSearchTool, deepResearchTool } from "@/lib/ai/tools/analysis";
 import {
   createGetBalanceTool,
   createGetPositionsTool,
+  createWithdrawToSolanaTool,
   type ToolSigners,
+  type WithdrawSigners,
 } from "@/lib/ai/tools/management";
 
 import type {
@@ -74,31 +75,44 @@ export class PredictionMarketAgent {
    * - User prompt is static ("Analyze markets...")
    */
   async run(_input: AgentRunInput): Promise<TradingResult> {
-    // Create Kalshi signer from private key if available
-    let kalshiSigner: KeyPairSigner | undefined;
-    if (this.config.privateKey) {
-      kalshiSigner = await createSignerFromBase58SecretKey(
-        this.config.privateKey
-      );
-    }
+    // Create unified signers for this agent (SVM + EVM)
+    // Uses wallet registry to get per-model keys from env vars
+    const agentSigners = await createAgentSigners(this.config.modelId);
 
-    // DISABLED: Polymarket wallet creation temporarily disabled
-    // Create Polymarket wallet from environment if available
-    // let polymarketWallet: Wallet | undefined;
-    // const polygonKey =
-    //   process.env.POLYGON_PRIVATE_KEY || process.env.PRIVATE_KEY;
-    // if (polygonKey) {
-    //   try {
-    //     polymarketWallet = createPolygonWallet(polygonKey);
-    //   } catch (e) {
-    //     console.warn("[PredictionMarketAgent] Failed to create Polygon wallet");
-    //   }
-    // }
+    // Extract signers for tools
+    const kalshiSigner: KeyPairSigner | undefined =
+      agentSigners.svm?.keyPairSigner;
+    const polymarketWallet: PolygonWallet | undefined =
+      agentSigners.evm?.wallet;
 
-    // Create signers for management tools (Kalshi/SVM only for now)
+    // Log wallet availability
+    console.log(`[PredictionMarketAgent:${this.config.modelId}] Signers:`, {
+      hasSvm: !!agentSigners.svm,
+      svmAddress: agentSigners.svm?.address,
+      hasEvm: !!agentSigners.evm,
+      evmAddress: agentSigners.evm?.address,
+    });
+
+    // Create signers for management tools (multi-chain)
     const signers: ToolSigners = {
-      svm: { address: this.config.walletAddress },
-      evm: { address: "" }, // Polymarket disabled
+      svm: { address: agentSigners.svm?.address || this.config.walletAddress },
+      evm: { address: agentSigners.evm?.address || "" },
+    };
+
+    // Create withdrawal signers (needs full signer objects for bridge)
+    const withdrawSigners: WithdrawSigners = {
+      svm: agentSigners.svm
+        ? {
+            address: agentSigners.svm.address,
+            keyPairSigner: agentSigners.svm.keyPairSigner,
+          }
+        : undefined,
+      evm: agentSigners.evm
+        ? {
+            address: agentSigners.evm.address,
+            wallet: agentSigners.evm.wallet,
+          }
+        : undefined,
     };
 
     // Create tools directly with wallet context
@@ -107,13 +121,14 @@ export class PredictionMarketAgent {
       getPositions: createGetPositionsTool(signers),
       discoverMarkets: discoverMarketsTool,
       explainMarket: explainMarketTool,
-      placeOrder: createPlaceOrderTool(
-        this.config.walletAddress,
+      placeMarketOrder: createPlaceMarketOrderTool(
+        agentSigners.svm?.address || this.config.walletAddress,
         kalshiSigner,
-        undefined // polymarketWallet disabled
+        polymarketWallet
       ),
-      // DISABLED: Polymarket-only tools
-      // cancelOrder: createCancelOrderTool(polymarketWallet),
+      placeLimitOrder: createPlaceLimitOrderTool(polymarketWallet),
+      cancelLimitOrder: createCancelLimitOrderTool(polymarketWallet),
+      withdrawToSolana: createWithdrawToSolanaTool(withdrawSigners),
       webSearch: webSearchTool,
       deepResearch: deepResearchTool,
     };
@@ -144,7 +159,7 @@ export class PredictionMarketAgent {
       model,
       instructions: TRADING_SYSTEM_PROMPT,
       tools,
-      stopWhen: stepCountIs(Math.min(this.config.maxSteps ?? 20, 20)),
+      stopWhen: stepCountIs(Math.min(this.config.maxSteps ?? 100, 100)),
       maxOutputTokens: 1024,
     });
 
@@ -206,6 +221,9 @@ export class PredictionMarketAgent {
     // Extract reasoning: use result.text or gather text from steps
     const reasoning = this.extractReasoning(result.text, result.steps);
 
+    // Extract token usage from all steps
+    const tokenUsage = this.extractTokenUsage(result.steps);
+
     return {
       reasoning,
       trades,
@@ -214,6 +232,7 @@ export class PredictionMarketAgent {
       portfolioValue,
       marketTicker,
       marketTitle,
+      tokenUsage,
     };
   }
 
@@ -292,8 +311,11 @@ export class PredictionMarketAgent {
       if (!step.toolCalls || !step.toolResults) continue;
 
       for (const call of step.toolCalls) {
-        // Handle placeOrder tool (unified across exchanges)
-        if (call.toolName === "placeOrder") {
+        // Handle placeMarketOrder and placeLimitOrder tools
+        if (
+          call.toolName === "placeMarketOrder" ||
+          call.toolName === "placeLimitOrder"
+        ) {
           const resultEntry = step.toolResults.find(
             (r) => r.toolCallId === call.toolCallId
           );
@@ -400,5 +422,29 @@ export class PredictionMarketAgent {
     }
 
     return 0;
+  }
+
+  /**
+   * Extract total token usage from all agent steps.
+   * Sums up inputTokens and outputTokens from each step's usage.
+   */
+  private extractTokenUsage(
+    steps: Array<{
+      usage?: {
+        inputTokens?: number;
+        outputTokens?: number;
+      };
+    }>
+  ): { totalTokens: number } {
+    let totalTokens = 0;
+
+    for (const step of steps) {
+      if (step.usage) {
+        totalTokens +=
+          (step.usage.inputTokens ?? 0) + (step.usage.outputTokens ?? 0);
+      }
+    }
+
+    return { totalTokens };
   }
 }

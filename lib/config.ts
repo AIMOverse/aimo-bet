@@ -28,6 +28,18 @@ export const POLYGON_USDC_ADDRESS =
   "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
 
 // =============================================================================
+// Bridge Vault Configuration
+// =============================================================================
+
+/** Bridge vault SVM (Solana) private key - base58 encoded */
+export const BRIDGE_VAULT_SVM_PRIVATE_KEY =
+  process.env.BRIDGE_VAULT_SVM_PRIVATE_KEY;
+
+/** Bridge vault EVM (Polygon) private key - hex encoded */
+export const BRIDGE_VAULT_EVM_PRIVATE_KEY =
+  process.env.BRIDGE_VAULT_EVM_PRIVATE_KEY;
+
+// =============================================================================
 // Arena Configuration
 // =============================================================================
 
@@ -38,7 +50,7 @@ export const POLYGON_USDC_ADDRESS =
 export const GLOBAL_SESSION_ID = "00000000-0000-0000-0000-000000000001";
 
 /** Default starting capital for new sessions */
-export const DEFAULT_STARTING_CAPITAL = 10000;
+export const DEFAULT_STARTING_CAPITAL = 100;
 
 /** Chart configuration */
 export const CHART_CONFIG = {
@@ -60,10 +72,16 @@ export const PARALLEL_API_URL = "https://api.parallel.ai";
 /** Parallel webhook secret for verifying incoming webhooks */
 export const PARALLEL_WEBHOOK_SECRET = process.env.PARALLEL_WEBHOOK_SECRET;
 
+/** Base URL for webhooks */
+const WEBHOOK_BASE_URL = process.env.VERCEL_URL
+  ? `https://${process.env.VERCEL_URL}`
+  : "http://localhost:3000";
+
 /** Webhook URL for Task API callbacks */
-export const PARALLEL_WEBHOOK_URL = process.env.VERCEL_URL
-  ? `https://${process.env.VERCEL_URL}/api/parallel/webhook`
-  : "http://localhost:3000/api/parallel/webhook";
+export const PARALLEL_TASK_WEBHOOK_URL = `${WEBHOOK_BASE_URL}/api/parallel/task/webhook`;
+
+/** Webhook URL for Monitor API callbacks */
+export const PARALLEL_MONITOR_WEBHOOK_URL = `${WEBHOOK_BASE_URL}/api/parallel/monitor/webhook`;
 
 // =============================================================================
 // Trading Configuration
@@ -76,7 +94,7 @@ export const TRADING_CONFIG = {
   lookbackMinutes: 5, // Compare to price N minutes ago
 
   // Agent execution
-  maxStepsPerAgent: 20, // Max tool calls per agent run
+  maxStepsPerAgent: 100, // Max tool calls per agent run
 
   // Risk limits (enforced in prompt, can add code checks)
   maxPositionPercent: 0.2, // Max 20% of portfolio per position

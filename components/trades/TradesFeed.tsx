@@ -1,12 +1,40 @@
 "use client";
 
 import { useMemo } from "react";
-import { ArrowRightLeft, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { ArrowRightLeft, ArrowUpRight, ArrowDownRight, ExternalLink } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import type { AgentTrade } from "@/hooks/trades/useTrades";
+
+interface PlatformConfig {
+  label: string;
+  logoPath: string;
+  color: string;
+  bgColor: string;
+  explorerLabel: string;
+  explorerUrlTemplate: (signature: string) => string;
+}
+
+const PLATFORM_CONFIG: Record<"kalshi" | "polymarket", PlatformConfig> = {
+  kalshi: {
+    label: "Kalshi",
+    logoPath: "/prediction-markets/kalshi.svg",
+    color: "text-blue-500",
+    bgColor: "bg-blue-500/10",
+    explorerLabel: "View on Solscan",
+    explorerUrlTemplate: (sig: string) => `https://solscan.io/tx/${sig}`,
+  },
+  polymarket: {
+    label: "Polymarket",
+    logoPath: "/prediction-markets/polymarket.svg",
+    color: "text-purple-500",
+    bgColor: "bg-purple-500/10",
+    explorerLabel: "View on Polygonscan",
+    explorerUrlTemplate: (sig: string) => `https://polygonscan.com/tx/${sig}`,
+  },
+} as const;
 
 // Map series to logo filename
 const SERIES_LOGO_MAP: Record<string, string> = {
@@ -61,6 +89,7 @@ function formatCurrency(value: number): string {
 
 // Extract base58 signature from txSignature (removes exchange prefix like "kalshi:")
 function extractSignature(txSignature: string): string {
+  if (!txSignature) return "";
   const colonIndex = txSignature.indexOf(":");
   return colonIndex !== -1 ? txSignature.slice(colonIndex + 1) : txSignature;
 }
@@ -73,9 +102,12 @@ function TradeCard({ trade }: { trade: AgentTrade }) {
   const logoPath = getLogoPathFromSeries(trade.modelSeries);
   const initial = modelName.charAt(0).toUpperCase();
 
+  const platform = PLATFORM_CONFIG[trade.platform];
+  const signature = extractSignature(trade.txSignature ?? "");
+  const explorerUrl = platform.explorerUrlTemplate(signature);
+
   return (
     <div className="p-4 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
-      {/* Header */}
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex items-center gap-2">
           <Avatar
@@ -99,13 +131,24 @@ function TradeCard({ trade }: { trade: AgentTrade }) {
             </AvatarFallback>
           </Avatar>
           <span className="font-medium text-sm">{modelName}</span>
+          <span
+            className={cn(
+              "flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium",
+              platform.bgColor,
+              platform.color
+            )}
+          >
+            <Avatar className="size-4 rounded-sm">
+              <AvatarImage src={platform.logoPath} alt={platform.label} />
+            </Avatar>
+            {platform.label}
+          </span>
         </div>
         <span className="text-xs text-muted-foreground">
           {formatTimeAgo(trade.createdAt)}
         </span>
       </div>
 
-      {/* Trade action */}
       <div className="flex items-center gap-2 mb-2">
         <span
           className={cn(
@@ -134,12 +177,10 @@ function TradeCard({ trade }: { trade: AgentTrade }) {
         </span>
       </div>
 
-      {/* Market ticker */}
       <p className="text-sm mb-2 line-clamp-2 font-mono">
         {trade.marketTicker}
       </p>
 
-      {/* Trade details */}
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>
           {trade.quantity} @ {formatCurrency(trade.price)}
@@ -149,15 +190,15 @@ function TradeCard({ trade }: { trade: AgentTrade }) {
         </span>
       </div>
 
-      {/* Transaction signature link */}
       {trade.txSignature && (
         <a
-          href={`https://solscan.io/tx/${extractSignature(trade.txSignature)}`}
+          href={explorerUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-2 text-xs text-blue-500 hover:underline block truncate"
+          className="mt-2 text-xs text-blue-500 hover:underline flex items-center gap-1"
         >
-          View on Solscan
+          {platform.explorerLabel}
+          <ExternalLink className="h-3 w-3" />
         </a>
       )}
     </div>

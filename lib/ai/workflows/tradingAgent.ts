@@ -14,8 +14,12 @@ import {
   upsertAgentPosition,
   updateAgentSessionValue,
   updateAllAgentBalances,
+  incrementAgentTokens,
 } from "@/lib/supabase/agents";
 import { getCurrencyBalance } from "@/lib/crypto/solana/client";
+import { getUsdcBalance } from "@/lib/crypto/polygon/client";
+import { createAgentSigners } from "@/lib/crypto/signers";
+import { checkAndTriggerRebalance } from "@/lib/prediction-market/rebalancing";
 import type { AgentSession, TradingSession } from "@/lib/supabase/types";
 
 // ============================================================================
@@ -108,6 +112,9 @@ export async function tradingAgentWorkflow(
     // This ensures leaderboard reflects current on-chain state
     await updateAllBalancesStep(session);
 
+    // Step 6: Check and trigger cross-chain rebalancing (non-blocking)
+    await checkAndRebalanceStep(input.modelId);
+
     console.log(
       `[tradingAgent:${input.modelId}] Completed: ${result.decision}, ${result.trades.length} trades`
     );
@@ -173,7 +180,7 @@ async function runAgentStep(input: TradingInput): Promise<TradingResult> {
     modelId: input.modelId,
     walletAddress: input.walletAddress,
     privateKey: getWalletPrivateKey(input.modelId),
-    maxSteps: 20,
+    maxSteps: 100,
     researchContext: input.research,
   });
 
@@ -250,6 +257,14 @@ async function recordResultsStep(
     portfolioValue,
     portfolioValue - agentSession.startingCapital
   );
+
+  // 4. Update token usage if available
+  if (result.tokenUsage?.totalTokens) {
+    await incrementAgentTokens(agentSession.id, result.tokenUsage.totalTokens);
+    console.log(
+      `[tradingAgent] Recorded ${result.tokenUsage.totalTokens} tokens for ${agentSession.modelName}`
+    );
+  }
 }
 
 /**
@@ -287,4 +302,50 @@ async function updateAllBalancesStep(session: TradingSession): Promise<void> {
     fetchBalance
   );
   console.log(`[tradingAgent] Updated ${updated.length} agent balances`);
+}
+
+/**
+ * Check balances and trigger cross-chain rebalance if needed.
+ * Non-blocking - fires async bridge and returns immediately.
+ * Durable: Rebalance check should complete even if subsequent bridge fails.
+ */
+async function checkAndRebalanceStep(modelId: string): Promise<void> {
+  "use step";
+
+  const logPrefix = `[tradingAgent:${modelId}]`;
+
+  try {
+    // 1. Get signers for this model
+    const signers = await createAgentSigners(modelId);
+
+    if (!signers.svm || !signers.evm) {
+      console.log(`${logPrefix} Skipping rebalance - missing signers`);
+      return;
+    }
+
+    // 2. Fetch current balances
+    const [solanaResult, polygonResult] = await Promise.all([
+      getCurrencyBalance(signers.svm.address, "USDC"),
+      getUsdcBalance(signers.evm.address),
+    ]);
+
+    const balances = {
+      solana: solanaResult ? Number(solanaResult.formatted) : 0,
+      polygon: polygonResult?.balance ?? 0,
+    };
+
+    console.log(
+      `${logPrefix} Balances: Solana=$${balances.solana}, Polygon=$${balances.polygon}`
+    );
+
+    // 3. Check and trigger rebalance (non-blocking)
+    const result = await checkAndTriggerRebalance(modelId, signers, balances);
+
+    if (result.triggered) {
+      console.log(`${logPrefix} Rebalance triggered: ${result.reason}`);
+    }
+  } catch (error) {
+    // Don't fail the workflow if rebalance check fails
+    console.error(`${logPrefix} Rebalance check error:`, error);
+  }
 }

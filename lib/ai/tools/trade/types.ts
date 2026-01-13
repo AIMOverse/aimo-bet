@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { type KeyPairSigner } from "@solana/kit";
-import { type Wallet } from "ethers";
+import { type PolygonWallet } from "@/lib/crypto/polygon/client";
 
 // ============================================================================
 // Core Types
@@ -21,7 +21,7 @@ export type OrderStatus = "open" | "filled" | "partial" | "failed";
 // ============================================================================
 
 export type KalshiSigner = KeyPairSigner;
-export type PolymarketSigner = Wallet;
+export type PolymarketSigner = PolygonWallet;
 
 export interface SignerInfo<T = KalshiSigner | PolymarketSigner> {
   address: string;
@@ -33,10 +33,8 @@ export interface SignerInfo<T = KalshiSigner | PolymarketSigner> {
  * and enables per-exchange signer retrieval
  */
 export type SignerResolver = <E extends Exchange>(
-  exchange: E,
-) => Promise<
-  SignerInfo<E extends "kalshi" ? KalshiSigner : PolymarketSigner>
->;
+  exchange: E
+) => Promise<SignerInfo<E extends "kalshi" ? KalshiSigner : PolymarketSigner>>;
 
 // ============================================================================
 // Tool Input/Output Types

@@ -26,8 +26,8 @@ export interface Signer {
  * Contains signers for both SVM (Solana/Kalshi) and EVM (Polygon/Polymarket)
  */
 export interface ToolSigners {
-  svm: Signer;   // Solana signer for Kalshi
-  evm: Signer;   // Polygon signer for Polymarket
+  svm: Signer; // Solana signer for Kalshi
+  evm: Signer; // Polygon signer for Polymarket
 }
 
 // ============================================================================
@@ -53,6 +53,41 @@ export interface GetBalanceResult {
 }
 
 // ============================================================================
+// Trade Types
+// ============================================================================
+
+export interface Trade {
+  exchange: Exchange;
+  trade_id: string;
+  market_id: string;
+  asset_id: string;
+  side: "buy" | "sell";
+  outcome: string;
+  size: number;
+  price: number;
+  fee_rate_bps: number;
+  role: "taker" | "maker";
+  status: string;
+  match_time: string;
+  transaction_hash?: string;
+}
+
+export interface TradeSummary {
+  total_trades: number;
+  total_volume: number;
+  total_fees: number;
+  buys: number;
+  sells: number;
+}
+
+export interface GetTradesResult {
+  success: boolean;
+  trades: Trade[];
+  summary: TradeSummary;
+  error?: string;
+}
+
+// ============================================================================
 // Position Types
 // ============================================================================
 
@@ -69,7 +104,7 @@ export interface Position {
   pnl_percent?: number;
   status: "active" | "closed";
   redeemable?: boolean;
-  proxy_wallet?: string;  // Polymarket only
+  proxy_wallet?: string; // Polymarket only
 }
 
 export interface PositionSummary {

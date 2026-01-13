@@ -16,7 +16,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { ChartDataPoint, LeaderboardEntry } from "@/lib/supabase/types";
 import { MODELS } from "@/lib/ai/models";
-import { getSeriesLogoPath } from "@/lib/ai/models/catalog";
+import {
+  getSeriesLogoPath,
+  getModelCostPerMillion,
+} from "@/lib/ai/models/catalog";
 import { DEFAULT_STARTING_CAPITAL, CHART_CONFIG } from "@/lib/config";
 import { useEffect, useMemo, useState } from "react";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
@@ -28,6 +31,7 @@ interface PerformanceChartProps {
   data: ChartDataPoint[];
   title?: string;
   latestValues?: Map<string, number>;
+  tokenUsage?: Map<string, number>;
   leaderboard?: LeaderboardEntry[];
   deadModels?: Set<string>;
 }
@@ -62,7 +66,20 @@ function formatPercent(value: number, startingCapital: number): string {
   return `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
 }
 
-// Custom tooltip component
+// Format P&L value
+function formatPnL(pnl: number): string {
+  const sign = pnl >= 0 ? "+" : "";
+  return `${sign}${formatCurrency(pnl)}`;
+}
+
+// Format token count (e.g., 1234567 -> "1.2M")
+function formatTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(0)}K`;
+  return tokens.toString();
+}
+
+// Custom tooltip component - shows P&L values
 function CustomTooltip({
   active,
   payload,
@@ -82,20 +99,30 @@ function CustomTooltip({
       <div className="space-y-1">
         {payload
           .sort((a, b) => b.value - a.value)
-          .map((entry) => (
-            <div key={entry.name} className="flex items-center gap-2">
-              <div
-                className="w-3 h-3 rounded-full"
-                style={{ backgroundColor: entry.color }}
-              />
-              <span className="text-muted-foreground">{entry.name}:</span>
-              <span className="font-medium">
-                {valueDisplay === "dollar"
-                  ? formatCurrency(entry.value)
-                  : formatPercent(entry.value, DEFAULT_STARTING_CAPITAL)}
-              </span>
-            </div>
-          ))}
+          .map((entry) => {
+            // entry.value is already P&L (transformed in chartData)
+            const pnl = entry.value;
+            const isPositive = pnl >= 0;
+            return (
+              <div key={entry.name} className="flex items-center gap-2">
+                <div
+                  className="w-3 h-3 rounded-full"
+                  style={{ backgroundColor: entry.color }}
+                />
+                <span className="text-muted-foreground">{entry.name}:</span>
+                <span
+                  className={cn(
+                    "font-medium",
+                    isPositive ? "text-green-500" : "text-red-500",
+                  )}
+                >
+                  {valueDisplay === "dollar"
+                    ? formatPnL(pnl)
+                    : `${isPositive ? "+" : ""}${pnl.toFixed(1)}%`}
+                </span>
+              </div>
+            );
+          })}
       </div>
     </div>
   );
@@ -112,7 +139,7 @@ function ChangeIndicator({ change }: { change: number }) {
   return <Minus className="h-3 w-3 text-muted-foreground" />;
 }
 
-// Custom label component for line-end logos with animated value
+// Custom label component for line-end logos with P&L and token info
 interface LineEndLabelProps {
   x?: number | string;
   y?: number | string;
@@ -125,6 +152,7 @@ interface LineEndLabelProps {
   isDead: boolean;
   onHover: (name: string | null) => void;
   latestValue: number;
+  totalTokens: number;
   valueDisplay: ValueDisplay;
 }
 
@@ -140,6 +168,7 @@ function LineEndLabel({
   isDead,
   onHover,
   latestValue,
+  totalTokens,
   valueDisplay,
 }: LineEndLabelProps) {
   // Only render at the last data point
@@ -152,13 +181,16 @@ function LineEndLabel({
 
   const logoPath = getSeriesLogoPath(modelName);
   const initial = modelName.charAt(0).toUpperCase();
-  const logoSize = 20;
-  const labelWidth = 100; // Width for logo + value
+  const logoSize = 32; // Increased height for two lines
+  const labelWidth = 120; // Width for logo + value + token info
 
-  // Calculate percent change for percent mode
-  const percentChange =
-    ((latestValue - DEFAULT_STARTING_CAPITAL) / DEFAULT_STARTING_CAPITAL) * 100;
-  const isPositive = percentChange >= 0;
+  // Calculate P&L values
+  const pnl = latestValue - DEFAULT_STARTING_CAPITAL;
+  const percentChange = (pnl / DEFAULT_STARTING_CAPITAL) * 100;
+  const isPositive = pnl >= 0;
+
+  // Get cost per million tokens for this model
+  const costPerMillion = getModelCostPerMillion(modelName);
 
   return (
     <foreignObject
@@ -181,7 +213,7 @@ function LineEndLabel({
           className={cn(
             "size-5 ring-[1.5px] ring-offset-0 bg-background shrink-0",
             isHovered && "ring-2",
-            isDead && "grayscale opacity-60"
+            isDead && "grayscale opacity-60",
           )}
           style={{
             ["--tw-ring-color" as string]: isDead ? DEAD_MODEL_COLOR : color,
@@ -201,57 +233,58 @@ function LineEndLabel({
             {initial}
           </AvatarFallback>
         </Avatar>
-        <span
-          className={cn(
-            "text-[11px] font-semibold whitespace-nowrap tabular-nums",
-            isDead && "text-muted-foreground",
-            !isDead &&
-              valueDisplay === "percent" &&
-              (isPositive ? "text-green-500" : "text-red-500")
-          )}
-          style={{
-            color: isDead
-              ? undefined
-              : valueDisplay === "dollar"
-              ? color
-              : undefined,
-          }}
-        >
-          {valueDisplay === "dollar" ? (
-            <AnimateNumber
-              format={{
-                style: "currency",
-                currency: "USD",
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              }}
-              locales="en-US"
-              transition={{
-                layout: { duration: 0.3 },
-                y: { type: "spring", visualDuration: 0.4, bounce: 0.2 },
-              }}
-            >
-              {latestValue}
-            </AnimateNumber>
-          ) : (
-            <>
-              {isPositive ? "+" : ""}
-              <AnimateNumber
-                format={{
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                }}
-                suffix="%"
-                transition={{
-                  layout: { duration: 0.3 },
-                  y: { type: "spring", visualDuration: 0.4, bounce: 0.2 },
-                }}
-              >
-                {percentChange}
-              </AnimateNumber>
-            </>
-          )}
-        </span>
+        <div className="flex flex-col">
+          {/* P&L value */}
+          <span
+            className={cn(
+              "text-[11px] font-semibold whitespace-nowrap tabular-nums leading-tight",
+              isDead && "text-muted-foreground",
+              !isDead && (isPositive ? "text-green-500" : "text-red-500"),
+            )}
+          >
+            {valueDisplay === "dollar" ? (
+              <>
+                {isPositive ? "+" : "-"}
+                <AnimateNumber
+                  format={{
+                    style: "currency",
+                    currency: "USD",
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  }}
+                  locales="en-US"
+                  transition={{
+                    layout: { duration: 0.3 },
+                    y: { type: "spring", visualDuration: 0.4, bounce: 0.2 },
+                  }}
+                >
+                  {Math.abs(pnl)}
+                </AnimateNumber>
+              </>
+            ) : (
+              <>
+                {isPositive ? "+" : ""}
+                <AnimateNumber
+                  format={{
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  }}
+                  suffix="%"
+                  transition={{
+                    layout: { duration: 0.3 },
+                    y: { type: "spring", visualDuration: 0.4, bounce: 0.2 },
+                  }}
+                >
+                  {percentChange}
+                </AnimateNumber>
+              </>
+            )}
+          </span>
+          {/* Token usage info */}
+          <span className="text-[9px] text-muted-foreground whitespace-nowrap leading-tight">
+            {formatTokens(totalTokens)} / ${costPerMillion.toFixed(2)}
+          </span>
+        </div>
       </div>
     </foreignObject>
   );
@@ -261,6 +294,7 @@ function LineEndLabel({
 interface CustomLegendProps {
   payload?: Array<{ value: string; color: string; dataKey: string }>;
   latestValues?: Map<string, number>;
+  tokenUsage?: Map<string, number>;
   leaderboard?: LeaderboardEntry[];
   hoveredModel: string | null;
   onModelHover: (modelName: string | null) => void;
@@ -270,6 +304,7 @@ interface CustomLegendProps {
 function CustomLegend({
   payload,
   latestValues,
+  tokenUsage,
   leaderboard,
   hoveredModel,
   onModelHover,
@@ -277,16 +312,18 @@ function CustomLegend({
 }: CustomLegendProps) {
   if (!payload || payload.length === 0) return null;
 
-  // Build model data with rankings
+  // Build model data with rankings and token usage
   const modelsWithData = payload.map((entry, index) => {
     const value = latestValues?.get(entry.value) || DEFAULT_STARTING_CAPITAL;
+    const tokens = tokenUsage?.get(entry.value) || 0;
     const leaderboardEntry = leaderboard?.find(
-      (e) => e.model.name === entry.value
+      (e) => e.model.name === entry.value,
     );
     return {
       name: entry.value,
       color: entry.color,
       value,
+      tokens,
       rank: leaderboardEntry?.rank || index + 1,
       change: leaderboardEntry?.change || 0,
     };
@@ -296,16 +333,15 @@ function CustomLegend({
   const sortedModels = [...modelsWithData].sort((a, b) => a.rank - b.rank);
 
   return (
-    <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 pt-2">
+    <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 pt-2">
       {sortedModels.map((model) => {
-        const isPositive = model.value >= DEFAULT_STARTING_CAPITAL;
+        const pnl = model.value - DEFAULT_STARTING_CAPITAL;
+        const isPositive = pnl >= 0;
         const isHovered = hoveredModel === model.name;
         const isDimmed = hoveredModel !== null && !isHovered;
         const isDead = deadModels?.has(model.name) ?? false;
-        const changePercent =
-          ((model.value - DEFAULT_STARTING_CAPITAL) /
-            DEFAULT_STARTING_CAPITAL) *
-          100;
+        const changePercent = (pnl / DEFAULT_STARTING_CAPITAL) * 100;
+        const costPerMillion = getModelCostPerMillion(model.name);
 
         return (
           <div
@@ -314,7 +350,7 @@ function CustomLegend({
               "flex items-center gap-1 px-1 rounded transition-opacity cursor-default text-xs",
               "hover:bg-muted/50",
               isDimmed && "opacity-30",
-              isDead && "opacity-60"
+              isDead && "opacity-60",
             )}
             onMouseEnter={() => onModelHover(model.name)}
             onMouseLeave={() => onModelHover(null)}
@@ -336,12 +372,15 @@ function CustomLegend({
                 isDead
                   ? "text-muted-foreground"
                   : isPositive
-                  ? "text-green-500"
-                  : "text-red-500"
+                    ? "text-green-500"
+                    : "text-red-500",
               )}
             >
               {changePercent >= 0 ? "+" : ""}
               {changePercent.toFixed(1)}%
+            </span>
+            <span className="text-muted-foreground text-[10px]">
+              ({formatTokens(model.tokens)} / ${costPerMillion.toFixed(2)})
             </span>
           </div>
         );
@@ -352,8 +391,9 @@ function CustomLegend({
 
 export function PerformanceChart({
   data,
-  title = "Account Value Over Time",
+  title = "P&L Over Time",
   latestValues,
+  tokenUsage,
   leaderboard,
   deadModels,
 }: PerformanceChartProps) {
@@ -388,7 +428,7 @@ export function PerformanceChart({
     return map;
   }, []);
 
-  // Convert values to percentages if needed and add numeric timestamp for X-axis domain
+  // Convert values to P&L (profit/loss from starting capital)
   const chartData = useMemo(() => {
     return data.map((point) => {
       const converted: ChartDataPoint & { _ts: number } = {
@@ -397,48 +437,52 @@ export function PerformanceChart({
       };
       modelNames.forEach((name) => {
         const value = point[name] as number;
+        const pnl = value - DEFAULT_STARTING_CAPITAL;
+        // In dollar mode: show P&L in dollars
+        // In percent mode: show P&L as percentage of starting capital
         converted[name] =
           valueDisplay === "percent"
-            ? ((value - DEFAULT_STARTING_CAPITAL) / DEFAULT_STARTING_CAPITAL) *
-              100
-            : value;
+            ? (pnl / DEFAULT_STARTING_CAPITAL) * 100
+            : pnl;
       });
       return converted;
     });
   }, [data, valueDisplay, modelNames]);
 
-  // Calculate Y-axis domain: 0 to max value + 10% padding
+  // Calculate Y-axis domain: centered around 0 for P&L display
   const yDomain = useMemo(() => {
     const excludeKeys = new Set(["timestamp", "_ts"]);
 
-    // Find actual max value from data
+    // Find min and max P&L values from data
+    let actualMin = Infinity;
     let actualMax = -Infinity;
 
     chartData.forEach((point) => {
       Object.entries(point).forEach(([key, value]) => {
         if (!excludeKeys.has(key) && typeof value === "number") {
+          actualMin = Math.min(actualMin, value);
           actualMax = Math.max(actualMax, value);
         }
       });
     });
 
     // Handle empty data case
-    if (!isFinite(actualMax)) {
+    if (!isFinite(actualMax) || !isFinite(actualMin)) {
       if (valueDisplay === "percent") {
-        return [0, 10]; // 0% to +10%
+        return [-10, 10]; // -10% to +10%
       }
-      return [0, DEFAULT_STARTING_CAPITAL * 1.1];
+      return [-100, 100]; // -$100 to +$100
     }
 
-    // Add 10% padding to max
-    const maxY = actualMax * 1.1;
+    // Add 10% padding and ensure symmetric around 0
+    const absMax = Math.max(Math.abs(actualMin), Math.abs(actualMax));
+    const paddedMax = absMax * 1.2;
 
-    // For percent mode, ensure we show at least up to +10%
-    if (valueDisplay === "percent") {
-      return [0, Math.max(maxY, 10)];
-    }
+    // Ensure minimum range for visibility
+    const minRange = valueDisplay === "percent" ? 5 : 50;
+    const finalMax = Math.max(paddedMax, minRange);
 
-    return [0, maxY];
+    return [-finalMax, finalMax];
   }, [chartData, valueDisplay]);
 
   // Calculate X-axis domain: first data point to now + 1 hour
@@ -496,13 +540,17 @@ export function PerformanceChart({
               />
               <YAxis
                 domain={yDomain}
-                tickFormatter={(value) =>
-                  valueDisplay === "dollar"
-                    ? value >= 1000
-                      ? `$${(value / 1000).toFixed(1)}k`
-                      : `$${value.toFixed(0)}`
-                    : `${value >= 0 ? "+" : ""}${value.toFixed(0)}%`
-                }
+                tickFormatter={(value) => {
+                  const sign = value >= 0 ? "+" : "";
+                  if (valueDisplay === "dollar") {
+                    const absValue = Math.abs(value);
+                    if (absValue >= 1000) {
+                      return `${sign}$${(value / 1000).toFixed(1)}k`;
+                    }
+                    return `${sign}$${value.toFixed(0)}`;
+                  }
+                  return `${sign}${value.toFixed(0)}%`;
+                }}
                 className="text-xs"
                 tick={{ fill: "hsl(var(--muted-foreground))" }}
                 tickLine={{ stroke: "hsl(var(--muted))" }}
@@ -513,8 +561,9 @@ export function PerformanceChart({
               <Tooltip
                 content={<CustomTooltip valueDisplay={valueDisplay} />}
               />
+              {/* Zero line (break-even) */}
               <ReferenceLine
-                y={valueDisplay === "dollar" ? DEFAULT_STARTING_CAPITAL : 0}
+                y={0}
                 stroke="hsl(var(--muted-foreground))"
                 strokeDasharray="5 5"
                 strokeOpacity={0.5}
@@ -552,6 +601,7 @@ export function PerformanceChart({
                           latestValue={
                             latestValues?.get(name) ?? DEFAULT_STARTING_CAPITAL
                           }
+                          totalTokens={tokenUsage?.get(name) ?? 0}
                           valueDisplay={valueDisplay}
                         />
                       )}
@@ -563,6 +613,7 @@ export function PerformanceChart({
                 content={
                   <CustomLegend
                     latestValues={latestValues}
+                    tokenUsage={tokenUsage}
                     leaderboard={leaderboard}
                     hoveredModel={hoveredModel}
                     onModelHover={setHoveredModel}

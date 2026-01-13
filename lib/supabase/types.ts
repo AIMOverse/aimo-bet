@@ -289,6 +289,7 @@ export interface AgentSession {
   startingCapital: number;
   currentValue: number;
   totalPnl: number;
+  totalTokens: number;
   status: AgentSessionStatus;
   createdAt: Date;
   updatedAt: Date;
@@ -360,6 +361,7 @@ export interface DbAgentSession {
   starting_capital: number;
   current_value: number;
   total_pnl: number;
+  total_tokens: number;
   status: AgentSessionStatus;
   created_at: string;
   updated_at: string;
@@ -374,6 +376,7 @@ export interface DbAgentSessionInsert {
   starting_capital?: number;
   current_value?: number;
   total_pnl?: number;
+  total_tokens?: number;
   status?: AgentSessionStatus;
 }
 
@@ -565,6 +568,13 @@ export interface Database {
           p_side: string;
           p_mint: string;
           p_quantity_delta: number;
+        };
+        Returns: void;
+      };
+      increment_agent_tokens: {
+        Args: {
+          p_session_id: string;
+          p_tokens: number;
         };
         Returns: void;
       };

@@ -1,5 +1,5 @@
 // ============================================================================
-// Parallel AI Webhook Handler
+// Parallel AI Task Webhook Handler
 // Receives Task API completion webhooks and triggers agent workflows
 // ============================================================================
 
@@ -14,7 +14,7 @@ import type { WebhookPayload } from "@/lib/parallel/types";
 // ============================================================================
 
 /**
- * POST /api/parallel/webhook
+ * POST /api/parallel/task/webhook
  *
  * Receives webhook callbacks from Parallel Task API when research completes.
  * 1. Verifies HMAC signature
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
   const body = await req.text();
 
   if (!PARALLEL_WEBHOOK_SECRET) {
-    console.error("[parallel/webhook] PARALLEL_WEBHOOK_SECRET not configured");
+    console.error("[parallel/task/webhook] PARALLEL_WEBHOOK_SECRET not configured");
     return NextResponse.json(
       { error: "Webhook secret not configured" },
       { status: 500 }
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
     .digest("hex");
 
   if (signature !== expectedSignature) {
-    console.error("[parallel/webhook] Invalid signature");
+    console.error("[parallel/task/webhook] Invalid signature");
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
@@ -48,19 +48,19 @@ export async function POST(req: NextRequest) {
   try {
     payload = JSON.parse(body) as WebhookPayload;
   } catch {
-    console.error("[parallel/webhook] Invalid JSON payload");
+    console.error("[parallel/task/webhook] Invalid JSON payload");
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
   console.log(
-    `[parallel/webhook] Received: run_id=${payload.run_id}, status=${payload.status}`
+    `[parallel/task/webhook] Received: run_id=${payload.run_id}, status=${payload.status}`
   );
 
   // 3. Store result in Supabase (for audit/retrieval)
   try {
     await storeResearchResult(payload);
   } catch (error) {
-    console.error("[parallel/webhook] Failed to store result:", error);
+    console.error("[parallel/task/webhook] Failed to store result:", error);
     // Continue - don't fail the webhook if storage fails
   }
 
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
 
   if (!webhookSecret || !vercelUrl) {
     console.error(
-      "[parallel/webhook] Missing WEBHOOK_SECRET or VERCEL_URL for agent trigger"
+      "[parallel/task/webhook] Missing WEBHOOK_SECRET or VERCEL_URL for agent trigger"
     );
     return NextResponse.json({ received: true, triggered: false });
   }
@@ -94,13 +94,13 @@ export async function POST(req: NextRequest) {
 
     if (!triggerResponse.ok) {
       console.error(
-        `[parallel/webhook] Failed to trigger agent: ${triggerResponse.status}`
+        `[parallel/task/webhook] Failed to trigger agent: ${triggerResponse.status}`
       );
     } else {
-      console.log("[parallel/webhook] Agent triggered successfully");
+      console.log("[parallel/task/webhook] Agent triggered successfully");
     }
   } catch (error) {
-    console.error("[parallel/webhook] Failed to trigger agent:", error);
+    console.error("[parallel/task/webhook] Failed to trigger agent:", error);
   }
 
   return NextResponse.json({ received: true });
@@ -111,14 +111,14 @@ export async function POST(req: NextRequest) {
 // ============================================================================
 
 /**
- * GET /api/parallel/webhook
+ * GET /api/parallel/task/webhook
  *
  * Health check endpoint for webhook configuration
  */
 export async function GET() {
   return NextResponse.json({
     status: "ready",
-    message: "Parallel AI webhook endpoint",
+    message: "Parallel AI Task webhook endpoint",
     configured: Boolean(PARALLEL_WEBHOOK_SECRET),
   });
 }

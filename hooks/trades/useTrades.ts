@@ -13,6 +13,7 @@ export interface AgentTrade {
   id: string;
   marketTicker: string;
   marketTitle?: string;
+  platform: "kalshi" | "polymarket";
   side: "yes" | "no";
   action: "buy" | "sell" | "redeem";
   quantity: number;
@@ -178,6 +179,7 @@ function mapTradeRow(row: Record<string, unknown>): AgentTrade {
     id: row.id as string,
     marketTicker: row.market_ticker as string,
     marketTitle: (row.market_title as string) ?? undefined,
+    platform: (row.platform as "kalshi" | "polymarket") ?? "kalshi",
     side: row.side as "yes" | "no",
     action: row.action as "buy" | "sell" | "redeem",
     quantity: row.quantity as number,
