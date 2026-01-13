@@ -23,7 +23,7 @@ import {
   createPolygonWallet,
 } from "@/lib/crypto/polygon/client";
 import { getDepositAddresses } from "@/lib/prediction-market/polymarket/bridge";
-import { getWithdrawalQuote } from "@/lib/prediction-market/polymarket/wormhole";
+import { getVaultBalances } from "@/lib/prediction-market/rebalancing/manualBridge";
 
 // ============================================================================
 // Types
@@ -59,7 +59,7 @@ const colors = {
 function log(
   color: keyof typeof colors,
   prefix: string,
-  message: string,
+  message: string
 ): void {
   console.log(`${colors[color]}[${prefix}]${colors.reset} ${message}`);
 }
@@ -125,11 +125,11 @@ function checkEnvVars(): void {
 
   if (missingRequired > 0) {
     console.log(
-      `\n${colors.red}⚠ ${missingRequired} required env vars missing${colors.reset}\n`,
+      `\n${colors.red}⚠ ${missingRequired} required env vars missing${colors.reset}\n`
     );
   } else {
     console.log(
-      `\n${colors.green}✓ All required env vars present${colors.reset}\n`,
+      `\n${colors.green}✓ All required env vars present${colors.reset}\n`
     );
   }
 }
@@ -250,7 +250,7 @@ async function testDiscoverMarkets(): Promise<ToolTestResult> {
         question: market.title,
         volume_24h: market.volume,
         status: market.status,
-      })),
+      }))
     );
 
     return {
@@ -327,7 +327,7 @@ async function testExplainMarket(): Promise<ToolTestResult> {
     let orderbookStatus = "none";
     try {
       const orderbookResponse = await dflowMetadataFetch(
-        `/orderbook/${marketTicker}`,
+        `/orderbook/${marketTicker}`
       );
       if (orderbookResponse.ok) {
         const orderbook = (await orderbookResponse.json()) as {
@@ -636,26 +636,40 @@ async function testBridgeDeposit(): Promise<ToolTestResult> {
 }
 
 /**
- * Test Wormhole withdrawal quote
- * Gets estimated fees and timing for Polygon→Solana bridge
+ * Test bridge vault balances
+ * Gets current liquidity in the manual bridge vaults
  */
-async function testWormholeQuote(): Promise<ToolTestResult> {
-  const name = "wormholeQuote";
+async function testBridgeVaultBalances(): Promise<ToolTestResult> {
+  const name = "bridgeVaultBalances";
   const start = Date.now();
 
   try {
-    // Get a quote for $100 withdrawal
-    const quote = await getWithdrawalQuote(100);
+    const vaults = await getVaultBalances();
+
+    if (!vaults) {
+      return {
+        name,
+        success: false,
+        duration: Date.now() - start,
+        error: "Bridge vaults not configured",
+      };
+    }
 
     return {
       name,
       success: true,
       duration: Date.now() - start,
       result: {
-        amount: quote.amount,
-        estimated_fee: `$${quote.estimatedFee}`,
-        estimated_time: quote.estimatedTime,
-        min_amount: `$${quote.minAmount}`,
+        svm_vault: {
+          address: vaults.svm.address.slice(0, 8) + "...",
+          usdc: `$${vaults.svm.usdc.toFixed(2)}`,
+          sol: `${vaults.svm.sol.toFixed(4)} SOL`,
+        },
+        evm_vault: {
+          address: vaults.evm.address.slice(0, 10) + "...",
+          usdc: `$${vaults.evm.usdc.toFixed(2)}`,
+          pol: `${vaults.evm.pol.toFixed(4)} POL`,
+        },
       },
     };
   } catch (error) {
@@ -757,7 +771,7 @@ async function runAllTests(config: TestConfig = {}): Promise<void> {
     // Polygon/Polymarket tools
     { name: "polygonBalance", fn: () => testPolygonBalance() },
     { name: "bridgeDepositAddresses", fn: () => testBridgeDeposit() },
-    { name: "wormholeQuote", fn: () => testWormholeQuote() },
+    { name: "bridgeVaultBalances", fn: () => testBridgeVaultBalances() },
 
     // Research tools
     { name: "webSearch", fn: () => testWebSearch() },
@@ -823,7 +837,7 @@ async function runAllTests(config: TestConfig = {}): Promise<void> {
       const resultStr = JSON.stringify(
         result.result,
         (_, v) => (typeof v === "bigint" ? v.toString() : v),
-        2,
+        2
       )
         .split("\n")
         .map((line) => `    ${line}`)
@@ -848,10 +862,10 @@ async function runAllTests(config: TestConfig = {}): Promise<void> {
 
   if (failed > 0) {
     console.log(
-      `\n${colors.yellow}Note: Some failures may be expected (missing env vars, network issues).${colors.reset}`,
+      `\n${colors.yellow}Note: Some failures may be expected (missing env vars, network issues).${colors.reset}`
     );
     console.log(
-      `${colors.yellow}Re-run this script to verify network-related failures.${colors.reset}\n`,
+      `${colors.yellow}Re-run this script to verify network-related failures.${colors.reset}\n`
     );
   }
 }
@@ -879,7 +893,7 @@ Options:
 
 Tests included:
   Solana/Kalshi:     getBalance, getPositions, discoverMarkets, explainMarket
-  Polygon/Polymarket: polygonBalance, bridgeDepositAddresses, wormholeQuote
+  Polygon/Polymarket: polygonBalance, bridgeDepositAddresses, bridgeVaultBalances
   Research:          webSearch, deepResearch*
   Trading:           placeOrder*, cancelOrder*
 

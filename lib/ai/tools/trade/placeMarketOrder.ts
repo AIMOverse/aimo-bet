@@ -6,7 +6,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { type KeyPairSigner } from "@solana/kit";
-import { type Wallet } from "ethers";
+import { type PolygonWallet } from "@/lib/crypto/polygon/client";
 
 // Kalshi imports
 import {
@@ -114,7 +114,7 @@ async function executeKalshiMarketOrder(params: {
         slippageBps,
         predictionMarketSlippageBps: slippageBps,
       },
-      signer,
+      signer
     );
 
     if (!result.success) {
@@ -179,7 +179,7 @@ async function executePolymarketMarketOrder(params: {
   tokenId: string;
   side: OrderSide;
   quantity: number;
-  wallet: Wallet;
+  wallet: PolygonWallet;
 }): Promise<PlaceOrderResult> {
   const { tokenId, side, quantity, wallet } = params;
   const logPrefix = "[placeMarketOrder:polymarket]";
@@ -260,7 +260,7 @@ async function executePolymarketMarketOrder(params: {
 export function createPlaceMarketOrderTool(
   kalshiWalletAddress: string,
   kalshiSigner?: KeyPairSigner,
-  polymarketWallet?: Wallet,
+  polymarketWallet?: PolygonWallet
 ) {
   return tool({
     description:
@@ -274,7 +274,7 @@ export function createPlaceMarketOrderTool(
       id: z
         .string()
         .describe(
-          "Market identifier: market_ticker (Kalshi) or token_id (Polymarket)",
+          "Market identifier: market_ticker (Kalshi) or token_id (Polymarket)"
         ),
       side: z.enum(["buy", "sell"]).describe("Trade direction"),
       outcome: z.enum(["yes", "no"]).describe("Outcome to trade"),

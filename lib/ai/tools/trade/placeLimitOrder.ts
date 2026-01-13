@@ -5,7 +5,7 @@
 
 import { tool } from "ai";
 import { z } from "zod";
-import { type Wallet } from "ethers";
+import { type PolygonWallet } from "@/lib/crypto/polygon/client";
 
 // Polymarket imports
 import { createClobClient } from "@/lib/prediction-market/polymarket/clob";
@@ -23,7 +23,7 @@ async function executePolymarketLimitOrder(params: {
   quantity: number;
   price: number;
   timeInForce: TimeInForce;
-  wallet: Wallet;
+  wallet: PolygonWallet;
 }): Promise<PlaceOrderResult> {
   const { tokenId, side, quantity, price, timeInForce, wallet } = params;
   const logPrefix = "[placeLimitOrder:polymarket]";
@@ -109,9 +109,9 @@ async function executePolymarketLimitOrder(params: {
  * The returned order_id can be used with cancelLimitOrder if the order
  * has not yet been filled.
  *
- * @param polymarketWallet - ethers Wallet for Polymarket trades (optional)
+ * @param polymarketWallet - Polygon wallet for Polymarket trades (optional)
  */
-export function createPlaceLimitOrderTool(polymarketWallet?: Wallet) {
+export function createPlaceLimitOrderTool(polymarketWallet?: PolygonWallet) {
   return tool({
     description:
       "Place a limit order on Polymarket at a specific price. " +
@@ -137,7 +137,7 @@ export function createPlaceLimitOrderTool(polymarketWallet?: Wallet) {
         .optional()
         .default("GTC")
         .describe(
-          "Time in force: GTC (Good Till Cancelled, default), FOK (Fill Or Kill), IOC (Immediate Or Cancel)",
+          "Time in force: GTC (Good Till Cancelled, default), FOK (Fill Or Kill), IOC (Immediate Or Cancel)"
         ),
     }),
     execute: async ({

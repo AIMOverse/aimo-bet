@@ -28,6 +28,18 @@ export const POLYGON_USDC_ADDRESS =
   "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
 
 // =============================================================================
+// Bridge Vault Configuration
+// =============================================================================
+
+/** Bridge vault SVM (Solana) private key - base58 encoded */
+export const BRIDGE_VAULT_SVM_PRIVATE_KEY =
+  process.env.BRIDGE_VAULT_SVM_PRIVATE_KEY;
+
+/** Bridge vault EVM (Polygon) private key - hex encoded */
+export const BRIDGE_VAULT_EVM_PRIVATE_KEY =
+  process.env.BRIDGE_VAULT_EVM_PRIVATE_KEY;
+
+// =============================================================================
 // Arena Configuration
 // =============================================================================
 

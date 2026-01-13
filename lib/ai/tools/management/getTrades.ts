@@ -5,7 +5,7 @@
 
 import { tool } from "ai";
 import { z } from "zod";
-import { type Wallet } from "ethers";
+import { type PolygonWallet } from "@/lib/crypto/polygon/client";
 import { createClobClient } from "@/lib/prediction-market/polymarket/clob";
 import type { Trade, TradeSummary, GetTradesResult } from "./types";
 
@@ -52,9 +52,9 @@ interface TradeParams {
  * Returns the user's trade history from Polymarket.
  * Note: Kalshi/dflow does not provide user-specific trade history.
  *
- * @param polymarketWallet - ethers Wallet for Polymarket authentication
+ * @param polymarketWallet - Polygon wallet for Polymarket authentication
  */
-export function createGetTradesTool(polymarketWallet?: Wallet) {
+export function createGetTradesTool(polymarketWallet?: PolygonWallet) {
   return tool({
     description:
       "Get your trade history from Polymarket. " +
@@ -133,7 +133,7 @@ export function createGetTradesTool(polymarketWallet?: Wallet) {
         // getTrades(params, only_first_page) - false means fetch all pages
         const rawTrades = (await client.getTrades(
           params,
-          !paginate_all,
+          !paginate_all
         )) as unknown as PolymarketTrade[];
 
         console.log(`${logPrefix} Fetched ${rawTrades.length} raw trades`);
@@ -148,7 +148,9 @@ export function createGetTradesTool(polymarketWallet?: Wallet) {
         const summary = calculateSummary(trades);
 
         console.log(
-          `${logPrefix} Returning ${trades.length} trades, volume: ${summary.total_volume.toFixed(2)}`,
+          `${logPrefix} Returning ${
+            trades.length
+          } trades, volume: ${summary.total_volume.toFixed(2)}`
         );
 
         return {

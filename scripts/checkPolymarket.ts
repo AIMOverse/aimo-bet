@@ -1,8 +1,9 @@
 // ============================================================================
-// Bridge Tool Checker Script
-// Tests Solana ↔ Polygon bridging via Polymarket and Wormhole
-// Usage: bun scripts/checkBridge.ts [--deposit|--trade|--withdraw] [amount]
+// Polymarket Tool Checker Script
+// Tests Polymarket trading on Polygon
+// Usage: bun scripts/checkPolymarket.ts [--deposit|--trade] [amount]
 //
+// NOTE: For bridging, use scripts/checkBridge.ts instead
 // WARNING: This script moves REAL MONEY! Default amount is $10.
 // ============================================================================
 
@@ -15,7 +16,6 @@ import {
   createPolygonWallet,
 } from "@/lib/crypto/polygon/client";
 import { bridgeUSDCToPolygon } from "@/lib/prediction-market/polymarket/bridge";
-import { withdrawUSDCToSolana } from "@/lib/prediction-market/polymarket/wormhole";
 import { createSignerFromBase58SecretKey } from "@/lib/crypto/solana/wallets";
 import { getSponsorSigner } from "@/lib/crypto/solana/sponsor";
 import { createClobClient } from "@/lib/prediction-market/polymarket/clob";
@@ -405,106 +405,17 @@ async function runTrade(
 }
 
 // ============================================================================
-// Step 3: Withdraw (Polygon → Solana via Wormhole)
+// Step 3: Withdraw (Polygon → Solana) - REMOVED
+// Use scripts/checkBridge.ts for bridging instead
 // ============================================================================
 
-async function runWithdraw(
-  evmWallet: ReturnType<typeof createPolygonWallet>,
-  svmSigner: Awaited<ReturnType<typeof createSignerFromBase58SecretKey>>,
-  evmPublicKey: string
-): Promise<StepResult> {
-  console.log("═".repeat(60));
-  console.log("  🔄 Withdraw: Polygon → Solana (Wormhole)");
-  console.log("═".repeat(60));
-
-  const startTime = Date.now();
-
-  // Get current Polygon balance and withdraw ALL of it (minus small buffer for gas)
-  const polygonBalance = await getPolygonBalance(evmPublicKey);
-  const withdrawAmount = Math.floor(polygonBalance * 100) / 100; // Round down to 2 decimals
-
-  if (withdrawAmount < 1) {
-    console.log(
-      `  ${
-        colors.yellow
-      }⚠ Insufficient balance to withdraw: $${polygonBalance.toFixed(2)}${
-        colors.reset
-      }`
-    );
-    return {
-      step: "Withdraw to Solana",
-      success: false,
-      duration: Date.now() - startTime,
-      error: `Insufficient Polygon balance: $${polygonBalance.toFixed(2)}`,
-    };
-  }
-
-  console.log(`  Polygon balance: $${polygonBalance.toFixed(2)}`);
-  console.log(`  Withdrawing: $${withdrawAmount}`);
-  console.log(`  ⏳ This can take 10-30 minutes for Wormhole attestation`);
-  console.log();
-
-  const withdrawResult = await withdrawUSDCToSolana(
-    withdrawAmount,
-    evmWallet,
-    svmSigner
-  );
-
-  if (!withdrawResult.success) {
-    console.error(
-      `  ${colors.red}✗ Withdrawal failed: ${withdrawResult.error}${colors.reset}`
-    );
-    if (withdrawResult.sourceTxHash) {
-      console.log(
-        `  Source TX: ${withdrawResult.sourceTxHash.slice(0, 20)}...`
-      );
-    }
-    if (withdrawResult.state) {
-      console.log(`  State: ${withdrawResult.state}`);
-    }
-    return {
-      step: "Withdraw to Solana",
-      success: false,
-      duration: Date.now() - startTime,
-      error: withdrawResult.error,
-      data: {
-        source_tx: withdrawResult.sourceTxHash,
-        state: withdrawResult.state,
-      },
-    };
-  }
-
-  console.log(`  ${colors.green}✓${colors.reset} Withdrawal successful!`);
-  console.log(`  Source TX: ${withdrawResult.sourceTxHash.slice(0, 20)}...`);
-  if (withdrawResult.destinationTxHash) {
-    console.log(
-      `  Dest TX: ${withdrawResult.destinationTxHash.slice(0, 20)}...`
-    );
-  }
-  console.log(`  Amount: $${withdrawResult.amountBridged}`);
-  console.log(`  Duration: ${formatDuration(Date.now() - startTime)}`);
-  console.log();
-
-  return {
-    step: "Withdraw to Solana",
-    success: true,
-    duration: Date.now() - startTime,
-    data: {
-      source_tx: withdrawResult.sourceTxHash,
-      destination_tx: withdrawResult.destinationTxHash,
-      amount_bridged: withdrawResult.amountBridged,
-      state: withdrawResult.state,
-    },
-  };
-}
-
 // ============================================================================
-// Full Test (All Steps)
+// Full Test (Deposit + Trade)
 // ============================================================================
 
 async function runFullTest(amount: number): Promise<void> {
   console.log("═".repeat(60));
-  console.log("  🌉 Bridge Tool Checker - Full Test");
+  console.log("  🎰 Polymarket Tool Checker - Full Test");
   console.log("═".repeat(60));
   console.log();
   console.log(
@@ -513,7 +424,7 @@ async function runFullTest(amount: number): Promise<void> {
   console.log(`  ${colors.cyan}Amount: $${amount}${colors.reset}`);
   console.log();
 
-  const { svmSigner, evmWallet, svmPublicKey, evmPublicKey, sponsorSigner } =
+  const { svmSigner, svmPublicKey, evmPublicKey, sponsorSigner } =
     await setupWallets();
 
   const results: StepResult[] = [];
@@ -559,12 +470,6 @@ async function runFullTest(amount: number): Promise<void> {
   const tradeResult = await runTrade(5, process.env.WALLET_GPT_EVM_PRIVATE!);
   results.push(tradeResult);
 
-  // Continue even if trade fails - we still want to withdraw
-
-  // Step 3: Withdraw
-  const withdrawResult = await runWithdraw(evmWallet, svmSigner, evmPublicKey);
-  results.push(withdrawResult);
-
   // Final balances
   console.log("═".repeat(60));
   console.log("  Final Balances");
@@ -575,10 +480,9 @@ async function runFullTest(amount: number): Promise<void> {
 
   console.log(`  Final Solana USDC:  $${finalSolanaBalance.toFixed(2)}`);
   console.log(`  Final Polygon USDC: $${finalPolygonBalance.toFixed(2)}`);
+  console.log();
   console.log(
-    `  Net change:         $${(
-      finalSolanaBalance - initialSolanaBalance
-    ).toFixed(2)}`
+    `  ${colors.cyan}TIP: Use 'bun scripts/checkBridge.ts --to-solana' to bridge back${colors.reset}`
   );
   console.log();
 
@@ -684,27 +588,27 @@ const args = process.argv.slice(2);
 
 if (args.includes("--help") || args.includes("-h")) {
   console.log(`
-Bridge Tool Checker
+Polymarket Tool Checker
 
-Tests the Solana ↔ Polygon bridging and trading flow:
+Tests Polymarket trading on Polygon:
 
 Modes:
   --deposit   Bridge USDC from Solana to Polygon (Polymarket bridge)
   --trade     Buy and sell on Polymarket (requires Polygon balance)
-  --withdraw  Bridge USDC from Polygon to Solana (Wormhole)
-  (no flag)   Run all steps: deposit → trade → withdraw
+  (no flag)   Run all steps: deposit → trade
+
+For bridging back to Solana, use: bun scripts/checkBridge.ts --to-solana
 
 Usage:
-  bun scripts/checkBridge.ts [--deposit|--trade|--withdraw] [amount]
+  bun scripts/checkPolymarket.ts [--deposit|--trade] [amount]
 
 Arguments:
   amount    Amount in USD (default: 10 for deposit, 5 for trade)
 
 Examples:
-  bun scripts/checkBridge.ts                # Full test: deposit $10, trade $5, withdraw all
-  bun scripts/checkBridge.ts --deposit 20   # Deposit $20 to Polygon
-  bun scripts/checkBridge.ts --trade 5      # Buy & sell $5 on Polymarket  
-  bun scripts/checkBridge.ts --withdraw     # Withdraw ALL Polygon balance to Solana
+  bun scripts/checkPolymarket.ts                # Full test: deposit $10, trade $5
+  bun scripts/checkPolymarket.ts --deposit 20   # Deposit $20 to Polygon
+  bun scripts/checkPolymarket.ts --trade 5      # Buy & sell $5 on Polymarket  
 
 Environment variables required:
   WALLET_GPT_SVM_PRIVATE   Solana wallet private key (base58)
@@ -720,8 +624,7 @@ Environment variables required:
 // Parse mode and amount
 const isDeposit = args.includes("--deposit");
 const isTrade = args.includes("--trade");
-const isWithdraw = args.includes("--withdraw");
-const isFullTest = !isDeposit && !isTrade && !isWithdraw;
+const isFullTest = !isDeposit && !isTrade;
 
 // Get amount from non-flag args
 const amountArg = args.find((a) => !a.startsWith("--"));
@@ -734,7 +637,6 @@ async function main() {
   } else {
     const {
       svmSigner,
-      evmWallet,
       svmPublicKey,
       evmPublicKey,
       evmPrivateKey,
@@ -755,11 +657,6 @@ async function main() {
 
     if (isTrade) {
       const result = await runTrade(amount, evmPrivateKey);
-      results.push(result);
-    }
-
-    if (isWithdraw) {
-      const result = await runWithdraw(evmWallet, svmSigner, evmPublicKey);
       results.push(result);
     }
 

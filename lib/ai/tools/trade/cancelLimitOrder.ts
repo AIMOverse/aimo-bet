@@ -5,7 +5,7 @@
 
 import { tool } from "ai";
 import { z } from "zod";
-import { type Wallet } from "ethers";
+import { type PolygonWallet } from "@/lib/crypto/polygon/client";
 
 import { createClobClient } from "@/lib/prediction-market/polymarket/clob";
 import { cancelOrder } from "@/lib/prediction-market/polymarket/trade";
@@ -23,7 +23,7 @@ import type { CancelOrderResult, Exchange } from "./types";
  * @returns Parsed exchange and order ID, or null if invalid format
  */
 function parseOrderId(
-  prefixedOrderId: string,
+  prefixedOrderId: string
 ): { exchange: Exchange; orderId: string } | null {
   if (prefixedOrderId.startsWith("kalshi:")) {
     return { exchange: "kalshi", orderId: prefixedOrderId.slice(7) };
@@ -44,9 +44,9 @@ function parseOrderId(
  * Only Polymarket limit orders can be cancelled. Kalshi orders execute
  * immediately and cannot be cancelled.
  *
- * @param polymarketWallet - ethers Wallet for Polymarket trades (optional)
+ * @param polymarketWallet - Polygon wallet for Polymarket trades (optional)
  */
-export function createCancelLimitOrderTool(polymarketWallet?: Wallet) {
+export function createCancelLimitOrderTool(polymarketWallet?: PolygonWallet) {
   return tool({
     description:
       "Cancel an open limit order on Polymarket. " +
@@ -57,7 +57,7 @@ export function createCancelLimitOrderTool(polymarketWallet?: Wallet) {
       order_id: z
         .string()
         .describe(
-          "Prefixed order ID from placeLimitOrder (e.g., 'polymarket:abc123')",
+          "Prefixed order ID from placeLimitOrder (e.g., 'polymarket:abc123')"
         ),
     }),
     execute: async ({ order_id }): Promise<CancelOrderResult> => {

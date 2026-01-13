@@ -27,7 +27,7 @@ export { createGetPositionsTool, getPositionsTool } from "./getPositions";
 // Trades Tool
 export { createGetTradesTool, getTradesTool } from "./getTrades";
 
-// Withdrawal Tool (Polygon -> Solana via Wormhole)
+// Withdrawal Tool (Polygon -> Solana via Manual Bridge)
 export {
   createWithdrawToSolanaTool,
   withdrawToSolanaTool,

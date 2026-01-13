@@ -1,4 +1,4 @@
-import { bridgeUSDCToPolygon } from "@/lib/prediction-market/polymarket/bridge";
+import { bridgeSolanaToPolygon } from "./manualBridge";
 import type { AgentSigners } from "@/lib/crypto/signers";
 import { checkRebalanceNeeded } from "./check";
 import {
@@ -46,7 +46,7 @@ export async function checkAndTriggerRebalance(
   );
 
   // Fire and forget - don't await
-  bridgeUSDCToPolygon(
+  bridgeSolanaToPolygon(
     check.amount,
     signers.svm.keyPairSigner,
     signers.evm.address

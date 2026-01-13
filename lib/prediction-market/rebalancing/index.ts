@@ -2,11 +2,7 @@
 export { REBALANCE_CONFIG } from "./config";
 
 // Types
-export type {
-  BalanceState,
-  RebalanceCheck,
-  RebalanceResult,
-} from "./types";
+export type { BalanceState, RebalanceCheck, RebalanceResult } from "./types";
 
 // Check logic
 export { checkRebalanceNeeded } from "./check";
@@ -20,3 +16,14 @@ export {
 
 // Execute
 export { checkAndTriggerRebalance } from "./execute";
+
+// Manual Bridge
+export {
+  bridgePolygonToSolana,
+  bridgeSolanaToPolygon,
+  getVaultBalances,
+  getSvmVaultSigner,
+  getEvmVaultWallet,
+  type BridgeResult,
+  type VaultBalances,
+} from "./manualBridge";

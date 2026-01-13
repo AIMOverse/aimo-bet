@@ -1,16 +1,17 @@
 // ============================================================================
 // Withdraw USDC Tool
-// Bridge USDC from Polygon back to Solana via Wormhole
+// Bridge USDC from Polygon back to Solana via Manual Bridge
 // ============================================================================
 
 import { tool } from "ai";
 import { z } from "zod";
-import type { Wallet } from "ethers";
 import type { KeyPairSigner } from "@solana/kit";
+import type { PolygonWallet } from "@/lib/crypto/polygon/client";
 import {
-  withdrawUSDCToSolana,
-  getWithdrawalQuote,
-} from "@/lib/prediction-market/polymarket/wormhole";
+  bridgePolygonToSolana,
+  getVaultBalances,
+} from "@/lib/prediction-market/rebalancing/manualBridge";
+import { getCurrencyBalance } from "@/lib/crypto/solana/client";
 
 // ============================================================================
 // Types
@@ -19,7 +20,7 @@ import {
 export interface WithdrawSigners {
   evm?: {
     address: string;
-    wallet: Wallet;
+    wallet: PolygonWallet;
   };
   svm?: {
     address: string;
@@ -33,16 +34,14 @@ export interface WithdrawResult {
   destination_tx_hash?: string;
   amount_withdrawn: number;
   new_solana_balance?: number;
-  state?: string;
   error?: string;
 }
 
 export interface QuoteResult {
   success: boolean;
   amount: number;
-  estimated_fee: number;
-  estimated_time: string;
-  min_amount: number;
+  vault_available: number;
+  can_bridge: boolean;
   error?: string;
 }
 
@@ -52,21 +51,18 @@ export interface QuoteResult {
 
 /**
  * Create withdrawToSolana tool bound to agent signers
- * Allows agents to withdraw USDC.e from Polygon back to Solana via Wormhole
+ * Allows agents to withdraw USDC.e from Polygon back to Solana via manual bridge
  *
  * @param signers - Agent signers with EVM and SVM keys
  */
 export function createWithdrawToSolanaTool(signers: WithdrawSigners) {
   return tool({
     description:
-      "Withdraw USDC from Polygon (Polymarket) back to Solana (Kalshi) via Wormhole bridge. " +
+      "Withdraw USDC from Polygon (Polymarket) back to Solana (Kalshi) via bridge vault. " +
       "Use this to move funds from Polymarket profits back to your main Solana wallet. " +
-      "Takes 10-30 minutes to complete. Minimum withdrawal is $1.",
+      "Completes in seconds (no external bridge delays).",
     inputSchema: z.object({
-      amount: z
-        .number()
-        .positive()
-        .describe("Amount of USDC to withdraw (minimum $1)"),
+      amount: z.number().positive().describe("Amount of USDC to withdraw"),
       quote_only: z
         .boolean()
         .optional()
@@ -81,16 +77,26 @@ export function createWithdrawToSolanaTool(signers: WithdrawSigners) {
     }): Promise<WithdrawResult | QuoteResult> => {
       const logPrefix = "[management/withdrawToSolana]";
 
-      // Quote only mode
+      // Quote only mode - check vault liquidity
       if (quote_only) {
         console.log(`${logPrefix} Getting withdrawal quote for $${amount}`);
-        const quote = await getWithdrawalQuote(amount);
+        const vaults = await getVaultBalances();
+
+        if (!vaults) {
+          return {
+            success: false,
+            amount,
+            vault_available: 0,
+            can_bridge: false,
+            error: "Bridge vaults not configured",
+          };
+        }
+
         return {
           success: true,
-          amount: quote.amount,
-          estimated_fee: quote.estimatedFee,
-          estimated_time: quote.estimatedTime,
-          min_amount: quote.minAmount,
+          amount,
+          vault_available: vaults.svm.usdc,
+          can_bridge: vaults.svm.usdc >= amount,
         };
       }
 
@@ -119,21 +125,29 @@ export function createWithdrawToSolanaTool(signers: WithdrawSigners) {
       console.log(`${logPrefix} To: ${signers.svm.address} (Solana)`);
 
       try {
-        const result = await withdrawUSDCToSolana(
+        const result = await bridgePolygonToSolana(
           amount,
           signers.evm.wallet,
-          signers.svm.keyPairSigner
+          signers.svm.address
         );
 
         if (result.success) {
           console.log(`${logPrefix} Withdrawal successful!`);
+
+          // Get new Solana balance
+          const newBalance = await getCurrencyBalance(
+            signers.svm.address,
+            "USDC"
+          );
+
           return {
             success: true,
             source_tx_hash: result.sourceTxHash,
             destination_tx_hash: result.destinationTxHash,
             amount_withdrawn: result.amountBridged,
-            new_solana_balance: result.newBalance,
-            state: result.state,
+            new_solana_balance: newBalance
+              ? Number(newBalance.formatted)
+              : undefined,
           };
         } else {
           console.error(`${logPrefix} Withdrawal failed: ${result.error}`);
@@ -141,7 +155,6 @@ export function createWithdrawToSolanaTool(signers: WithdrawSigners) {
             success: false,
             source_tx_hash: result.sourceTxHash,
             amount_withdrawn: 0,
-            state: result.state,
             error: result.error,
           };
         }

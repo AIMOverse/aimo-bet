@@ -16,7 +16,7 @@
 import { ToolLoopAgent, stepCountIs } from "ai";
 import { nanoid } from "nanoid";
 import { type KeyPairSigner } from "@solana/kit";
-import { type Wallet } from "ethers";
+import { type PolygonWallet } from "@/lib/crypto/polygon/client";
 import { getModel } from "@/lib/ai/models";
 import { TRADING_SYSTEM_PROMPT } from "@/lib/ai/prompts/systemPrompt";
 import { createAgentSigners } from "@/lib/crypto/signers";
@@ -82,7 +82,8 @@ export class PredictionMarketAgent {
     // Extract signers for tools
     const kalshiSigner: KeyPairSigner | undefined =
       agentSigners.svm?.keyPairSigner;
-    const polymarketWallet: Wallet | undefined = agentSigners.evm?.wallet;
+    const polymarketWallet: PolygonWallet | undefined =
+      agentSigners.evm?.wallet;
 
     // Log wallet availability
     console.log(`[PredictionMarketAgent:${this.config.modelId}] Signers:`, {
@@ -98,7 +99,7 @@ export class PredictionMarketAgent {
       evm: { address: agentSigners.evm?.address || "" },
     };
 
-    // Create withdrawal signers (needs full signer objects for Wormhole bridge)
+    // Create withdrawal signers (needs full signer objects for bridge)
     const withdrawSigners: WithdrawSigners = {
       svm: agentSigners.svm
         ? {
@@ -123,7 +124,7 @@ export class PredictionMarketAgent {
       placeMarketOrder: createPlaceMarketOrderTool(
         agentSigners.svm?.address || this.config.walletAddress,
         kalshiSigner,
-        polymarketWallet,
+        polymarketWallet
       ),
       placeLimitOrder: createPlaceLimitOrderTool(polymarketWallet),
       cancelLimitOrder: createCancelLimitOrderTool(polymarketWallet),
@@ -134,19 +135,19 @@ export class PredictionMarketAgent {
 
     // Get the model instance with detailed error logging
     console.log(
-      `[PredictionMarketAgent:${this.config.modelId}] Getting model instance...`,
+      `[PredictionMarketAgent:${this.config.modelId}] Getting model instance...`
     );
 
     let model;
     try {
       model = await getModel(this.config.modelId);
       console.log(
-        `[PredictionMarketAgent:${this.config.modelId}] Model instance created successfully`,
+        `[PredictionMarketAgent:${this.config.modelId}] Model instance created successfully`
       );
     } catch (modelError) {
       console.error(
         `[PredictionMarketAgent:${this.config.modelId}] Failed to get model:`,
-        modelError,
+        modelError
       );
       throw modelError;
     }
@@ -167,7 +168,7 @@ export class PredictionMarketAgent {
     const prompt = this.buildPrompt();
 
     console.log(
-      `[PredictionMarketAgent:${this.config.modelId}] Starting agent run`,
+      `[PredictionMarketAgent:${this.config.modelId}] Starting agent run`
     );
 
     // Run the agent with ToolLoopAgent.generate()
@@ -195,13 +196,13 @@ export class PredictionMarketAgent {
           url: error.url,
           requestBodyValues: JSON.stringify(error.requestBodyValues, null, 2),
           // stack: error.stack,
-        },
+        }
       );
       throw agentError;
     }
 
     console.log(
-      `[PredictionMarketAgent:${this.config.modelId}] Completed with ${result.steps.length} steps`,
+      `[PredictionMarketAgent:${this.config.modelId}] Completed with ${result.steps.length} steps`
     );
 
     // Extract trades from tool call results
@@ -270,7 +271,7 @@ export class PredictionMarketAgent {
    */
   private extractReasoning(
     finalText: string | undefined,
-    steps: Array<{ text?: string }>,
+    steps: Array<{ text?: string }>
   ): string {
     // If we have final text, use it
     if (finalText && finalText.trim()) {
@@ -302,7 +303,7 @@ export class PredictionMarketAgent {
         input: unknown;
       }>;
       toolResults?: Array<{ toolCallId: string; output?: unknown }>;
-    }>,
+    }>
   ): ExecutedTrade[] {
     const trades: ExecutedTrade[] = [];
 
@@ -316,7 +317,7 @@ export class PredictionMarketAgent {
           call.toolName === "placeLimitOrder"
         ) {
           const resultEntry = step.toolResults.find(
-            (r) => r.toolCallId === call.toolCallId,
+            (r) => r.toolCallId === call.toolCallId
           );
 
           const typedOutput = resultEntry?.output as
@@ -365,7 +366,7 @@ export class PredictionMarketAgent {
    */
   private determineDecision(
     text: string | undefined,
-    trades: ExecutedTrade[],
+    trades: ExecutedTrade[]
   ): DecisionType {
     if (trades.length > 0) {
       return trades[0].action === "buy" ? "buy" : "sell";
@@ -395,7 +396,7 @@ export class PredictionMarketAgent {
         input: unknown;
       }>;
       toolResults?: Array<{ toolCallId: string; output?: unknown }>;
-    }>,
+    }>
   ): number {
     for (const step of steps) {
       if (!step.toolCalls || !step.toolResults) continue;
@@ -403,7 +404,7 @@ export class PredictionMarketAgent {
       for (const call of step.toolCalls) {
         if (call.toolName === "getBalance") {
           const resultEntry = step.toolResults.find(
-            (r) => r.toolCallId === call.toolCallId,
+            (r) => r.toolCallId === call.toolCallId
           );
 
           const typedOutput = resultEntry?.output as
@@ -433,7 +434,7 @@ export class PredictionMarketAgent {
         inputTokens?: number;
         outputTokens?: number;
       };
-    }>,
+    }>
   ): { totalTokens: number } {
     let totalTokens = 0;
 

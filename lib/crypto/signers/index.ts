@@ -4,7 +4,6 @@
 // ============================================================================
 
 import type { KeyPairSigner } from "@solana/kit";
-import type { Wallet } from "ethers";
 import type { SvmClientSigner } from "@aimo.network/svm";
 
 import {
@@ -14,7 +13,7 @@ import {
 } from "../wallets/registry";
 import { createSvmSigner } from "../wallets/svm";
 import { createSignerFromBase58SecretKey } from "../solana/wallets";
-import { createPolygonWallet } from "../polygon/client";
+import { createPolygonWallet, type PolygonWallet } from "../polygon/client";
 import { getModelById } from "@/lib/ai/models/catalog";
 
 // ============================================================================
@@ -33,8 +32,8 @@ export interface SvmSigners {
 export interface EvmSigners {
   /** EVM EOA wallet address (holds USDC for Polymarket) */
   address: string;
-  /** ethers Wallet for Polymarket order signing */
-  wallet: Wallet;
+  /** Polygon wallet for Polymarket order signing */
+  wallet: PolygonWallet;
 }
 
 export interface AgentSigners {
