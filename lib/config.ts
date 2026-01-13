@@ -38,7 +38,7 @@ export const POLYGON_USDC_ADDRESS =
 export const GLOBAL_SESSION_ID = "00000000-0000-0000-0000-000000000001";
 
 /** Default starting capital for new sessions */
-export const DEFAULT_STARTING_CAPITAL = 10000;
+export const DEFAULT_STARTING_CAPITAL = 100;
 
 /** Chart configuration */
 export const CHART_CONFIG = {
