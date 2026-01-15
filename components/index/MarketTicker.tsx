@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, Component, type ReactNode } from "react";
 import { Ticker } from "motion-plus/react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
@@ -10,6 +11,45 @@ import type {
   Platform,
   Category,
 } from "@/hooks/index/useTickerMarkets";
+
+// ============================================================================
+// Error Boundary for Ticker component
+// ============================================================================
+
+interface TickerErrorBoundaryProps {
+  children: ReactNode;
+  fallback: ReactNode;
+}
+
+interface TickerErrorBoundaryState {
+  hasError: boolean;
+}
+
+class TickerErrorBoundary extends Component<
+  TickerErrorBoundaryProps,
+  TickerErrorBoundaryState
+> {
+  constructor(props: TickerErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(): TickerErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
+    // Log silently - this is a known issue with motion-plus Ticker during unmount
+    console.debug("[MarketTicker] Ticker error caught:", error.message);
+  }
+
+  render(): ReactNode {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+    return this.props.children;
+  }
+}
 
 // ============================================================================
 // Constants
@@ -65,6 +105,23 @@ export function MarketTicker({
   // Check if any platform is connected
   const anyConnected = isConnected.kalshi || isConnected.polymarket;
 
+  // Ensure markets is always a valid array to prevent race conditions with Ticker component
+  const safeMarkets = markets ?? [];
+
+  // Pre-render ticker items to ensure stable children array for Ticker component
+  // Must be called before any early returns to follow React hooks rules
+  const tickerItems = useMemo(() => {
+    if (safeMarkets.length === 0) return null;
+    return safeMarkets.map((market) => (
+      <MarketCard
+        key={`${market.platform}-${market.ticker}`}
+        market={market}
+        direction={priceDirection.get(market.ticker)}
+      />
+    ));
+  }, [safeMarkets, priceDirection]);
+
+  // Loading state
   if (isLoading) {
     return (
       <div className="flex gap-4 p-4 overflow-hidden">
@@ -88,6 +145,7 @@ export function MarketTicker({
     );
   }
 
+  // Error state
   if (error) {
     console.error("[MarketTicker] Error loading markets:", error);
     return (
@@ -97,10 +155,8 @@ export function MarketTicker({
     );
   }
 
-  // Ensure markets is always a valid array to prevent race conditions with Ticker component
-  const safeMarkets = markets ?? [];
-
-  if (safeMarkets.length === 0) {
+  // Empty state
+  if (!tickerItems || tickerItems.length === 0) {
     return (
       <div className="p-4 text-sm text-muted-foreground">
         No markets available
@@ -119,15 +175,17 @@ export function MarketTicker({
       )}
 
       {/* Auto-scrolling ticker - pauses on hover */}
-      <Ticker velocity={TICKER_VELOCITY} gap={TICKER_GAP} hoverFactor={0}>
-        {safeMarkets.map((market) => (
-          <MarketCard
-            key={`${market.platform}-${market.ticker}`}
-            market={market}
-            direction={priceDirection.get(market.ticker)}
-          />
-        ))}
-      </Ticker>
+      <TickerErrorBoundary
+        fallback={
+          <div className="p-4 text-sm text-muted-foreground">
+            Loading markets...
+          </div>
+        }
+      >
+        <Ticker velocity={TICKER_VELOCITY} gap={TICKER_GAP} hoverFactor={0}>
+          {tickerItems}
+        </Ticker>
+      </TickerErrorBoundary>
     </div>
   );
 }

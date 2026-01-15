@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import { DEFAULT_STARTING_CAPITAL } from "@/lib/config";
 import type { ChartDataPoint } from "@/lib/supabase/types";
@@ -55,17 +55,15 @@ export function usePerformanceChart({
 }: UsePerformanceChartOptions): UsePerformanceChartReturn {
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [latestValues, setLatestValues] = useState<Map<string, number>>(
-    new Map()
+    new Map(),
   );
   const [tokenUsage, setTokenUsage] = useState<Map<string, number>>(new Map());
   const [deadModels, setDeadModels] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
-  // Store agent sessions for reference
-  const [agentSessions, setAgentSessions] = useState<
-    Map<string, AgentSessionRow>
-  >(new Map());
+  // Store agent sessions for reference (use ref to avoid effect re-runs)
+  const agentSessionsRef = useRef<Map<string, AgentSessionRow>>(new Map());
 
   /**
    * Transform raw decision data into chart format, ensuring all models are included.
@@ -74,7 +72,7 @@ export function usePerformanceChart({
   const transformToChartData = useCallback(
     (
       decisions: DecisionRow[],
-      sessions: Map<string, AgentSessionRow>
+      sessions: Map<string, AgentSessionRow>,
     ): ChartDataPoint[] => {
       // Get all model names from sessions (source of truth)
       const allModels = Array.from(sessions.values()).map((s) => s.model_name);
@@ -138,7 +136,7 @@ export function usePerformanceChart({
 
       return result;
     },
-    []
+    [],
   );
 
   useEffect(() => {
@@ -164,7 +162,7 @@ export function usePerformanceChart({
         const { data: sessionsData, error: sessionsError } = await client
           .from("agent_sessions")
           .select(
-            "id, model_name, starting_capital, current_value, total_tokens"
+            "id, model_name, starting_capital, current_value, total_tokens",
           )
           .eq("session_id", sessionId);
 
@@ -189,7 +187,7 @@ export function usePerformanceChart({
           }
         }
 
-        setAgentSessions(sessionsMap);
+        agentSessionsRef.current = sessionsMap;
         setLatestValues(latestValuesMap);
         setTokenUsage(tokenUsageMap);
         setDeadModels(deadModelsSet);
@@ -202,7 +200,7 @@ export function usePerformanceChart({
             created_at,
             portfolio_value_after,
             agent_sessions!inner(session_id, model_name)
-          `
+          `,
           )
           .eq("agent_sessions.session_id", sessionId)
           .gte("created_at", sinceTimestamp)
@@ -221,7 +219,7 @@ export function usePerformanceChart({
               portfolio_value_after: row.portfolio_value_after as number,
               model_name: agentSessions.model_name,
             };
-          }
+          },
         );
 
         // Transform to chart data (all models included)
@@ -229,7 +227,7 @@ export function usePerformanceChart({
       } catch (err) {
         console.error("[usePerformanceChart] Error fetching data:", err);
         setError(
-          err instanceof Error ? err : new Error("Failed to fetch chart data")
+          err instanceof Error ? err : new Error("Failed to fetch chart data"),
         );
       } finally {
         setLoading(false);
@@ -250,13 +248,13 @@ export function usePerformanceChart({
           table: "agent_decisions",
         },
         async (
-          payload: RealtimePostgresInsertPayload<Record<string, unknown>>
+          payload: RealtimePostgresInsertPayload<Record<string, unknown>>,
         ) => {
           try {
             const agentSessionId = payload.new.agent_session_id as string;
 
             // Get model name from our cached sessions
-            const session = agentSessions.get(agentSessionId);
+            const session = agentSessionsRef.current.get(agentSessionId);
             let modelName = session?.model_name;
 
             // If not in cache, fetch from DB
@@ -290,7 +288,7 @@ export function usePerformanceChart({
             setChartData((prev: ChartDataPoint[]) => {
               const updated = [...prev];
               const existingPointIndex = updated.findIndex(
-                (p) => p.timestamp === newPoint.created_at
+                (p) => p.timestamp === newPoint.created_at,
               );
 
               if (existingPointIndex >= 0) {
@@ -326,10 +324,10 @@ export function usePerformanceChart({
           } catch (err) {
             console.error(
               "[usePerformanceChart] Error processing decision update:",
-              err
+              err,
             );
           }
-        }
+        },
       )
       // Listen for agent_sessions updates (current_value changes)
       .on(
@@ -377,27 +375,23 @@ export function usePerformanceChart({
               });
             }
 
-            // Update agent sessions cache
-            setAgentSessions((prev) => {
-              const updated = new Map(prev);
-              const id = payload.new.id as string;
-              const existing = updated.get(id);
-              if (existing) {
-                updated.set(id, {
-                  ...existing,
-                  current_value: currentValue,
-                  total_tokens: totalTokens,
-                });
-              }
-              return updated;
-            });
+            // Update agent sessions cache (ref mutation, no re-render needed)
+            const id = payload.new.id as string;
+            const existing = agentSessionsRef.current.get(id);
+            if (existing) {
+              agentSessionsRef.current.set(id, {
+                ...existing,
+                current_value: currentValue,
+                total_tokens: totalTokens,
+              });
+            }
           } catch (err) {
             console.error(
               "[usePerformanceChart] Error processing session update:",
-              err
+              err,
             );
           }
-        }
+        },
       )
       // Listen for new agent_sessions (new models joining)
       .on(
@@ -424,12 +418,8 @@ export function usePerformanceChart({
               total_tokens: (payload.new.total_tokens as number) ?? 0,
             };
 
-            // Add to sessions cache
-            setAgentSessions((prev) => {
-              const updated = new Map(prev);
-              updated.set(newSession.id, newSession);
-              return updated;
-            });
+            // Add to sessions cache (ref mutation, no re-render needed)
+            agentSessionsRef.current.set(newSession.id, newSession);
 
             // Add to latest values
             setLatestValues((prev) => {
@@ -473,10 +463,10 @@ export function usePerformanceChart({
           } catch (err) {
             console.error(
               "[usePerformanceChart] Error processing new session:",
-              err
+              err,
             );
           }
-        }
+        },
       )
       .subscribe((status: string) => {
         console.log(`[usePerformanceChart] Subscription status: ${status}`);
@@ -485,7 +475,7 @@ export function usePerformanceChart({
     return () => {
       channel.unsubscribe();
     };
-  }, [sessionId, hoursBack, transformToChartData, agentSessions]);
+  }, [sessionId, hoursBack, since, transformToChartData]);
 
   return { chartData, latestValues, tokenUsage, deadModels, loading, error };
 }
