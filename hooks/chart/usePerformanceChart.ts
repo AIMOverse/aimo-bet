@@ -239,96 +239,97 @@ export function usePerformanceChart({
     // Subscribe to realtime updates on both tables
     const channel = client
       .channel(`chart:${sessionId}`)
+      // TEMPORARILY COMMENTED OUT to debug -$1000 outlier issue
       // Listen for new decisions (adds chart points)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "agent_decisions",
-        },
-        async (
-          payload: RealtimePostgresInsertPayload<Record<string, unknown>>,
-        ) => {
-          try {
-            const agentSessionId = payload.new.agent_session_id as string;
+      // .on(
+      //   "postgres_changes",
+      //   {
+      //     event: "INSERT",
+      //     schema: "public",
+      //     table: "agent_decisions",
+      //   },
+      //   async (
+      //     payload: RealtimePostgresInsertPayload<Record<string, unknown>>,
+      //   ) => {
+      //     try {
+      //       const agentSessionId = payload.new.agent_session_id as string;
 
-            // Get model name from our cached sessions
-            const session = agentSessionsRef.current.get(agentSessionId);
-            let modelName = session?.model_name;
+      //       // Get model name from our cached sessions
+      //       const session = agentSessionsRef.current.get(agentSessionId);
+      //       let modelName = session?.model_name;
 
-            // If not in cache, fetch from DB
-            if (!modelName) {
-              const { data: agentSession } = await client
-                .from("agent_sessions")
-                .select("model_name, session_id")
-                .eq("id", agentSessionId)
-                .single();
+      //       // If not in cache, fetch from DB
+      //       if (!modelName) {
+      //         const { data: agentSession } = await client
+      //           .from("agent_sessions")
+      //           .select("model_name, session_id")
+      //           .eq("id", agentSessionId)
+      //           .single();
 
-              const fetchedSession = agentSession as {
-                model_name: string;
-                session_id: string;
-              } | null;
+      //         const fetchedSession = agentSession as {
+      //           model_name: string;
+      //           session_id: string;
+      //         } | null;
 
-              if (!fetchedSession || fetchedSession.session_id !== sessionId) {
-                return;
-              }
+      //         if (!fetchedSession || fetchedSession.session_id !== sessionId) {
+      //           return;
+      //         }
 
-              modelName = fetchedSession.model_name;
-            }
+      //         modelName = fetchedSession.model_name;
+      //       }
 
-            const newPoint: DecisionRow = {
-              created_at: payload.new.created_at as string,
-              portfolio_value_after: payload.new
-                .portfolio_value_after as number,
-              model_name: modelName,
-            };
+      //       const newPoint: DecisionRow = {
+      //         created_at: payload.new.created_at as string,
+      //         portfolio_value_after: payload.new
+      //           .portfolio_value_after as number,
+      //         model_name: modelName,
+      //       };
 
-            // Update chart data
-            setChartData((prev: ChartDataPoint[]) => {
-              const updated = [...prev];
-              const existingPointIndex = updated.findIndex(
-                (p) => p.timestamp === newPoint.created_at,
-              );
+      //       // Update chart data
+      //       setChartData((prev: ChartDataPoint[]) => {
+      //         const updated = [...prev];
+      //         const existingPointIndex = updated.findIndex(
+      //           (p) => p.timestamp === newPoint.created_at,
+      //         );
 
-              if (existingPointIndex >= 0) {
-                // Update existing point
-                updated[existingPointIndex] = {
-                  ...updated[existingPointIndex],
-                  [newPoint.model_name]: newPoint.portfolio_value_after,
-                };
-              } else {
-                // Add new point (carry forward previous values for other models)
-                const lastPoint = updated[updated.length - 1] || {};
-                updated.push({
-                  ...lastPoint,
-                  timestamp: newPoint.created_at,
-                  [newPoint.model_name]: newPoint.portfolio_value_after,
-                });
-              }
+      //         if (existingPointIndex >= 0) {
+      //           // Update existing point
+      //           updated[existingPointIndex] = {
+      //             ...updated[existingPointIndex],
+      //             [newPoint.model_name]: newPoint.portfolio_value_after,
+      //           };
+      //         } else {
+      //           // Add new point (carry forward previous values for other models)
+      //           const lastPoint = updated[updated.length - 1] || {};
+      //           updated.push({
+      //             ...lastPoint,
+      //             timestamp: newPoint.created_at,
+      //             [newPoint.model_name]: newPoint.portfolio_value_after,
+      //           });
+      //         }
 
-              return updated;
-            });
+      //         return updated;
+      //       });
 
-            // Update latest values
-            setLatestValues((prev) => {
-              const updated = new Map(prev);
-              updated.set(newPoint.model_name, newPoint.portfolio_value_after);
-              return updated;
-            });
+      //       // Update latest values
+      //       setLatestValues((prev) => {
+      //         const updated = new Map(prev);
+      //         updated.set(newPoint.model_name, newPoint.portfolio_value_after);
+      //         return updated;
+      //       });
 
-            // Check if model is now dead
-            if (newPoint.portfolio_value_after <= 0) {
-              setDeadModels((prev) => new Set(prev).add(newPoint.model_name));
-            }
-          } catch (err) {
-            console.error(
-              "[usePerformanceChart] Error processing decision update:",
-              err,
-            );
-          }
-        },
-      )
+      //       // Check if model is now dead
+      //       if (newPoint.portfolio_value_after <= 0) {
+      //         setDeadModels((prev) => new Set(prev).add(newPoint.model_name));
+      //       }
+      //     } catch (err) {
+      //       console.error(
+      //         "[usePerformanceChart] Error processing decision update:",
+      //         err,
+      //       );
+      //     }
+      //   },
+      // )
       // Listen for agent_sessions updates (current_value changes)
       .on(
         "postgres_changes",
