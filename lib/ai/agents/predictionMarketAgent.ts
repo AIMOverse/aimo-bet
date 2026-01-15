@@ -53,6 +53,7 @@ import type {
   PositionSide,
   TradeAction,
 } from "@/lib/supabase/types";
+import type { ExplainMarketResult } from "@/lib/ai/tools/discover/types";
 
 export class PredictionMarketAgent {
   private config: AgentConfig;
@@ -74,6 +75,7 @@ export class PredictionMarketAgent {
    * - Agent fetches balance via getBalance tool (appends to cache)
    * - User prompt is static ("Analyze markets...")
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async run(_input: AgentRunInput): Promise<TradingResult> {
     // Create unified signers for this agent (SVM + EVM)
     // Uses wallet registry to get per-model keys from env vars
@@ -292,8 +294,59 @@ export class PredictionMarketAgent {
   }
 
   /**
+   * Build a title map from explainMarket tool calls.
+   * Maps market IDs, token IDs, and tickers to human-readable titles.
+   */
+  private buildTitleMap(
+    steps: Array<{
+      toolCalls?: Array<{
+        toolName: string;
+        toolCallId: string;
+        input: unknown;
+      }>;
+      toolResults?: Array<{ toolCallId: string; output?: unknown }>;
+    }>
+  ): Map<string, string> {
+    const titleMap = new Map<string, string>();
+
+    for (const step of steps) {
+      if (!step.toolCalls || !step.toolResults) continue;
+
+      for (const call of step.toolCalls) {
+        if (call.toolName === "explainMarket") {
+          const result = step.toolResults.find(
+            (r) => r.toolCallId === call.toolCallId
+          );
+          const output = result?.output as ExplainMarketResult | undefined;
+
+          if (output?.success && output.question) {
+            // Map the market ID → title
+            titleMap.set(output.id, output.question);
+
+            // Also map token IDs for Polymarket (trades use token_id, not market_id)
+            if (output.trading?.yes_token_id) {
+              titleMap.set(output.trading.yes_token_id, output.question);
+            }
+            if (output.trading?.no_token_id) {
+              titleMap.set(output.trading.no_token_id, output.question);
+            }
+
+            // Also map market_ticker for Kalshi
+            if (output.trading?.market_ticker) {
+              titleMap.set(output.trading.market_ticker, output.question);
+            }
+          }
+        }
+      }
+    }
+
+    return titleMap;
+  }
+
+  /**
    * Extract executed trades from agent steps.
    * Looks for successful placeOrder tool calls and their results.
+   * Uses title map from explainMarket calls for human-readable titles.
    */
   private extractTrades(
     steps: Array<{
@@ -306,6 +359,9 @@ export class PredictionMarketAgent {
     }>
   ): ExecutedTrade[] {
     const trades: ExecutedTrade[] = [];
+
+    // Build title map from explainMarket calls first
+    const titleMap = this.buildTitleMap(steps);
 
     for (const step of steps) {
       if (!step.toolCalls || !step.toolResults) continue;
@@ -346,7 +402,7 @@ export class PredictionMarketAgent {
             trades.push({
               id: typedOutput.order_id || nanoid(),
               marketTicker: input.id,
-              marketTitle: input.id,
+              marketTitle: titleMap.get(input.id) || input.id,
               side: input.outcome as PositionSide,
               action: input.side as TradeAction,
               quantity: typedOutput.filled_quantity || input.quantity || 0,

@@ -71,9 +71,9 @@ export default function Home() {
       <AppHeader />
 
       {/* Market Ticker Strip */}
-      {/*<div className="border-b bg-background/50">
+      <div className="border-b bg-background/50">
         <MarketTicker {...livePrices} />
-      </div>*/}
+      </div>
 
       {/* Main Content: Left (Chart) + Right (Tabs + Content) */}
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">

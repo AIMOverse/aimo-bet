@@ -164,6 +164,7 @@ export async function createMonitor(
       query: config.query,
       cadence: config.cadence,
       metadata: config.metadata,
+      ...(config.outputSchema && { output_schema: config.outputSchema }),
       webhook: {
         url: PARALLEL_MONITOR_WEBHOOK_URL,
         event_types: [

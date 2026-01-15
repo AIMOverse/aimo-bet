@@ -1,11 +1,13 @@
 "use client";
 
 import { useMemo } from "react";
-import { Briefcase } from "lucide-react";
+import { Briefcase, Wifi, WifiOff } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import type { AgentPosition } from "@/hooks/positions/usePositions";
+import { usePositionPrices } from "@/hooks/positions/usePositionPrices";
+import type { PriceDirection } from "@/hooks/positions/usePriceSubscription";
 import { cn } from "@/lib/utils";
 import { AnimateNumber } from "motion-plus/react";
 
@@ -34,7 +36,8 @@ interface PositionsTableProps {
 }
 
 interface PositionWithPrice extends AgentPosition {
-  mockPrice: number;
+  livePrice: number | undefined;
+  priceDirection?: PriceDirection;
 }
 
 interface MarketGroup {
@@ -54,14 +57,6 @@ interface ModelGroup {
   markets: MarketGroup[];
 }
 
-function getMockPrice(ticker: string, side: "yes" | "no"): number {
-  const hash = ticker
-    .split("")
-    .reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const basePrice = 35 + (hash % 50);
-  return side === "yes" ? basePrice / 100 : (100 - basePrice) / 100;
-}
-
 function formatCents(value: number): string {
   return `${Math.round(value * 100)}¢`;
 }
@@ -70,10 +65,12 @@ function Badge({
   side,
   isSelected,
   price,
+  priceDirection,
 }: {
   side: "yes" | "no";
   isSelected: boolean;
   price?: number;
+  priceDirection?: PriceDirection;
 }) {
   const isYes = side === "yes";
 
@@ -86,14 +83,19 @@ function Badge({
             ? "bg-blue-500 text-white"
             : "bg-orange-500 text-white"
           : "bg-muted/50 text-muted-foreground opacity-60",
+        // Price direction flash effect
+        priceDirection === "up" && "ring-2 ring-green-400",
+        priceDirection === "down" && "ring-2 ring-red-400",
       )}
     >
       <span className="uppercase">{side}</span>
       {price !== undefined && (
         <span
           className={cn(
-            "text-[10px] mt-0.5",
+            "text-[10px] mt-0.5 transition-colors",
             isSelected ? "text-white/80" : "text-muted-foreground",
+            priceDirection === "up" && "text-green-400",
+            priceDirection === "down" && "text-red-400",
           )}
         >
           {formatCents(price)}
@@ -150,12 +152,14 @@ function ModelRow({ modelGroup }: { modelGroup: ModelGroup }) {
                 <Badge
                   side="yes"
                   isSelected={market.yesPosition?.side === "yes"}
-                  price={market.yesPosition?.mockPrice}
+                  price={market.yesPosition?.livePrice}
+                  priceDirection={market.yesPosition?.priceDirection}
                 />
                 <Badge
                   side="no"
                   isSelected={market.noPosition?.side === "no"}
-                  price={market.noPosition?.mockPrice}
+                  price={market.noPosition?.livePrice}
+                  priceDirection={market.noPosition?.priceDirection}
                 />
               </div>
 
@@ -185,11 +189,25 @@ export function PositionsTable({
   positions,
   selectedModelId,
 }: PositionsTableProps) {
+  // Subscribe to live price updates for all positions
+  const { prices, priceDirection, isConnected } = usePositionPrices(positions);
+
   const modelGroups = useMemo(() => {
-    const positionsWithPrice: PositionWithPrice[] = positions.map((p) => ({
-      ...p,
-      mockPrice: getMockPrice(p.marketTicker, p.side),
-    }));
+    // Enrich positions with live prices
+    const positionsWithPrice: PositionWithPrice[] = positions.map((p) => {
+      const priceUpdate = prices.get(p.marketTicker);
+      const livePrice = priceUpdate
+        ? p.side === "yes"
+          ? priceUpdate.yesPrice
+          : priceUpdate.noPrice
+        : undefined;
+
+      return {
+        ...p,
+        livePrice,
+        priceDirection: priceDirection.get(p.marketTicker),
+      };
+    });
 
     const groupedByModel = new Map<string, ModelGroup>();
 
@@ -210,7 +228,9 @@ export function PositionsTable({
       }
 
       const modelGroup = groupedByModel.get(modelKey)!;
-      modelGroup.totalValue += position.quantity * position.mockPrice;
+      // Use live price if available, otherwise estimate with 0.5
+      const priceForValue = position.livePrice ?? 0.5;
+      modelGroup.totalValue += position.quantity * priceForValue;
     }
 
     for (const position of positionsWithPrice) {
@@ -242,11 +262,39 @@ export function PositionsTable({
     }
 
     return Array.from(groupedByModel.values());
-  }, [positions, selectedModelId]);
+  }, [positions, selectedModelId, prices, priceDirection]);
+
+  // Check if any connection is active
+  const hasConnection = isConnected.kalshi || isConnected.polymarket;
 
   return (
     <Card className="h-full flex flex-col">
-      <CardHeader className="pb-3"></CardHeader>
+      <CardHeader className="pb-3 flex flex-row items-center justify-end">
+        {positions.length > 0 && (
+          <div
+            className={cn(
+              "flex items-center gap-1 text-xs",
+              hasConnection ? "text-green-500" : "text-muted-foreground"
+            )}
+            title={
+              hasConnection
+                ? `Connected: ${[
+                    isConnected.kalshi && "Kalshi",
+                    isConnected.polymarket && "Polymarket",
+                  ]
+                    .filter(Boolean)
+                    .join(", ")}`
+                : "Disconnected"
+            }
+          >
+            {hasConnection ? (
+              <Wifi className="h-3 w-3" />
+            ) : (
+              <WifiOff className="h-3 w-3" />
+            )}
+          </div>
+        )}
+      </CardHeader>
 
       <CardContent className="flex-1 min-h-0">
         <ScrollArea className="h-full pr-4">

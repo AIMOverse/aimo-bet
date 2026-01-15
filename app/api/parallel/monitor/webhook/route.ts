@@ -7,7 +7,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHmac } from "crypto";
 import { PARALLEL_WEBHOOK_SECRET } from "@/lib/config";
 import { getMonitorEventGroup } from "@/lib/parallel/client";
-import type { MonitorWebhookPayload, MonitorEventGroup } from "@/lib/parallel/types";
+import type {
+  MonitorWebhookPayload,
+  MonitorEventGroup,
+  NewsEventStructuredOutput,
+} from "@/lib/parallel/types";
 
 // ============================================================================
 // Types
@@ -22,7 +26,19 @@ export interface NewsEventPayload {
     output: string;
     event_date: string;
     source_urls: string[];
+    result?: {
+      type: string;
+      content: NewsEventStructuredOutput;
+    };
   }>;
+  /** Enriched context extracted from metadata and structured output */
+  context?: {
+    category?: string;
+    type?: string;
+    urgency?: string;
+    sentiment?: string;
+    tradeable?: boolean;
+  };
 }
 
 // ============================================================================
@@ -134,15 +150,27 @@ async function handleEventDetected(
     );
   }
 
-  // 2. Build news event payload for agent
+  // 2. Extract structured output if available
+  const structuredResult = eventGroup.events[0]?.result?.content as
+    | NewsEventStructuredOutput
+    | undefined;
+
+  // 3. Build news event payload with enriched context for agent
   const newsPayload: NewsEventPayload = {
     monitor_id,
     event_group_id: event.event_group_id,
     metadata,
     events: eventGroup.events,
+    context: {
+      category: metadata?.category || structuredResult?.category,
+      type: metadata?.type, // "breaking" or "daily"
+      urgency: structuredResult?.urgency,
+      sentiment: structuredResult?.sentiment,
+      tradeable: structuredResult?.tradeable === "yes",
+    },
   };
 
-  // 3. Trigger agent with news event
+  // 4. Trigger agent with news event
   const webhookSecret = process.env.WEBHOOK_SECRET;
   const vercelUrl = process.env.VERCEL_URL;
 

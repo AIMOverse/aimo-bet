@@ -118,6 +118,8 @@ export interface MonitorConfig {
   cadence: MonitorCadence;
   /** Optional metadata for routing/filtering */
   metadata?: Record<string, string>;
+  /** Optional output schema for structured responses */
+  outputSchema?: object;
 }
 
 /** Response from creating a monitor */
@@ -125,6 +127,22 @@ export interface MonitorCreateResponse {
   monitor_id: string;
   status: MonitorStatus;
   created_at: string;
+}
+
+/** Structured output from news event monitors */
+export interface NewsEventStructuredOutput {
+  /** Concise headline summarizing the news event */
+  headline: string;
+  /** News category */
+  category: "politics" | "sports" | "crypto";
+  /** Urgency level */
+  urgency: "breaking" | "important" | "routine";
+  /** Market sentiment implication */
+  sentiment: "bullish" | "bearish" | "neutral";
+  /** Whether this news is directly tradeable */
+  tradeable: "yes" | "no";
+  /** Brief description of potential market impact */
+  market_impact: string;
 }
 
 /** Single event detected by a monitor */
@@ -135,6 +153,11 @@ export interface MonitorEvent {
   event_date: string;
   /** Source URLs for the event */
   source_urls: string[];
+  /** Structured result if output schema was specified */
+  result?: {
+    type: string;
+    content: NewsEventStructuredOutput;
+  };
 }
 
 /** Event group containing related events */
@@ -174,3 +197,42 @@ export interface MonitorDetails {
 export interface MonitorListResponse {
   monitors: MonitorDetails[];
 }
+
+// ============================================================================
+// Structured Output Schemas
+// ============================================================================
+
+/** Output schema for news event monitors */
+export const NEWS_OUTPUT_SCHEMA = {
+  type: "json",
+  json_schema: {
+    type: "object",
+    properties: {
+      headline: {
+        type: "string",
+        description: "Concise headline summarizing the news event (max 100 chars)",
+      },
+      category: {
+        type: "string",
+        description: "News category: politics, sports, or crypto",
+      },
+      urgency: {
+        type: "string",
+        description:
+          "Urgency level: breaking (rare, immediate impact), important (notable), or routine (minor)",
+      },
+      sentiment: {
+        type: "string",
+        description: "Market sentiment implication: bullish, bearish, or neutral",
+      },
+      tradeable: {
+        type: "string",
+        description: "Whether this news is directly tradeable on prediction markets: yes or no",
+      },
+      market_impact: {
+        type: "string",
+        description: "Brief description of potential prediction market impact (max 200 chars)",
+      },
+    },
+  },
+};
