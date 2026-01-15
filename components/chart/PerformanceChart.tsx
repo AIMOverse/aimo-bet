@@ -115,7 +115,7 @@ function CustomTooltip({
                 <span
                   className={cn(
                     "font-medium",
-                    isPositive ? "text-green-500" : "text-red-500"
+                    isPositive ? "text-green-500" : "text-red-500",
                   )}
                 >
                   {valueDisplay === "dollar"
@@ -215,7 +215,7 @@ function LineEndLabel({
           className={cn(
             "size-5 ring-[1.5px] ring-offset-0 bg-background shrink-0",
             isHovered && "ring-2",
-            isDead && "grayscale opacity-60"
+            isDead && "grayscale opacity-60",
           )}
           style={{
             ["--tw-ring-color" as string]: isDead ? DEAD_MODEL_COLOR : color,
@@ -244,7 +244,7 @@ function LineEndLabel({
           className={cn(
             "text-[11px] font-semibold whitespace-nowrap tabular-nums",
             isDead && "text-muted-foreground",
-            !isDead && (isPositive ? "text-green-500" : "text-red-500")
+            !isDead && (isPositive ? "text-green-500" : "text-red-500"),
           )}
         >
           {valueDisplay === "dollar" ? (
@@ -321,7 +321,7 @@ function CustomLegend({
     const value = latestValues?.get(entry.value) || DEFAULT_STARTING_CAPITAL;
     const tokens = tokenUsage?.get(entry.value) || 0;
     const leaderboardEntry = leaderboard?.find(
-      (e) => e.model.name === entry.value
+      (e) => e.model.name === entry.value,
     );
     return {
       name: entry.value,
@@ -354,7 +354,7 @@ function CustomLegend({
               "flex items-center gap-1 px-1 rounded transition-opacity cursor-default text-xs",
               "hover:bg-muted/50",
               isDimmed && "opacity-30",
-              isDead && "opacity-60"
+              isDead && "opacity-60",
             )}
             onMouseEnter={() => onModelHover(model.name)}
             onMouseLeave={() => onModelHover(null)}
@@ -376,8 +376,8 @@ function CustomLegend({
                 isDead
                   ? "text-muted-foreground"
                   : isPositive
-                  ? "text-green-500"
-                  : "text-red-500"
+                    ? "text-green-500"
+                    : "text-red-500",
               )}
             >
               {changePercent >= 0 ? "+" : ""}
@@ -489,22 +489,23 @@ export function PerformanceChart({
       return converted;
     });
 
+    // TEMPORARILY COMMENTED OUT to debug -$1000 outlier issue
     // Add latest real-time values as the newest point
-    if (latestValues && latestValues.size > 0) {
-      const latestPoint: ChartDataPoint & { _ts: number } = {
-        timestamp: new Date(now).toISOString(),
-        _ts: now,
-      };
-      modelNames.forEach((name) => {
-        const value = latestValues.get(name) ?? DEFAULT_STARTING_CAPITAL;
-        const pnl = value - DEFAULT_STARTING_CAPITAL;
-        latestPoint[name] =
-          valueDisplay === "percent"
-            ? (pnl / DEFAULT_STARTING_CAPITAL) * 100
-            : pnl;
-      });
-      historicalData.push(latestPoint);
-    }
+    // if (latestValues && latestValues.size > 0) {
+    //   const latestPoint: ChartDataPoint & { _ts: number } = {
+    //     timestamp: new Date(now).toISOString(),
+    //     _ts: now,
+    //   };
+    //   modelNames.forEach((name) => {
+    //     const value = latestValues.get(name) ?? DEFAULT_STARTING_CAPITAL;
+    //     const pnl = value - DEFAULT_STARTING_CAPITAL;
+    //     latestPoint[name] =
+    //       valueDisplay === "percent"
+    //         ? (pnl / DEFAULT_STARTING_CAPITAL) * 100
+    //         : pnl;
+    //   });
+    //   historicalData.push(latestPoint);
+    // }
 
     return historicalData;
   }, [data, valueDisplay, modelNames, latestValues, now]);
