@@ -13,8 +13,8 @@ import type { ModelDefinition } from "./types";
 export const MODELS: ModelDefinition[] = [
   // OpenAI - GPT-5.2
   {
-    id: "openai/gpt-5",
-    name: "GPT-5",
+    id: "openai/gpt-5.2",
+    name: "GPT 5.2",
     provider: "aimo-network",
     contextLength: 128000,
     pricing: { prompt: 1.75, completion: 14 },
@@ -68,8 +68,8 @@ export const MODELS: ModelDefinition[] = [
   },
   // GLM - glm-4.7
   {
-    id: "z-ai/glm-4.6",
-    name: "GLM-4.7",
+    id: "z-ai/glm-4.7",
+    name: "GLM 4.7",
     provider: "aimo-network",
     contextLength: 128000,
     pricing: { prompt: 0.5, completion: 1 },
@@ -84,10 +84,10 @@ export const MODELS: ModelDefinition[] = [
     walletAddress: process.env.WALLET_GLM_SVM_PUBLIC,
     enabled: true,
   },
-  // Grok - grok-4
+  // Grok - grok-4.1
   {
-    id: "xai/grok-4",
-    name: "Grok 4",
+    id: "xai/grok-4.1",
+    name: "Grok 4.1",
     provider: "aimo-network",
     contextLength: 256000,
     pricing: { prompt: 3, completion: 15 },
@@ -211,7 +211,7 @@ export function getArenaModel(id: string): ModelDefinition | undefined {
  * Get a specific arena model by short ID (e.g., "gpt-5.2" instead of "openai/gpt-5.2")
  */
 export function getArenaModelByShortId(
-  shortId: string,
+  shortId: string
 ): ModelDefinition | undefined {
   return MODELS.find((m) => m.id.endsWith(`/${shortId}`) || m.id === shortId);
 }
@@ -303,11 +303,11 @@ export function getModelsWithWallets(): ModelDefinition[] {
  * Uses the same SVM private keys as the aimo-network provider (registry.ts).
  */
 const WALLET_PRIVATE_KEY_MAP: Record<string, string | undefined> = {
-  "openai/gpt-5": process.env.WALLET_GPT_SVM_PRIVATE,
+  "openai/gpt-5.2": process.env.WALLET_GPT_SVM_PRIVATE,
   "anthropic/claude-sonnet-4.5": process.env.WALLET_CLAUDE_SVM_PRIVATE,
   "deepseek/deepseek-v3.2": process.env.WALLET_DEEPSEEK_SVM_PRIVATE,
-  "z-ai/glm-4.6": process.env.WALLET_GLM_SVM_PRIVATE,
-  "xai/grok-4": process.env.WALLET_GROK_SVM_PRIVATE,
+  "z-ai/glm-4.7": process.env.WALLET_GLM_SVM_PRIVATE,
+  "xai/grok-4.1": process.env.WALLET_GROK_SVM_PRIVATE,
   "qwen/qwen3-max": process.env.WALLET_QWEN_SVM_PRIVATE,
   "google/gemini-3-pro": process.env.WALLET_GEMINI_SVM_PRIVATE,
   "moonshotai/kimi-k2-0905": process.env.WALLET_KIMI_SVM_PRIVATE,
@@ -322,8 +322,8 @@ export function getWalletPrivateKey(modelId: string): string | undefined {
   if (!privateKey) {
     console.warn(
       `[Catalog] No private key found for model "${modelId}". Available keys: ${Object.keys(
-        WALLET_PRIVATE_KEY_MAP,
-      ).join(", ")}`,
+        WALLET_PRIVATE_KEY_MAP
+      ).join(", ")}`
     );
   }
   return privateKey;
