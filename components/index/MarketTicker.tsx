@@ -1,100 +1,86 @@
 "use client";
 
-import { useMemo } from "react";
+import { Ticker } from "motion-plus/react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { AnimateNumber } from "motion-plus/react";
-import {
-  type MarketPrice,
-  type PriceDirection,
-} from "@/hooks/index/useLivePrices";
 import { cn } from "@/lib/utils";
+import type {
+  TickerMarket,
+  Platform,
+  Category,
+} from "@/hooks/index/useTickerMarkets";
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-const MAX_MARKETS_PER_CARD = 3;
+const TICKER_VELOCITY = 40; // pixels per second
+const TICKER_GAP = 16; // gap between items in pixels
+
+// Category colors
+const CATEGORY_COLORS: Record<Category, string> = {
+  politics: "bg-blue-500",
+  sports: "bg-green-500",
+  crypto: "bg-orange-500",
+};
+
+// Platform badges
+const PLATFORM_BADGE: Record<Platform, { label: string; className: string }> = {
+  kalshi: {
+    label: "K",
+    className: "bg-purple-500/20 text-purple-400 border-purple-500/30",
+  },
+  polymarket: {
+    label: "P",
+    className: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30",
+  },
+};
 
 // ============================================================================
 // Types
 // ============================================================================
 
-interface GroupedEvent {
-  eventTicker: string;
-  eventTitle: string;
-  markets: MarketPrice[];
-  isSingleMarket: boolean;
-  totalMarkets: number;
-}
-
-// ============================================================================
-// Props
-// ============================================================================
+export type PriceDirection = "up" | "down" | "neutral";
 
 interface MarketTickerProps {
-  prices: MarketPrice[];
+  markets: TickerMarket[];
   priceDirection: Map<string, PriceDirection>;
   isLoading: boolean;
   error: Error | undefined;
-  isConnected: boolean;
+  isConnected: { kalshi: boolean; polymarket: boolean };
 }
 
 // ============================================================================
 // Main Export
 // ============================================================================
+
 export function MarketTicker({
-  prices,
+  markets,
   priceDirection,
   isLoading,
   error,
   isConnected,
 }: MarketTickerProps) {
-  // Group markets by eventTicker, sort by volume, limit to 5 events
-  const groupedEvents = useMemo(() => {
-    const eventMap = new Map<string, GroupedEvent>();
-
-    for (const market of prices) {
-      const existing = eventMap.get(market.eventTicker);
-      if (existing) {
-        existing.markets.push(market);
-        existing.isSingleMarket = false;
-        existing.totalMarkets += 1;
-      } else {
-        eventMap.set(market.eventTicker, {
-          eventTicker: market.eventTicker,
-          eventTitle: market.eventTitle,
-          markets: [market],
-          isSingleMarket: true,
-          totalMarkets: 1,
-        });
-      }
-    }
-
-    // Sort markets within each event by volume (highest first), then limit to MAX_MARKETS_PER_CARD
-    for (const group of eventMap.values()) {
-      group.markets.sort((a, b) => {
-        const volA = a.volume ?? a.volume24h ?? 0;
-        const volB = b.volume ?? b.volume24h ?? 0;
-        return volB - volA;
-      });
-      group.markets = group.markets.slice(0, MAX_MARKETS_PER_CARD);
-    }
-
-    // Limit to 5 events to fit screen without scrolling
-    return Array.from(eventMap.values()).slice(0, 5);
-  }, [prices]);
+  // Check if any platform is connected
+  const anyConnected = isConnected.kalshi || isConnected.polymarket;
 
   if (isLoading) {
     return (
-      <div className="grid grid-cols-5">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <div key={i} className="border-r last:border-r-0 p-4 space-y-3">
-            <Skeleton className="h-5 w-3/4" />
+      <div className="flex gap-4 p-4 overflow-hidden">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div
+            key={i}
+            className="shrink-0 w-64 border rounded-lg p-3 space-y-2"
+          >
+            <div className="flex items-center gap-2">
+              <Skeleton className="h-4 w-4 rounded" />
+              <Skeleton className="h-4 w-3/4" />
+            </div>
             <Skeleton className="h-3 w-full" />
             <div className="flex justify-between">
-              <Skeleton className="h-4 w-12" />
-              <Skeleton className="h-4 w-12" />
+              <Skeleton className="h-3 w-12" />
+              <Skeleton className="h-3 w-12" />
             </div>
           </div>
         ))}
@@ -105,40 +91,40 @@ export function MarketTicker({
   if (error) {
     console.error("[MarketTicker] Error loading markets:", error);
     return (
-      <div className="text-sm text-muted-foreground">
+      <div className="p-4 text-sm text-muted-foreground">
         Failed to load markets: {error.message}
       </div>
     );
   }
 
-  if (!prices || prices.length === 0) {
+  if (!markets || markets.length === 0) {
     return (
-      <div className="text-sm text-muted-foreground">
-        No crypto markets available
+      <div className="p-4 text-sm text-muted-foreground">
+        No markets available
       </div>
     );
   }
 
   return (
-    <div className="relative">
+    <div className="relative py-3">
       {/* Connection indicator */}
-      {!isConnected && (
+      {!anyConnected && (
         <div
-          className="absolute right-2 top-2 h-2 w-2 rounded-full bg-yellow-500 z-10"
-          title="Connecting..."
+          className="absolute right-3 top-3 h-2 w-2 rounded-full bg-yellow-500 z-10"
+          title="Connecting to live prices..."
         />
       )}
 
-      {/* Fixed 5-column grid - no scroll, fits screen */}
-      <div className="grid grid-cols-5">
-        {groupedEvents.map((group) => (
+      {/* Auto-scrolling ticker - pauses on hover */}
+      <Ticker velocity={TICKER_VELOCITY} gap={TICKER_GAP} hoverFactor={0}>
+        {markets.map((market) => (
           <MarketCard
-            key={group.eventTicker}
-            group={group}
-            priceDirection={priceDirection}
+            key={`${market.platform}-${market.ticker}`}
+            market={market}
+            direction={priceDirection.get(market.ticker)}
           />
         ))}
-      </div>
+      </Ticker>
     </div>
   );
 }
@@ -148,79 +134,61 @@ export function MarketTicker({
 // ============================================================================
 
 function MarketCard({
-  group,
-  priceDirection,
-}: {
-  group: GroupedEvent;
-  priceDirection: Map<string, PriceDirection>;
-}) {
-  const cardTitle = group.eventTitle;
-
-  return (
-    <div className="border-r last:border-r-0 bg-card p-4 space-y-3">
-      {/* Card Title */}
-      <h3 className="font-semibold text-sm leading-tight line-clamp-2">
-        {cardTitle}
-      </h3>
-
-      {/* Markets - different layout for single vs multi */}
-      {group.isSingleMarket ? (
-        // Single market: full-width progress bar with bid/ask below
-        <SingleMarketRow
-          market={group.markets[0]}
-          direction={priceDirection.get(group.markets[0].marketTicker)}
-        />
-      ) : (
-        // Multi-market: compact horizontal rows
-        <div className="space-y-1">
-          {group.markets.map((market) => (
-            <MultiMarketRow
-              key={market.marketTicker}
-              market={market}
-              direction={priceDirection.get(market.marketTicker)}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ============================================================================
-// Single Market Row Component (Full-width progress bar)
-// ============================================================================
-
-function SingleMarketRow({
   market,
   direction,
 }: {
-  market: MarketPrice;
+  market: TickerMarket;
   direction?: PriceDirection;
 }) {
-  // Convert prices to cents (0-100)
-  const bidCents =
-    market.yesBid !== null
-      ? market.yesBid > 1
-        ? market.yesBid
-        : Math.round(market.yesBid * 100)
-      : 0;
-  const askCents =
-    market.yesAsk !== null
-      ? market.yesAsk > 1
-        ? market.yesAsk
-        : Math.round(market.yesAsk * 100)
-      : 0;
+  const platformBadge = PLATFORM_BADGE[market.platform];
+  const categoryColor = CATEGORY_COLORS[market.category];
 
-  // Use midpoint for the progress bar display
-  const midpoint = (bidCents + askCents) / 2;
+  // Use yesPrice for progress bar (already in cents 0-100)
+  const yesPercent = market.yesPrice;
+  const noPercent = market.noPrice;
 
   return (
-    <div className="space-y-1.5">
-      {/* Progress bar showing bid-ask spread */}
+    <div className="shrink-0 w-64 border rounded-lg bg-card p-3 space-y-2">
+      {/* Header: Platform badge + Category indicator + Title */}
+      <div className="flex items-start gap-2">
+        {/* Platform badge */}
+        <span
+          className={cn(
+            "shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded border",
+            platformBadge.className,
+          )}
+          title={market.platform === "kalshi" ? "Kalshi" : "Polymarket"}
+        >
+          {platformBadge.label}
+        </span>
+
+        {/* Category indicator */}
+        <span
+          className={cn(
+            "shrink-0 w-1.5 h-1.5 rounded-full mt-1.5",
+            categoryColor,
+          )}
+          title={market.category}
+        />
+
+        {/* Title */}
+        <h3 className="font-medium text-sm leading-tight line-clamp-2 flex-1">
+          {market.eventTitle}
+        </h3>
+      </div>
+
+      {/* Market subtitle if different from event title */}
+      {market.marketTitle !== market.eventTitle && (
+        <p className="text-[10px] text-muted-foreground line-clamp-1 -mt-1">
+          {market.marketTitle}
+        </p>
+      )}
+
+      {/* Progress bar */}
       <Progress
-        value={midpoint}
+        value={yesPercent}
         className={cn(
-          "h-3 bg-red-500/30",
+          "h-2.5 bg-red-500/30",
           "[&>[data-slot=progress-indicator]]:bg-green-500",
           "[&>[data-slot=progress-indicator]]:transition-transform",
           "[&>[data-slot=progress-indicator]]:duration-500",
@@ -228,7 +196,7 @@ function SingleMarketRow({
         )}
       />
 
-      {/* Bid/Ask labels */}
+      {/* Prices */}
       <div className="flex justify-between text-xs tabular-nums">
         <span
           className={cn(
@@ -243,9 +211,9 @@ function SingleMarketRow({
             suffix="¢"
             transition={{ type: "spring", duration: 0.4, bounce: 0.2 }}
           >
-            {bidCents}
+            {Math.round(yesPercent)}
           </AnimateNumber>
-          {" bid"}
+          {" Yes"}
         </span>
         <span
           className={cn(
@@ -260,96 +228,9 @@ function SingleMarketRow({
             suffix="¢"
             transition={{ type: "spring", duration: 0.4, bounce: 0.2 }}
           >
-            {askCents}
+            {Math.round(noPercent)}
           </AnimateNumber>
-          {" ask"}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// Multi Market Row Component (Compact horizontal layout)
-// ============================================================================
-
-function MultiMarketRow({
-  market,
-  direction,
-}: {
-  market: MarketPrice;
-  direction?: PriceDirection;
-}) {
-  // Convert prices to cents (0-100)
-  const bidCents =
-    market.yesBid !== null
-      ? market.yesBid > 1
-        ? market.yesBid
-        : Math.round(market.yesBid * 100)
-      : 0;
-  const askCents =
-    market.yesAsk !== null
-      ? market.yesAsk > 1
-        ? market.yesAsk
-        : Math.round(market.yesAsk * 100)
-      : 0;
-
-  // Use midpoint for the progress bar display
-  const midpoint = (bidCents + askCents) / 2;
-
-  return (
-    <div className="flex items-center gap-1.5">
-      {/* Market title */}
-      <span className="text-[10px] text-muted-foreground truncate flex-1 min-w-0">
-        {market.marketTitle}
-      </span>
-
-      {/* Mini progress bar */}
-      <Progress
-        value={midpoint}
-        className={cn(
-          "h-1.5 w-12 shrink-0 bg-red-500/30",
-          "[&>[data-slot=progress-indicator]]:bg-green-500",
-          "[&>[data-slot=progress-indicator]]:transition-transform",
-          "[&>[data-slot=progress-indicator]]:duration-500",
-          "[&>[data-slot=progress-indicator]]:ease-out",
-        )}
-      />
-
-      {/* Bid/Ask prices */}
-      <div className="flex items-center gap-0.5 text-[10px] tabular-nums shrink-0">
-        <span
-          className={cn(
-            "font-medium transition-colors duration-300",
-            direction === "up" && "text-green-400",
-            direction === "down" && "text-red-400",
-            !direction && "text-green-500",
-          )}
-        >
-          <AnimateNumber
-            format={{ minimumFractionDigits: 0, maximumFractionDigits: 0 }}
-            suffix="¢"
-            transition={{ type: "spring", duration: 0.4, bounce: 0.2 }}
-          >
-            {bidCents}
-          </AnimateNumber>
-        </span>
-        <span className="text-muted-foreground">/</span>
-        <span
-          className={cn(
-            "font-medium transition-colors duration-300",
-            direction === "up" && "text-green-400",
-            direction === "down" && "text-red-400",
-            !direction && "text-red-500",
-          )}
-        >
-          <AnimateNumber
-            format={{ minimumFractionDigits: 0, maximumFractionDigits: 0 }}
-            suffix="¢"
-            transition={{ type: "spring", duration: 0.4, bounce: 0.2 }}
-          >
-            {askCents}
-          </AnimateNumber>
+          {" No"}
         </span>
       </div>
     </div>

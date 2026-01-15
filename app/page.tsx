@@ -11,7 +11,7 @@ import { PositionsTable } from "@/components/positions/PositionsTable";
 import { usePerformanceChart } from "@/hooks/chart/usePerformanceChart";
 import { useSessionTrades } from "@/hooks/trades/useTrades";
 import { useSessionPositions } from "@/hooks/positions/usePositions";
-import { useLivePrices } from "@/hooks/index/useLivePrices";
+import { useTickerMarkets } from "@/hooks/index/useTickerMarkets";
 import { useGlobalSession } from "@/hooks/useGlobalSession";
 import type { ArenaTab } from "@/lib/supabase/types";
 
@@ -39,7 +39,7 @@ export default function Home() {
   const { trades, isLoading: tradesLoading } = useSessionTrades(sessionId);
   const { positions, isLoading: positionsLoading } =
     useSessionPositions(sessionId);
-  const livePrices = useLivePrices();
+  const tickerMarkets = useTickerMarkets();
 
   // Render the right panel content based on active tab
   const renderTabContent = () => {
@@ -72,7 +72,7 @@ export default function Home() {
 
       {/* Market Ticker Strip */}
       <div className="border-b bg-background/50">
-        <MarketTicker {...livePrices} />
+        <MarketTicker {...tickerMarkets} />
       </div>
 
       {/* Main Content: Left (Chart) + Right (Tabs + Content) */}
