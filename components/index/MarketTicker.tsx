@@ -97,7 +97,10 @@ export function MarketTicker({
     );
   }
 
-  if (!markets || markets.length === 0) {
+  // Ensure markets is always a valid array to prevent race conditions with Ticker component
+  const safeMarkets = markets ?? [];
+
+  if (safeMarkets.length === 0) {
     return (
       <div className="p-4 text-sm text-muted-foreground">
         No markets available
@@ -117,7 +120,7 @@ export function MarketTicker({
 
       {/* Auto-scrolling ticker - pauses on hover */}
       <Ticker velocity={TICKER_VELOCITY} gap={TICKER_GAP} hoverFactor={0}>
-        {markets.map((market) => (
+        {safeMarkets.map((market) => (
           <MarketCard
             key={`${market.platform}-${market.ticker}`}
             market={market}
