@@ -3,11 +3,11 @@
   "crons": [
     {
       "path": "/api/agents/cron",
-      "schedule": "*/30 * * * *"
+      "schedule": "* */2 * * *"
     },
     {
       "path": "/api/agents/balances",
-      "schedule": "*/5 * * * *"
+      "schedule": "*/30 * * * *"
     }
   ]
 }
