@@ -50,7 +50,7 @@ export const BRIDGE_VAULT_EVM_PRIVATE_KEY =
 export const GLOBAL_SESSION_ID = "00000000-0000-0000-0000-000000000001";
 
 /** Default starting capital for new sessions */
-export const DEFAULT_STARTING_CAPITAL = 100;
+export const DEFAULT_STARTING_CAPITAL = 1000;
 
 /** Chart configuration */
 export const CHART_CONFIG = {

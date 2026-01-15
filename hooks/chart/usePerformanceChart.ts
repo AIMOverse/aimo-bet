@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { getSupabaseClient } from "@/lib/supabase/client";
+import { DEFAULT_STARTING_CAPITAL } from "@/lib/config";
 import type { ChartDataPoint } from "@/lib/supabase/types";
 import type {
   RealtimePostgresInsertPayload,
@@ -54,7 +55,7 @@ export function usePerformanceChart({
 }: UsePerformanceChartOptions): UsePerformanceChartReturn {
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [latestValues, setLatestValues] = useState<Map<string, number>>(
-    new Map(),
+    new Map()
   );
   const [tokenUsage, setTokenUsage] = useState<Map<string, number>>(new Map());
   const [deadModels, setDeadModels] = useState<Set<string>>(new Set());
@@ -73,7 +74,7 @@ export function usePerformanceChart({
   const transformToChartData = useCallback(
     (
       decisions: DecisionRow[],
-      sessions: Map<string, AgentSessionRow>,
+      sessions: Map<string, AgentSessionRow>
     ): ChartDataPoint[] => {
       // Get all model names from sessions (source of truth)
       const allModels = Array.from(sessions.values()).map((s) => s.model_name);
@@ -96,10 +97,11 @@ export function usePerformanceChart({
       // Get sorted timestamps
       const sortedTimestamps = Array.from(grouped.keys()).sort();
 
-      // Initialize last known values with starting capital for all models
+      // Initialize last known values with configured starting capital for all models
+      // (Use DEFAULT_STARTING_CAPITAL regardless of database seed value for consistent chart display)
       const lastKnownValues: Record<string, number> = {};
       for (const session of sessions.values()) {
-        lastKnownValues[session.model_name] = session.starting_capital;
+        lastKnownValues[session.model_name] = DEFAULT_STARTING_CAPITAL;
       }
 
       // If no decisions exist, create a single point at "now" with starting values
@@ -136,7 +138,7 @@ export function usePerformanceChart({
 
       return result;
     },
-    [],
+    []
   );
 
   useEffect(() => {
@@ -162,7 +164,7 @@ export function usePerformanceChart({
         const { data: sessionsData, error: sessionsError } = await client
           .from("agent_sessions")
           .select(
-            "id, model_name, starting_capital, current_value, total_tokens",
+            "id, model_name, starting_capital, current_value, total_tokens"
           )
           .eq("session_id", sessionId);
 
@@ -200,7 +202,7 @@ export function usePerformanceChart({
             created_at,
             portfolio_value_after,
             agent_sessions!inner(session_id, model_name)
-          `,
+          `
           )
           .eq("agent_sessions.session_id", sessionId)
           .gte("created_at", sinceTimestamp)
@@ -219,7 +221,7 @@ export function usePerformanceChart({
               portfolio_value_after: row.portfolio_value_after as number,
               model_name: agentSessions.model_name,
             };
-          },
+          }
         );
 
         // Transform to chart data (all models included)
@@ -227,7 +229,7 @@ export function usePerformanceChart({
       } catch (err) {
         console.error("[usePerformanceChart] Error fetching data:", err);
         setError(
-          err instanceof Error ? err : new Error("Failed to fetch chart data"),
+          err instanceof Error ? err : new Error("Failed to fetch chart data")
         );
       } finally {
         setLoading(false);
@@ -248,7 +250,7 @@ export function usePerformanceChart({
           table: "agent_decisions",
         },
         async (
-          payload: RealtimePostgresInsertPayload<Record<string, unknown>>,
+          payload: RealtimePostgresInsertPayload<Record<string, unknown>>
         ) => {
           try {
             const agentSessionId = payload.new.agent_session_id as string;
@@ -288,7 +290,7 @@ export function usePerformanceChart({
             setChartData((prev: ChartDataPoint[]) => {
               const updated = [...prev];
               const existingPointIndex = updated.findIndex(
-                (p) => p.timestamp === newPoint.created_at,
+                (p) => p.timestamp === newPoint.created_at
               );
 
               if (existingPointIndex >= 0) {
@@ -324,10 +326,10 @@ export function usePerformanceChart({
           } catch (err) {
             console.error(
               "[usePerformanceChart] Error processing decision update:",
-              err,
+              err
             );
           }
-        },
+        }
       )
       // Listen for agent_sessions updates (current_value changes)
       .on(
@@ -392,10 +394,10 @@ export function usePerformanceChart({
           } catch (err) {
             console.error(
               "[usePerformanceChart] Error processing session update:",
-              err,
+              err
             );
           }
-        },
+        }
       )
       // Listen for new agent_sessions (new models joining)
       .on(
@@ -443,24 +445,24 @@ export function usePerformanceChart({
               return updated;
             });
 
-            // Add to chart data (new model starts at starting capital)
+            // Add to chart data (new model starts at configured starting capital)
             setChartData((prev) => {
               if (prev.length === 0) {
                 return [
                   {
                     timestamp: new Date().toISOString(),
-                    [newSession.model_name]: newSession.starting_capital,
+                    [newSession.model_name]: DEFAULT_STARTING_CAPITAL,
                   },
                 ];
               }
 
-              // Add the new model to all existing points at starting capital
+              // Add the new model to all existing points at configured starting capital
               return prev.map((point, index) => ({
                 ...point,
                 [newSession.model_name]:
                   index === prev.length - 1
                     ? newSession.current_value
-                    : newSession.starting_capital,
+                    : DEFAULT_STARTING_CAPITAL,
               }));
             });
 
@@ -471,10 +473,10 @@ export function usePerformanceChart({
           } catch (err) {
             console.error(
               "[usePerformanceChart] Error processing new session:",
-              err,
+              err
             );
           }
-        },
+        }
       )
       .subscribe((status: string) => {
         console.log(`[usePerformanceChart] Subscription status: ${status}`);
