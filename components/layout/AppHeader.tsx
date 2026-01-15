@@ -14,7 +14,7 @@ export function AppHeader() {
       {/* Left: Title + Status */}
       <div className="flex items-center gap-3">
         <h1 className="text-xl font-bold">AImoBET</h1>
-        <Badge variant="secondary">Season 0</Badge>
+        <Badge variant="secondary">Season 1</Badge>
       </div>
 
       {/* Right: Links + Theme toggle */}

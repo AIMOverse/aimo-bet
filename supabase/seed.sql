@@ -34,11 +34,11 @@ INSERT INTO agent_sessions (
   total_pnl,
   status
 ) VALUES
-  -- GPT-5
+  -- GPT-5.2
   (
     '00000000-0000-0000-0000-000000000001',
-    'openai/gpt-5',
-    'GPT-5',
+    'openai/gpt-5.2',
+    'GPT 5.2',
     'seed-wallet-gpt',
     100,
     100,
@@ -70,19 +70,19 @@ INSERT INTO agent_sessions (
   -- GLM-4.7
   (
     '00000000-0000-0000-0000-000000000001',
-    'z-ai/glm-4.6',
-    'GLM-4.7',
+    'z-ai/glm-4.7',
+    'GLM 4.7',
     'seed-wallet-glm',
     100,
     100,
     0,
     'active'
   ),
-  -- Grok 4
+  -- Grok 4.1
   (
     '00000000-0000-0000-0000-000000000001',
-    'xai/grok-4',
-    'Grok 4',
+    'xai/grok-4.1',
+    'Grok 4.1',
     'seed-wallet-grok',
     100,
     100,

@@ -8,6 +8,15 @@ import {
 // Model Catalog - Season 0
 // ============================================================================
 
+export const AIMO_MODEL_ID_GPT = process.env.AIMO_MODEL_ID_GPT!;
+export const AIMO_MODEL_ID_CLAUDE = process.env.AIMO_MODEL_ID_CLAUDE!;
+export const AIMO_MODEL_ID_DEEPSEEK = process.env.AIMO_MODEL_ID_DEEPSEEK!;
+export const AIMO_MODEL_ID_GLM = process.env.AIMO_MODEL_ID_GLM!;
+export const AIMO_MODEL_ID_GROK = process.env.AIMO_MODEL_ID_GROK!;
+export const AIMO_MODEL_ID_QWEN = process.env.AIMO_MODEL_ID_QWEN!;
+export const AIMO_MODEL_ID_GEMINI = process.env.AIMO_MODEL_ID_GEMINI!;
+export const AIMO_MODEL_ID_KIMI = process.env.AIMO_MODEL_ID_KIMI!;
+
 /**
  * Arena models available for trading in Season 0.
  * All models use the aimo-network provider.
@@ -17,8 +26,8 @@ import {
 export const MODELS: ModelDefinition[] = [
   // OpenAI - GPT-5.2
   {
-    id: "openai/gpt-5",
-    name: "GPT-5",
+    id: "openai/gpt-5.2",
+    name: "GPT 5.2",
     provider: "aimo-network",
     contextLength: 128000,
     pricing: { prompt: 1.75, completion: 14 },
@@ -26,7 +35,7 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: true,
     supportsFunctions: true,
     providerIds: {
-      aimo: "GL9JtU2u8uo4XFrGrZg2KySxstdsQS2UcbZAwgtR3Rhq:openai/gpt-5",
+      aimo: AIMO_MODEL_ID_GPT,
     },
     series: "gpt",
     chartColor: "#10b981", // Emerald
@@ -44,7 +53,7 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: true,
     supportsFunctions: true,
     providerIds: {
-      aimo: "9D9ZcNGUSDCfiDQ4DcGvvF1de5s9cqZuE5T7KcWFSgV6:anthropic/claude-sonnet-4.5",
+      aimo: AIMO_MODEL_ID_CLAUDE,
     },
     series: "claude",
     chartColor: "#f97316", // Orange
@@ -63,7 +72,7 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: false,
     supportsFunctions: true,
     providerIds: {
-      aimo: "47bztUnCFpGYXWw5hCu7esJExSVRsK2Ww3Y5y8mMk7cY:deepseek/deepseek-v3.2-exp",
+      aimo: AIMO_MODEL_ID_DEEPSEEK,
     },
     series: "deepseek",
     chartColor: "#a78bfa", // Light violet
@@ -72,8 +81,8 @@ export const MODELS: ModelDefinition[] = [
   },
   // GLM - glm-4.7
   {
-    id: "z-ai/glm-4.6",
-    name: "GLM-4.7",
+    id: "z-ai/glm-4.7",
+    name: "GLM 4.7",
     provider: "aimo-network",
     contextLength: 128000,
     pricing: { prompt: 0.5, completion: 1 },
@@ -81,17 +90,17 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: true,
     supportsFunctions: true,
     providerIds: {
-      aimo: "GL9JtU2u8uo4XFrGrZg2KySxstdsQS2UcbZAwgtR3Rhq:z-ai/glm-4.6",
+      aimo: AIMO_MODEL_ID_GLM,
     },
     series: "glm",
     chartColor: "#06b6d4", // Cyan
     walletAddress: process.env.WALLET_GLM_SVM_PUBLIC,
     enabled: true,
   },
-  // Grok - grok-4
+  // Grok - grok-4.1
   {
-    id: "xai/grok-4",
-    name: "Grok 4",
+    id: "xai/grok-4.1",
+    name: "Grok 4.1",
     provider: "aimo-network",
     contextLength: 256000,
     pricing: { prompt: 3, completion: 15 },
@@ -99,7 +108,7 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: true,
     supportsFunctions: true,
     providerIds: {
-      aimo: "9D9ZcNGUSDCfiDQ4DcGvvF1de5s9cqZuE5T7KcWFSgV6:xai/grok-4",
+      aimo: AIMO_MODEL_ID_GROK,
     },
     series: "grok",
     chartColor: "#ef4444", // Red
@@ -117,7 +126,7 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: true,
     supportsFunctions: true,
     providerIds: {
-      aimo: "47bztUnCFpGYXWw5hCu7esJExSVRsK2Ww3Y5y8mMk7cY:alibaba/qwen3-max",
+      aimo: AIMO_MODEL_ID_QWEN,
     },
     series: "qwen",
     chartColor: "#8b5cf6", // Violet
@@ -136,7 +145,7 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: true,
     supportsFunctions: true,
     providerIds: {
-      aimo: "GL9JtU2u8uo4XFrGrZg2KySxstdsQS2UcbZAwgtR3Rhq:google/gemini-3-pro",
+      aimo: AIMO_MODEL_ID_GEMINI,
     },
     aimoSdkProvider: "google",
     series: "gemini",
@@ -155,7 +164,7 @@ export const MODELS: ModelDefinition[] = [
     supportsVision: true,
     supportsFunctions: true,
     providerIds: {
-      aimo: "47bztUnCFpGYXWw5hCu7esJExSVRsK2Ww3Y5y8mMk7cY:moonshot/kimi-k2",
+      aimo: AIMO_MODEL_ID_KIMI,
     },
     series: "kimi",
     chartColor: "#ec4899", // Pink
@@ -215,7 +224,7 @@ export function getArenaModel(id: string): ModelDefinition | undefined {
  * Get a specific arena model by short ID (e.g., "gpt-5.2" instead of "openai/gpt-5.2")
  */
 export function getArenaModelByShortId(
-  shortId: string,
+  shortId: string
 ): ModelDefinition | undefined {
   return MODELS.find((m) => m.id.endsWith(`/${shortId}`) || m.id === shortId);
 }
@@ -320,11 +329,11 @@ export function getModelsWithWallets(): ModelDefinition[] {
  * Uses the same SVM private keys as the aimo-network provider (registry.ts).
  */
 const WALLET_PRIVATE_KEY_MAP: Record<string, string | undefined> = {
-  "openai/gpt-5": process.env.WALLET_GPT_SVM_PRIVATE,
+  "openai/gpt-5.2": process.env.WALLET_GPT_SVM_PRIVATE,
   "anthropic/claude-sonnet-4.5": process.env.WALLET_CLAUDE_SVM_PRIVATE,
   "deepseek/deepseek-v3.2": process.env.WALLET_DEEPSEEK_SVM_PRIVATE,
-  "z-ai/glm-4.6": process.env.WALLET_GLM_SVM_PRIVATE,
-  "xai/grok-4": process.env.WALLET_GROK_SVM_PRIVATE,
+  "z-ai/glm-4.7": process.env.WALLET_GLM_SVM_PRIVATE,
+  "xai/grok-4.1": process.env.WALLET_GROK_SVM_PRIVATE,
   "qwen/qwen3-max": process.env.WALLET_QWEN_SVM_PRIVATE,
   "google/gemini-3-pro": process.env.WALLET_GEMINI_SVM_PRIVATE,
   "moonshotai/kimi-k2-0905": process.env.WALLET_KIMI_SVM_PRIVATE,
@@ -339,8 +348,8 @@ export function getWalletPrivateKey(modelId: string): string | undefined {
   if (!privateKey) {
     console.warn(
       `[Catalog] No private key found for model "${modelId}". Available keys: ${Object.keys(
-        WALLET_PRIVATE_KEY_MAP,
-      ).join(", ")}`,
+        WALLET_PRIVATE_KEY_MAP
+      ).join(", ")}`
     );
   }
   return privateKey;
