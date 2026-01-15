@@ -222,8 +222,39 @@ export function usePerformanceChart({
           },
         );
 
+        // DEBUG: Log any suspicious values
+        const suspiciousDecisions = decisions.filter(
+          (d) =>
+            d.portfolio_value_after <= 0 ||
+            d.portfolio_value_after === undefined,
+        );
+        if (suspiciousDecisions.length > 0) {
+          console.warn(
+            "[usePerformanceChart] Suspicious decisions found:",
+            suspiciousDecisions,
+          );
+        }
+
         // Transform to chart data (all models included)
-        setChartData(transformToChartData(decisions, sessionsMap));
+        const transformed = transformToChartData(decisions, sessionsMap);
+
+        // DEBUG: Log any chart points with 0 or negative values
+        transformed.forEach((point, idx) => {
+          Object.entries(point).forEach(([key, value]) => {
+            if (key !== "timestamp" && (value as number) <= 0) {
+              console.warn(
+                `[usePerformanceChart] Chart point ${idx} has suspicious value:`,
+                {
+                  timestamp: point.timestamp,
+                  model: key,
+                  value,
+                },
+              );
+            }
+          });
+        });
+
+        setChartData(transformed);
       } catch (err) {
         console.error("[usePerformanceChart] Error fetching data:", err);
         setError(
