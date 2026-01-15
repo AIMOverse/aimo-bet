@@ -77,6 +77,20 @@ export function usePerformanceChart({
       // Get all model names from sessions (source of truth)
       const allModels = Array.from(sessions.values()).map((s) => s.model_name);
 
+      // DEBUG: Also get all model names from decisions
+      const modelsInDecisions = [
+        ...new Set(decisions.map((d) => d.model_name)),
+      ];
+      const missingFromSessions = modelsInDecisions.filter(
+        (m) => !allModels.includes(m),
+      );
+      if (missingFromSessions.length > 0) {
+        console.warn(
+          "[transformToChartData] Models in decisions but NOT in sessions:",
+          missingFromSessions,
+        );
+      }
+
       if (allModels.length === 0) {
         return [];
       }
@@ -101,6 +115,12 @@ export function usePerformanceChart({
       for (const session of sessions.values()) {
         lastKnownValues[session.model_name] = DEFAULT_STARTING_CAPITAL;
       }
+
+      // DEBUG: Log initialized models
+      console.log(
+        "[transformToChartData] Initialized lastKnownValues for:",
+        Object.keys(lastKnownValues),
+      );
 
       // If no decisions exist, create a single point at "now" with starting values
       if (sortedTimestamps.length === 0) {
