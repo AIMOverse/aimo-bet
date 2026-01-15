@@ -249,6 +249,11 @@ export function usePriceSubscription(
       // Don't connect if already cleaned up
       if (isCleanedUp) return;
 
+      // Close any existing socket before creating new one
+      if (socket && socket.readyState !== WebSocket.CLOSED) {
+        socket.close();
+      }
+
       socket = new WebSocket(POLYMARKET_WS_URL);
       polymarketSocketRef.current = socket;
 
@@ -350,7 +355,13 @@ export function usePriceSubscription(
 
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (socket) {
-        socket.close();
+        // Only close if not already closing/closed
+        if (
+          socket.readyState === WebSocket.CONNECTING ||
+          socket.readyState === WebSocket.OPEN
+        ) {
+          socket.close();
+        }
         polymarketSocketRef.current = null;
       }
       setPolymarketConnected(false);
