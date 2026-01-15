@@ -8,7 +8,8 @@ import PartySocket from "partysocket";
 // ============================================================================
 
 const DIRECTION_FLASH_DURATION = 1000; // 1 second
-const POLYMARKET_WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
+const POLYMARKET_WS_URL =
+  "wss://ws-subscriptions-clob.polymarket.com/ws/market";
 const RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 30000]; // Exponential backoff
 
 // ============================================================================
@@ -51,7 +52,7 @@ export function detectPlatform(ticker: string): Platform {
 // ============================================================================
 
 export function usePriceSubscription(
-  tickers: string[]
+  tickers: string[],
 ): UsePriceSubscriptionReturn {
   // -------------------------------------------------------------------------
   // State
@@ -96,11 +97,11 @@ export function usePriceSubscription(
   // Create stable ticker sets for message filtering
   const kalshiTickerSet = useMemo(
     () => new Set(kalshiTickers),
-    [kalshiTickers]
+    [kalshiTickers],
   );
   const polymarketTickerSet = useMemo(
     () => new Set(polymarketTickers),
-    [polymarketTickers]
+    [polymarketTickers],
   );
 
   // -------------------------------------------------------------------------
@@ -125,7 +126,7 @@ export function usePriceSubscription(
 
           if (direction !== "neutral") {
             setPriceDirection((dirPrev) =>
-              new Map(dirPrev).set(ticker, direction)
+              new Map(dirPrev).set(ticker, direction),
             );
 
             // Clear existing timeout
@@ -142,7 +143,7 @@ export function usePriceSubscription(
                   return next;
                 });
                 directionTimeouts.current.delete(ticker);
-              }, DIRECTION_FLASH_DURATION)
+              }, DIRECTION_FLASH_DURATION),
             );
           }
         }
@@ -157,7 +158,7 @@ export function usePriceSubscription(
         return newPrices;
       });
     },
-    []
+    [],
   );
 
   // -------------------------------------------------------------------------
@@ -171,9 +172,7 @@ export function usePriceSubscription(
 
     const host = process.env.NEXT_PUBLIC_PARTYKIT_HOST;
     if (!host) {
-      console.warn(
-        "[usePriceSubscription] NEXT_PUBLIC_PARTYKIT_HOST not set"
-      );
+      console.warn("[usePriceSubscription] NEXT_PUBLIC_PARTYKIT_HOST not set");
       return;
     }
 
@@ -221,7 +220,7 @@ export function usePriceSubscription(
       } catch (err) {
         console.error(
           "[usePriceSubscription] Failed to parse Kalshi message:",
-          err
+          err,
         );
       }
     };
@@ -244,12 +243,19 @@ export function usePriceSubscription(
 
     let socket: WebSocket | null = null;
     let reconnectTimeout: NodeJS.Timeout | null = null;
+    let isCleanedUp = false; // Flag to prevent reconnection after cleanup
 
     const connect = () => {
+      // Don't connect if already cleaned up
+      if (isCleanedUp) return;
+
       socket = new WebSocket(POLYMARKET_WS_URL);
       polymarketSocketRef.current = socket;
 
       socket.onopen = () => {
+        // Don't process if cleaned up
+        if (isCleanedUp) return;
+
         console.log("[usePriceSubscription] Polymarket WebSocket connected");
         setPolymarketConnected(true);
         reconnectAttempts.current.polymarket = 0;
@@ -263,26 +269,39 @@ export function usePriceSubscription(
       };
 
       socket.onclose = () => {
+        // Don't reconnect if intentionally cleaned up
+        if (isCleanedUp) return;
+
         console.log("[usePriceSubscription] Polymarket WebSocket disconnected");
         setPolymarketConnected(false);
 
         // Reconnect with exponential backoff
         const attempt = reconnectAttempts.current.polymarket;
-        const delay = RECONNECT_DELAYS[Math.min(attempt, RECONNECT_DELAYS.length - 1)];
+        const delay =
+          RECONNECT_DELAYS[Math.min(attempt, RECONNECT_DELAYS.length - 1)];
         reconnectAttempts.current.polymarket = attempt + 1;
 
         console.log(
-          `[usePriceSubscription] Polymarket reconnecting in ${delay}ms (attempt ${attempt + 1})`
+          `[usePriceSubscription] Polymarket reconnecting in ${delay}ms (attempt ${attempt + 1})`,
         );
         reconnectTimeout = setTimeout(connect, delay);
       };
 
       socket.onerror = (err) => {
-        console.error("[usePriceSubscription] Polymarket WebSocket error:", err);
+        // Don't log errors if cleaned up (expected during unmount)
+        if (isCleanedUp) return;
+
+        console.error(
+          "[usePriceSubscription] Polymarket WebSocket error:",
+          err,
+        );
         setError(new Error("Polymarket WebSocket connection failed"));
       };
 
       socket.onmessage = (event: MessageEvent) => {
+        // Don't process messages if cleaned up
+        if (isCleanedUp) return;
+
         try {
           const msgs = JSON.parse(event.data as string);
 
@@ -314,7 +333,7 @@ export function usePriceSubscription(
         } catch (err) {
           console.error(
             "[usePriceSubscription] Failed to parse Polymarket message:",
-            err
+            err,
           );
         }
       };
@@ -326,6 +345,9 @@ export function usePriceSubscription(
     const timeouts = directionTimeouts.current;
 
     return () => {
+      // Set cleanup flag first to prevent reconnection
+      isCleanedUp = true;
+
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (socket) {
         socket.close();
