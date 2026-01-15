@@ -13,6 +13,7 @@ export interface AgentPosition {
   id: string;
   marketTicker: string;
   marketTitle?: string;
+  platform: "kalshi" | "polymarket";
   side: "yes" | "no";
   mint: string;
   quantity: number;
@@ -178,17 +179,27 @@ export function usePositions({ sessionId, modelId }: UsePositionsOptions) {
 // Helpers
 // ============================================================================
 
+/**
+ * Infer platform from market ticker format since the database doesn't have a platform column.
+ * Polymarket token IDs are 50+ digit numbers, Kalshi tickers are short alphanumeric.
+ */
+function inferPlatform(ticker: string): "kalshi" | "polymarket" {
+  return /^\d{50,}$/.test(ticker) ? "polymarket" : "kalshi";
+}
+
 function mapPositionRow(row: Record<string, unknown>): AgentPosition {
   const agentSession = row.agent_sessions as {
     model_id: string;
     model_name: string;
   };
   const model = MODELS.find((m) => m.id === agentSession.model_id);
+  const marketTicker = row.market_ticker as string;
 
   return {
     id: row.id as string,
-    marketTicker: row.market_ticker as string,
+    marketTicker,
     marketTitle: (row.market_title as string) ?? undefined,
+    platform: inferPlatform(marketTicker),
     side: row.side as "yes" | "no",
     mint: row.mint as string,
     quantity: row.quantity as number,

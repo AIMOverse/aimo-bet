@@ -156,26 +156,25 @@ export default class DflowRelay implements PartyKitServer {
   }
 
   // Handle incoming dflow messages
-  private async handleDflowMessage(msg: DflowMessage) {
-    let signal: Signal | null = null;
-
-    switch (msg.channel) {
-      case "prices":
-        signal = this.detectPriceSwing(msg);
-        break;
-      case "trades":
-        signal = this.detectVolumeSpike(msg);
-        break;
-      case "orderbook":
-        // DISABLED: Too noisy for position management
-        // signal = this.detectOrderbookImbalance(msg);
-        break;
-    }
-
-    // If significant signal detected, trigger agents
-    if (signal) {
-      await this.triggerAgents(signal);
-    }
+  private handleDflowMessage(msg: DflowMessage) {
+    // DISABLED: Agent triggering temporarily disabled
+    // let signal: Signal | null = null;
+    //
+    // switch (msg.channel) {
+    //   case "prices":
+    //     signal = this.detectPriceSwing(msg);
+    //     break;
+    //   case "trades":
+    //     signal = this.detectVolumeSpike(msg);
+    //     break;
+    //   case "orderbook":
+    //     signal = this.detectOrderbookImbalance(msg);
+    //     break;
+    // }
+    //
+    // if (signal) {
+    //   await this.triggerAgents(signal);
+    // }
 
     // Broadcast to connected frontend clients
     this.room.broadcast(JSON.stringify(msg));

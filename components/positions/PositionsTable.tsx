@@ -7,28 +7,34 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import type { AgentPosition } from "@/hooks/positions/usePositions";
 import { usePositionPrices } from "@/hooks/positions/usePositionPrices";
-import type { PriceDirection } from "@/hooks/positions/usePriceSubscription";
+import type { PriceDirection } from "@/hooks/usePriceSubscription";
 import { cn } from "@/lib/utils";
 import { AnimateNumber } from "motion-plus/react";
+import { getModelSeriesIcon } from "@/components/icons/model-series";
 
 const DEFAULT_CHART_COLOR = "#6366f1";
 
-const SERIES_LOGO_MAP: Record<string, string> = {
-  openai: "openai.svg",
-  claude: "claude-color.svg",
-  gemini: "gemini-color.svg",
-  deepseek: "deepseek-color.svg",
-  qwen: "qwen-color.svg",
-  grok: "grok.svg",
-  kimi: "kimi-color.svg",
-  glm: "zai.svg",
-};
-
-function getLogoPathFromSeries(series?: string): string | undefined {
-  if (!series) return undefined;
-  const filename = SERIES_LOGO_MAP[series];
-  return filename ? `/model-series/${filename}` : undefined;
+interface PlatformConfig {
+  label: string;
+  logoPath: string;
+  color: string;
+  bgColor: string;
 }
+
+const PLATFORM_CONFIG: Record<"kalshi" | "polymarket", PlatformConfig> = {
+  kalshi: {
+    label: "Kalshi",
+    logoPath: "/prediction-markets/kalshi.svg",
+    color: "text-blue-500",
+    bgColor: "bg-blue-500/10",
+  },
+  polymarket: {
+    label: "Polymarket",
+    logoPath: "/prediction-markets/polymarket.svg",
+    color: "text-purple-500",
+    bgColor: "bg-purple-500/10",
+  },
+};
 
 interface PositionsTableProps {
   positions: AgentPosition[];
@@ -43,6 +49,7 @@ interface PositionWithPrice extends AgentPosition {
 interface MarketGroup {
   marketTicker: string;
   marketTitle?: string;
+  platform: "kalshi" | "polymarket";
   positions: PositionWithPrice[];
   yesPosition?: PositionWithPrice;
   noPosition?: PositionWithPrice;
@@ -106,7 +113,7 @@ function Badge({
 }
 
 function ModelRow({ modelGroup }: { modelGroup: ModelGroup }) {
-  const logoPath = getLogoPathFromSeries(modelGroup.modelSeries);
+  const icon = getModelSeriesIcon(modelGroup.modelSeries);
   const initial = modelGroup.modelName.charAt(0).toUpperCase();
 
   return (
@@ -116,19 +123,30 @@ function ModelRow({ modelGroup }: { modelGroup: ModelGroup }) {
           className="size-5 ring-[1.5px] ring-offset-0 bg-background shrink-0"
           style={{ ["--tw-ring-color" as string]: modelGroup.modelColor }}
         >
-          {logoPath ? (
-            <AvatarImage
-              src={logoPath}
-              alt={`${modelGroup.modelName} logo`}
-              className="p-0.5"
-            />
-          ) : null}
-          <AvatarFallback
-            className="text-[10px] font-semibold text-foreground"
-            style={{ backgroundColor: `${modelGroup.modelColor}20` }}
-          >
-            {initial}
-          </AvatarFallback>
+          {icon?.type === "component" ? (
+            <icon.Component className="size-full p-0.5" />
+          ) : icon?.type === "image" ? (
+            <>
+              <AvatarImage
+                src={icon.src}
+                alt={`${modelGroup.modelName} logo`}
+                className="p-0.5"
+              />
+              <AvatarFallback
+                className="text-[10px] font-semibold text-foreground"
+                style={{ backgroundColor: `${modelGroup.modelColor}20` }}
+              >
+                {initial}
+              </AvatarFallback>
+            </>
+          ) : (
+            <AvatarFallback
+              className="text-[10px] font-semibold text-foreground"
+              style={{ backgroundColor: `${modelGroup.modelColor}20` }}
+            >
+              {initial}
+            </AvatarFallback>
+          )}
         </Avatar>
         <span className="font-medium text-sm">{modelGroup.modelName}</span>
         <AnimateNumber
@@ -141,45 +159,65 @@ function ModelRow({ modelGroup }: { modelGroup: ModelGroup }) {
       </div>
 
       <div className="space-y-4">
-        {modelGroup.markets.map((market) => (
-          <div key={market.marketTicker} className="pl-0">
-            <p className="text-sm font-medium font-mono line-clamp-1 mb-2">
-              {market.marketTitle || market.marketTicker}
-            </p>
-
-            <div className="flex items-start gap-2">
-              <div className="flex gap-2">
-                <Badge
-                  side="yes"
-                  isSelected={market.yesPosition?.side === "yes"}
-                  price={market.yesPosition?.livePrice}
-                  priceDirection={market.yesPosition?.priceDirection}
-                />
-                <Badge
-                  side="no"
-                  isSelected={market.noPosition?.side === "no"}
-                  price={market.noPosition?.livePrice}
-                  priceDirection={market.noPosition?.priceDirection}
-                />
+        {modelGroup.markets.map((market) => {
+          const platformConfig = PLATFORM_CONFIG[market.platform];
+          return (
+            <div key={market.marketTicker} className="pl-0">
+              <div className="flex items-center gap-2 mb-2">
+                <span
+                  className={cn(
+                    "flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium",
+                    platformConfig.bgColor,
+                    platformConfig.color,
+                  )}
+                >
+                  <Avatar className="size-4 rounded-sm">
+                    <AvatarImage
+                      src={platformConfig.logoPath}
+                      alt={platformConfig.label}
+                    />
+                  </Avatar>
+                  {platformConfig.label}
+                </span>
+                <p className="text-sm font-medium font-mono line-clamp-1 flex-1">
+                  {market.marketTitle || market.marketTicker}
+                </p>
               </div>
 
-              <div className="flex-1" />
+              <div className="flex items-start gap-2">
+                <div className="flex gap-2">
+                  <Badge
+                    side="yes"
+                    isSelected={market.yesPosition?.side === "yes"}
+                    price={market.yesPosition?.livePrice}
+                    priceDirection={market.yesPosition?.priceDirection}
+                  />
+                  <Badge
+                    side="no"
+                    isSelected={market.noPosition?.side === "no"}
+                    price={market.noPosition?.livePrice}
+                    priceDirection={market.noPosition?.priceDirection}
+                  />
+                </div>
 
-              <div className="flex flex-col items-end gap-1 text-xs">
-                {market.yesPosition && (
-                  <div className="text-muted-foreground">
-                    Qty: {market.yesPosition.quantity.toLocaleString()}
-                  </div>
-                )}
-                {market.noPosition && (
-                  <div className="text-muted-foreground">
-                    Qty: {market.noPosition.quantity.toLocaleString()}
-                  </div>
-                )}
+                <div className="flex-1" />
+
+                <div className="flex flex-col items-end gap-1 text-xs">
+                  {market.yesPosition && (
+                    <div className="text-muted-foreground">
+                      Qty: {market.yesPosition.quantity.toLocaleString()}
+                    </div>
+                  )}
+                  {market.noPosition && (
+                    <div className="text-muted-foreground">
+                      Qty: {market.noPosition.quantity.toLocaleString()}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -246,6 +284,7 @@ export function PositionsTable({
         market = {
           marketTicker: position.marketTicker,
           marketTitle: position.marketTitle,
+          platform: position.platform,
           positions: [],
           yesPosition: undefined,
           noPosition: undefined,
@@ -274,7 +313,7 @@ export function PositionsTable({
           <div
             className={cn(
               "flex items-center gap-1 text-xs",
-              hasConnection ? "text-green-500" : "text-muted-foreground"
+              hasConnection ? "text-green-500" : "text-muted-foreground",
             )}
             title={
               hasConnection

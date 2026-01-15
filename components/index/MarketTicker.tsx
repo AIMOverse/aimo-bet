@@ -3,58 +3,75 @@
 import { useMemo } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
-import { AnimateNumber } from "motion-plus/react";
-import {
-  type MarketPrice,
-  type PriceDirection,
-} from "@/hooks/index/useLivePrices";
+import { AnimateNumber, Ticker } from "motion-plus/react";
 import { cn } from "@/lib/utils";
+import type {
+  TickerMarket,
+  Platform,
+  Category,
+} from "@/hooks/index/useTickerMarkets";
+import Image from "next/image";
 
 // ============================================================================
 // Constants
 // ============================================================================
 
 const MAX_MARKETS_PER_CARD = 3;
+const MAX_EVENTS_TO_SHOW = 5;
+
+// Category colors
+const CATEGORY_COLORS: Record<Category, string> = {
+  politics: "bg-blue-500",
+  sports: "bg-green-500",
+  crypto: "bg-orange-500",
+};
+
+// Platform logo paths
+const PLATFORM_LOGOS: Record<Platform, string> = {
+  kalshi: "/prediction-markets/kalshi.svg",
+  polymarket: "/prediction-markets/polymarket.svg",
+};
 
 // ============================================================================
 // Types
 // ============================================================================
 
+export type PriceDirection = "up" | "down" | "neutral";
+
 interface GroupedEvent {
   eventTicker: string;
   eventTitle: string;
-  markets: MarketPrice[];
+  markets: TickerMarket[];
   isSingleMarket: boolean;
   totalMarkets: number;
+  platform: Platform;
+  category: Category;
 }
 
-// ============================================================================
-// Props
-// ============================================================================
-
 interface MarketTickerProps {
-  prices: MarketPrice[];
+  markets: TickerMarket[];
   priceDirection: Map<string, PriceDirection>;
   isLoading: boolean;
   error: Error | undefined;
-  isConnected: boolean;
+  isConnected: { kalshi: boolean; polymarket: boolean };
 }
 
 // ============================================================================
 // Main Export
 // ============================================================================
+
 export function MarketTicker({
-  prices,
+  markets,
   priceDirection,
   isLoading,
   error,
   isConnected,
 }: MarketTickerProps) {
-  // Group markets by eventTicker, sort by volume, limit to 5 events
+  // Group markets by eventTicker, sort by volume, limit to MAX_EVENTS_TO_SHOW
   const groupedEvents = useMemo(() => {
     const eventMap = new Map<string, GroupedEvent>();
 
-    for (const market of prices) {
+    for (const market of markets) {
       const existing = eventMap.get(market.eventTicker);
       if (existing) {
         existing.markets.push(market);
@@ -67,24 +84,58 @@ export function MarketTicker({
           markets: [market],
           isSingleMarket: true,
           totalMarkets: 1,
+          platform: market.platform,
+          category: market.category,
         });
       }
     }
 
     // Sort markets within each event by volume (highest first), then limit to MAX_MARKETS_PER_CARD
     for (const group of eventMap.values()) {
-      group.markets.sort((a, b) => {
-        const volA = a.volume ?? a.volume24h ?? 0;
-        const volB = b.volume ?? b.volume24h ?? 0;
-        return volB - volA;
-      });
+      group.markets.sort((a, b) => b.volume - a.volume);
       group.markets = group.markets.slice(0, MAX_MARKETS_PER_CARD);
     }
 
-    // Limit to 5 events to fit screen without scrolling
-    return Array.from(eventMap.values()).slice(0, 5);
-  }, [prices]);
+    // Separate events by platform and sort each by volume
+    const allEvents = Array.from(eventMap.values());
+    const polymarketEvents = allEvents
+      .filter((e) => e.platform === "polymarket")
+      .sort((a, b) => {
+        const volA = a.markets.reduce((sum, m) => sum + m.volume, 0);
+        const volB = b.markets.reduce((sum, m) => sum + m.volume, 0);
+        return volB - volA;
+      });
+    const kalshiEvents = allEvents
+      .filter((e) => e.platform === "kalshi")
+      .sort((a, b) => {
+        const volA = a.markets.reduce((sum, m) => sum + m.volume, 0);
+        const volB = b.markets.reduce((sum, m) => sum + m.volume, 0);
+        return volB - volA;
+      });
 
+    // Interleave: polymarket, kalshi, polymarket, kalshi, ...
+    const interleaved: GroupedEvent[] = [];
+    const maxLen = Math.max(polymarketEvents.length, kalshiEvents.length);
+    for (
+      let i = 0;
+      i < maxLen && interleaved.length < MAX_EVENTS_TO_SHOW;
+      i++
+    ) {
+      if (polymarketEvents[i] && interleaved.length < MAX_EVENTS_TO_SHOW) {
+        interleaved.push(polymarketEvents[i]);
+      }
+      if (kalshiEvents[i] && interleaved.length < MAX_EVENTS_TO_SHOW) {
+        interleaved.push(kalshiEvents[i]);
+      }
+    }
+
+    return interleaved;
+  }, [markets]);
+
+  // Check if any platform is connected
+  const anyConnected = isConnected.kalshi || isConnected.polymarket;
+
+  // Loading state
   if (isLoading) {
     return (
       <div className="grid grid-cols-5">
@@ -102,84 +153,118 @@ export function MarketTicker({
     );
   }
 
+  // Error state
   if (error) {
-    console.error("[MarketTicker] Error loading markets:", error);
     return (
-      <div className="text-sm text-muted-foreground">
+      <div className="text-sm text-muted-foreground p-4">
         Failed to load markets: {error.message}
       </div>
     );
   }
 
-  if (!prices || prices.length === 0) {
+  // Empty state
+  if (!markets || markets.length === 0) {
     return (
-      <div className="text-sm text-muted-foreground">
-        No crypto markets available
+      <div className="text-sm text-muted-foreground p-4">
+        No markets available
       </div>
     );
   }
 
+  // Build ticker items from grouped events
+  const tickerItems = groupedEvents.map((group) => (
+    <EventCard
+      key={group.eventTicker}
+      group={group}
+      priceDirection={priceDirection}
+    />
+  ));
+
   return (
     <div className="relative">
       {/* Connection indicator */}
-      {!isConnected && (
+      {!anyConnected && (
         <div
           className="absolute right-2 top-2 h-2 w-2 rounded-full bg-yellow-500 z-10"
           title="Connecting..."
         />
       )}
 
-      {/* Fixed 5-column grid - no scroll, fits screen */}
-      <div className="grid grid-cols-5">
-        {groupedEvents.map((group) => (
-          <MarketCard
-            key={group.eventTicker}
-            group={group}
-            priceDirection={priceDirection}
-          />
-        ))}
-      </div>
+      {/* Infinite scroll ticker */}
+      <Ticker items={tickerItems} hoverFactor={0} />
     </div>
   );
 }
 
 // ============================================================================
-// Market Card Component
+// Event Card Component (groups multiple markets from same event)
 // ============================================================================
 
-function MarketCard({
+function EventCard({
   group,
   priceDirection,
 }: {
   group: GroupedEvent;
   priceDirection: Map<string, PriceDirection>;
 }) {
-  const cardTitle = group.eventTitle;
+  const platformLogo = PLATFORM_LOGOS[group.platform];
+  const categoryColor = CATEGORY_COLORS[group.category];
 
   return (
-    <div className="border-r last:border-r-0 bg-card p-4 space-y-3">
-      {/* Card Title */}
-      <h3 className="font-semibold text-sm leading-tight line-clamp-2">
-        {cardTitle}
-      </h3>
+    <div className="w-72 shrink-0 border-r bg-card p-4 space-y-3">
+      {/* Header: Platform logo + Category indicator + Title */}
+      <div className="flex items-start gap-2">
+        {/* Platform logo */}
+        <Image
+          src={platformLogo}
+          alt={group.platform}
+          width={64}
+          height={16}
+          className={cn(
+            "shrink-0 h-4 w-auto mt-0.5",
+            group.platform === "kalshi" && "dark:invert",
+          )}
+          title={group.platform === "kalshi" ? "Kalshi" : "Polymarket"}
+        />
+
+        {/* Category indicator */}
+        <span
+          className={cn(
+            "shrink-0 w-1.5 h-1.5 rounded-full mt-1.5",
+            categoryColor,
+          )}
+          title={group.category}
+        />
+
+        {/* Card Title */}
+        <h3 className="font-semibold text-sm leading-tight line-clamp-2 flex-1">
+          {group.eventTitle}
+        </h3>
+      </div>
 
       {/* Markets - different layout for single vs multi */}
       {group.isSingleMarket ? (
-        // Single market: full-width progress bar with bid/ask below
+        // Single market: full-width progress bar with Yes/No prices below
         <SingleMarketRow
           market={group.markets[0]}
-          direction={priceDirection.get(group.markets[0].marketTicker)}
+          direction={priceDirection.get(group.markets[0].ticker)}
         />
       ) : (
         // Multi-market: compact horizontal rows
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           {group.markets.map((market) => (
             <MultiMarketRow
-              key={market.marketTicker}
+              key={market.ticker}
               market={market}
-              direction={priceDirection.get(market.marketTicker)}
+              direction={priceDirection.get(market.ticker)}
             />
           ))}
+          {/* Show count of additional markets if any */}
+          {group.totalMarkets > MAX_MARKETS_PER_CARD && (
+            <p className="text-[10px] text-muted-foreground text-center">
+              +{group.totalMarkets - MAX_MARKETS_PER_CARD} more markets
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -194,31 +279,25 @@ function SingleMarketRow({
   market,
   direction,
 }: {
-  market: MarketPrice;
+  market: TickerMarket;
   direction?: PriceDirection;
 }) {
-  // Convert prices to cents (0-100)
-  const bidCents =
-    market.yesBid !== null
-      ? market.yesBid > 1
-        ? market.yesBid
-        : Math.round(market.yesBid * 100)
-      : 0;
-  const askCents =
-    market.yesAsk !== null
-      ? market.yesAsk > 1
-        ? market.yesAsk
-        : Math.round(market.yesAsk * 100)
-      : 0;
-
-  // Use midpoint for the progress bar display
-  const midpoint = (bidCents + askCents) / 2;
+  // yesPrice and noPrice are already in cents (0-100)
+  const yesPercent = Number.isFinite(market.yesPrice) ? market.yesPrice : 50;
+  const noPercent = Number.isFinite(market.noPrice) ? market.noPrice : 50;
 
   return (
     <div className="space-y-1.5">
-      {/* Progress bar showing bid-ask spread */}
+      {/* Market title if different from event title */}
+      {market.marketTitle !== market.eventTitle && (
+        <p className="text-[10px] text-muted-foreground line-clamp-1 -mt-1">
+          {market.marketTitle}
+        </p>
+      )}
+
+      {/* Progress bar */}
       <Progress
-        value={midpoint}
+        value={yesPercent}
         className={cn(
           "h-3 bg-red-500/30",
           "[&>[data-slot=progress-indicator]]:bg-green-500",
@@ -228,7 +307,7 @@ function SingleMarketRow({
         )}
       />
 
-      {/* Bid/Ask labels */}
+      {/* Yes/No prices */}
       <div className="flex justify-between text-xs tabular-nums">
         <span
           className={cn(
@@ -243,9 +322,9 @@ function SingleMarketRow({
             suffix="¢"
             transition={{ type: "spring", duration: 0.4, bounce: 0.2 }}
           >
-            {bidCents}
+            {Math.round(yesPercent)}
           </AnimateNumber>
-          {" bid"}
+          {" Yes"}
         </span>
         <span
           className={cn(
@@ -260,9 +339,9 @@ function SingleMarketRow({
             suffix="¢"
             transition={{ type: "spring", duration: 0.4, bounce: 0.2 }}
           >
-            {askCents}
+            {Math.round(noPercent)}
           </AnimateNumber>
-          {" ask"}
+          {" No"}
         </span>
       </div>
     </div>
@@ -277,25 +356,12 @@ function MultiMarketRow({
   market,
   direction,
 }: {
-  market: MarketPrice;
+  market: TickerMarket;
   direction?: PriceDirection;
 }) {
-  // Convert prices to cents (0-100)
-  const bidCents =
-    market.yesBid !== null
-      ? market.yesBid > 1
-        ? market.yesBid
-        : Math.round(market.yesBid * 100)
-      : 0;
-  const askCents =
-    market.yesAsk !== null
-      ? market.yesAsk > 1
-        ? market.yesAsk
-        : Math.round(market.yesAsk * 100)
-      : 0;
-
-  // Use midpoint for the progress bar display
-  const midpoint = (bidCents + askCents) / 2;
+  // yesPrice and noPrice are already in cents (0-100)
+  const yesPercent = Number.isFinite(market.yesPrice) ? market.yesPrice : 50;
+  const noPercent = Number.isFinite(market.noPrice) ? market.noPrice : 50;
 
   return (
     <div className="flex items-center gap-1.5">
@@ -306,7 +372,7 @@ function MultiMarketRow({
 
       {/* Mini progress bar */}
       <Progress
-        value={midpoint}
+        value={yesPercent}
         className={cn(
           "h-1.5 w-12 shrink-0 bg-red-500/30",
           "[&>[data-slot=progress-indicator]]:bg-green-500",
@@ -316,7 +382,7 @@ function MultiMarketRow({
         )}
       />
 
-      {/* Bid/Ask prices */}
+      {/* Yes/No prices */}
       <div className="flex items-center gap-0.5 text-[10px] tabular-nums shrink-0">
         <span
           className={cn(
@@ -331,7 +397,7 @@ function MultiMarketRow({
             suffix="¢"
             transition={{ type: "spring", duration: 0.4, bounce: 0.2 }}
           >
-            {bidCents}
+            {Math.round(yesPercent)}
           </AnimateNumber>
         </span>
         <span className="text-muted-foreground">/</span>
@@ -348,7 +414,7 @@ function MultiMarketRow({
             suffix="¢"
             transition={{ type: "spring", duration: 0.4, bounce: 0.2 }}
           >
-            {askCents}
+            {Math.round(noPercent)}
           </AnimateNumber>
         </span>
       </div>
