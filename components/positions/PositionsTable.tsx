@@ -7,28 +7,12 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import type { AgentPosition } from "@/hooks/positions/usePositions";
 import { usePositionPrices } from "@/hooks/positions/usePositionPrices";
-import type { PriceDirection } from "@/hooks/positions/usePriceSubscription";
+import type { PriceDirection } from "@/hooks/usePriceSubscription";
 import { cn } from "@/lib/utils";
 import { AnimateNumber } from "motion-plus/react";
+import { getModelSeriesIcon } from "@/components/icons/model-series";
 
 const DEFAULT_CHART_COLOR = "#6366f1";
-
-const SERIES_LOGO_MAP: Record<string, string> = {
-  openai: "openai.svg",
-  claude: "claude-color.svg",
-  gemini: "gemini-color.svg",
-  deepseek: "deepseek-color.svg",
-  qwen: "qwen-color.svg",
-  grok: "grok.svg",
-  kimi: "kimi-color.svg",
-  glm: "zai.svg",
-};
-
-function getLogoPathFromSeries(series?: string): string | undefined {
-  if (!series) return undefined;
-  const filename = SERIES_LOGO_MAP[series];
-  return filename ? `/model-series/${filename}` : undefined;
-}
 
 interface PositionsTableProps {
   positions: AgentPosition[];
@@ -106,7 +90,7 @@ function Badge({
 }
 
 function ModelRow({ modelGroup }: { modelGroup: ModelGroup }) {
-  const logoPath = getLogoPathFromSeries(modelGroup.modelSeries);
+  const icon = getModelSeriesIcon(modelGroup.modelSeries);
   const initial = modelGroup.modelName.charAt(0).toUpperCase();
 
   return (
@@ -116,9 +100,13 @@ function ModelRow({ modelGroup }: { modelGroup: ModelGroup }) {
           className="size-5 ring-[1.5px] ring-offset-0 bg-background shrink-0"
           style={{ ["--tw-ring-color" as string]: modelGroup.modelColor }}
         >
-          {logoPath ? (
+          {icon?.type === "component" ? (
+            <div className="flex items-center justify-center w-full h-full p-0.5">
+              <icon.Component className="size-3.5" />
+            </div>
+          ) : icon?.type === "image" ? (
             <AvatarImage
-              src={logoPath}
+              src={icon.src}
               alt={`${modelGroup.modelName} logo`}
               className="p-0.5"
             />
@@ -274,7 +262,7 @@ export function PositionsTable({
           <div
             className={cn(
               "flex items-center gap-1 text-xs",
-              hasConnection ? "text-green-500" : "text-muted-foreground"
+              hasConnection ? "text-green-500" : "text-muted-foreground",
             )}
             title={
               hasConnection

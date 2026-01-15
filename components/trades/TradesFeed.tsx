@@ -1,12 +1,22 @@
 "use client";
 
 import { useMemo } from "react";
-import { ArrowRightLeft, ArrowUpRight, ArrowDownRight, ExternalLink } from "lucide-react";
+import {
+  ArrowRightLeft,
+  ArrowUpRight,
+  ArrowDownRight,
+  ExternalLink,
+  Wifi,
+  WifiOff,
+} from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import type { AgentTrade } from "@/hooks/trades/useTrades";
+import { useTradePrices } from "@/hooks/trades/useTradePrices";
+import type { PriceDirection } from "@/hooks/usePriceSubscription";
+import { getModelSeriesIcon } from "@/components/icons/model-series";
 
 interface PlatformConfig {
   label: string;
@@ -36,25 +46,6 @@ const PLATFORM_CONFIG: Record<"kalshi" | "polymarket", PlatformConfig> = {
   },
 } as const;
 
-// Map series to logo filename
-const SERIES_LOGO_MAP: Record<string, string> = {
-  openai: "openai.svg",
-  gpt: "openai.svg",
-  claude: "claude-color.svg",
-  gemini: "gemini-color.svg",
-  deepseek: "deepseek-color.svg",
-  qwen: "qwen-color.svg",
-  grok: "grok.svg",
-  kimi: "kimi-color.svg",
-  glm: "zai.svg",
-};
-
-function getLogoPathFromSeries(series?: string): string | undefined {
-  if (!series) return undefined;
-  const filename = SERIES_LOGO_MAP[series];
-  return filename ? `/model-series/${filename}` : undefined;
-}
-
 interface TradesFeedProps {
   trades: AgentTrade[];
   selectedModelId: string | null;
@@ -77,7 +68,12 @@ function formatTimeAgo(timestamp: Date | string): string {
   return `${diffDays}d ago`;
 }
 
-// Format currency
+// Format price as cents
+function formatCents(value: number): string {
+  return `${Math.round(value * 100)}¢`;
+}
+
+// Format currency for notional
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -94,12 +90,18 @@ function extractSignature(txSignature: string): string {
   return colonIndex !== -1 ? txSignature.slice(colonIndex + 1) : txSignature;
 }
 
-function TradeCard({ trade }: { trade: AgentTrade }) {
+interface TradeCardProps {
+  trade: AgentTrade;
+  currentPrice?: number;
+  priceDirection?: PriceDirection;
+}
+
+function TradeCard({ trade, currentPrice, priceDirection }: TradeCardProps) {
   const isBuy = trade.action === "buy";
   const isYes = trade.side === "yes";
   const modelName = trade.modelName || "Model";
   const chartColor = trade.modelColor || "#6366f1";
-  const logoPath = getLogoPathFromSeries(trade.modelSeries);
+  const icon = getModelSeriesIcon(trade.modelSeries);
   const initial = modelName.charAt(0).toUpperCase();
 
   const platform = PLATFORM_CONFIG[trade.platform];
@@ -116,9 +118,13 @@ function TradeCard({ trade }: { trade: AgentTrade }) {
               ["--tw-ring-color" as string]: chartColor,
             }}
           >
-            {logoPath ? (
+            {icon?.type === "component" ? (
+              <div className="flex items-center justify-center w-full h-full p-0.5">
+                <icon.Component className="size-3.5" />
+              </div>
+            ) : icon?.type === "image" ? (
               <AvatarImage
-                src={logoPath}
+                src={icon.src}
                 alt={`${modelName} logo`}
                 className="p-0.5"
               />
@@ -135,7 +141,7 @@ function TradeCard({ trade }: { trade: AgentTrade }) {
             className={cn(
               "flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium",
               platform.bgColor,
-              platform.color
+              platform.color,
             )}
           >
             <Avatar className="size-4 rounded-sm">
@@ -155,7 +161,7 @@ function TradeCard({ trade }: { trade: AgentTrade }) {
             "flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium",
             isBuy
               ? "bg-green-500/10 text-green-500"
-              : "bg-red-500/10 text-red-500"
+              : "bg-red-500/10 text-red-500",
           )}
         >
           {isBuy ? (
@@ -170,22 +176,41 @@ function TradeCard({ trade }: { trade: AgentTrade }) {
             "px-2 py-0.5 rounded text-xs font-medium",
             isYes
               ? "bg-blue-500/10 text-blue-500"
-              : "bg-orange-500/10 text-orange-500"
+              : "bg-orange-500/10 text-orange-500",
           )}
         >
           {trade.side.toUpperCase()}
         </span>
       </div>
 
-      <p className="text-sm mb-2 line-clamp-2 font-mono">
-        {trade.marketTicker}
+      <p className="text-sm mb-2 line-clamp-2">
+        {trade.marketTitle || trade.marketTicker}
       </p>
 
       <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span>
-          {trade.quantity} @ {formatCurrency(trade.price)}
-        </span>
-        <span className="font-medium text-foreground">
+        <div className="flex flex-col">
+          <span>
+            {trade.quantity} @ {formatCents(trade.price)}
+          </span>
+          {currentPrice !== undefined && (
+            <span
+              className={cn(
+                "text-[10px] transition-colors",
+                priceDirection === "up" && "text-green-500",
+                priceDirection === "down" && "text-red-500",
+              )}
+            >
+              Now: {formatCents(currentPrice)}
+            </span>
+          )}
+        </div>
+        <span
+          className={cn(
+            "font-medium text-foreground px-1.5 py-0.5 rounded transition-all",
+            priceDirection === "up" && "ring-2 ring-green-400",
+            priceDirection === "down" && "ring-2 ring-red-400",
+          )}
+        >
           {formatCurrency(trade.notional)}
         </span>
       </div>
@@ -206,6 +231,9 @@ function TradeCard({ trade }: { trade: AgentTrade }) {
 }
 
 export function TradesFeed({ trades, selectedModelId }: TradesFeedProps) {
+  // Subscribe to live price updates for all trades
+  const { prices, priceDirection, isConnected } = useTradePrices(trades);
+
   // Filter trades by selected model only
   const filteredTrades = useMemo(() => {
     return trades.filter((trade) => {
@@ -216,9 +244,37 @@ export function TradesFeed({ trades, selectedModelId }: TradesFeedProps) {
     });
   }, [trades, selectedModelId]);
 
+  // Check if any connection is active
+  const hasConnection = isConnected.kalshi || isConnected.polymarket;
+
   return (
     <Card className="h-full flex flex-col">
-      <CardHeader className="pb-3"></CardHeader>
+      <CardHeader className="pb-3 flex flex-row items-center justify-end">
+        {trades.length > 0 && (
+          <div
+            className={cn(
+              "flex items-center gap-1 text-xs",
+              hasConnection ? "text-green-500" : "text-muted-foreground",
+            )}
+            title={
+              hasConnection
+                ? `Connected: ${[
+                    isConnected.kalshi && "Kalshi",
+                    isConnected.polymarket && "Polymarket",
+                  ]
+                    .filter(Boolean)
+                    .join(", ")}`
+                : "Disconnected"
+            }
+          >
+            {hasConnection ? (
+              <Wifi className="h-3 w-3" />
+            ) : (
+              <WifiOff className="h-3 w-3" />
+            )}
+          </div>
+        )}
+      </CardHeader>
 
       <CardContent className="flex-1 min-h-0">
         <ScrollArea className="h-full pr-4">
@@ -232,9 +288,23 @@ export function TradesFeed({ trades, selectedModelId }: TradesFeedProps) {
             </div>
           ) : (
             <div className="space-y-3">
-              {filteredTrades.map((trade) => (
-                <TradeCard key={trade.id} trade={trade} />
-              ))}
+              {filteredTrades.map((trade) => {
+                const priceUpdate = prices.get(trade.marketTicker);
+                const currentPrice = priceUpdate
+                  ? trade.side === "yes"
+                    ? priceUpdate.yesPrice
+                    : priceUpdate.noPrice
+                  : undefined;
+
+                return (
+                  <TradeCard
+                    key={trade.id}
+                    trade={trade}
+                    currentPrice={currentPrice}
+                    priceDirection={priceDirection.get(trade.marketTicker)}
+                  />
+                );
+              })}
             </div>
           )}
         </ScrollArea>

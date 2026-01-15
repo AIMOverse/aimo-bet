@@ -5,7 +5,7 @@ import type { AgentPosition } from "./usePositions";
 import {
   usePriceSubscription,
   type UsePriceSubscriptionReturn,
-} from "./usePriceSubscription";
+} from "../usePriceSubscription";
 
 /**
  * High-level hook that auto-subscribes to price updates based on positions.
@@ -17,12 +17,12 @@ import {
  * @returns Price subscription state including prices map, connection status, and errors
  */
 export function usePositionPrices(
-  positions: AgentPosition[]
+  positions: AgentPosition[],
 ): UsePriceSubscriptionReturn {
   // Extract unique tickers from positions
   const tickers = useMemo(
     () => [...new Set(positions.map((p) => p.marketTicker))],
-    [positions]
+    [positions],
   );
 
   return usePriceSubscription(tickers);

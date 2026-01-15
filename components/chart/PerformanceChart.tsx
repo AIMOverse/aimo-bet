@@ -17,8 +17,9 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { ChartDataPoint, LeaderboardEntry } from "@/lib/supabase/types";
 import { MODELS } from "@/lib/ai/models";
 import {
-  getSeriesLogoPath,
+  getModelSeriesIcon,
   getModelCostPerMillion,
+  type ModelSeriesIconResult,
 } from "@/lib/ai/models/catalog";
 import { DEFAULT_STARTING_CAPITAL, CHART_CONFIG } from "@/lib/config";
 import { useEffect, useMemo, useState } from "react";
@@ -26,6 +27,7 @@ import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { AnimateNumber } from "motion-plus/react";
+import { useTheme } from "next-themes";
 
 interface PerformanceChartProps {
   data: ChartDataPoint[];
@@ -179,7 +181,7 @@ function LineEndLabel({
     return null;
   }
 
-  const logoPath = getSeriesLogoPath(modelName);
+  const icon = getModelSeriesIcon(modelName);
   const initial = modelName.charAt(0).toUpperCase();
   const logoSize = 32; // Increased height for two lines
   const labelWidth = 120; // Width for logo + value + token info
@@ -219,9 +221,13 @@ function LineEndLabel({
             ["--tw-ring-color" as string]: isDead ? DEAD_MODEL_COLOR : color,
           }}
         >
-          {logoPath ? (
+          {icon?.type === "component" ? (
+            <div className="flex items-center justify-center w-full h-full p-0.5">
+              <icon.Component className="size-3.5" />
+            </div>
+          ) : icon?.type === "image" ? (
             <AvatarImage
-              src={logoPath}
+              src={icon.src}
               alt={`${modelName} logo`}
               className="p-0.5"
             />
@@ -389,6 +395,32 @@ function CustomLegend({
   );
 }
 
+// Nice number rounding for Y-axis ticks (symmetric around 0)
+function getNiceAxisMax(value: number, isPercent: boolean): number {
+  if (value <= 0) {
+    return isPercent ? 10 : 100; // Minimum range
+  }
+
+  // Define nice tick values for dollar and percent modes
+  const niceValues = isPercent
+    ? [5, 10, 15, 20, 25, 50, 75, 100, 150, 200, 250, 500]
+    : [
+        50, 100, 150, 200, 250, 500, 750, 1000, 1500, 2000, 2500, 5000, 7500,
+        10000,
+      ];
+
+  // Find the smallest nice value that fits the data with padding
+  for (const nice of niceValues) {
+    if (nice >= value) {
+      return nice;
+    }
+  }
+
+  // For very large values, round up to nearest significant figure
+  const magnitude = Math.pow(10, Math.floor(Math.log10(value)));
+  return Math.ceil(value / magnitude) * magnitude;
+}
+
 export function PerformanceChart({
   data,
   title = "P&L Over Time",
@@ -399,6 +431,16 @@ export function PerformanceChart({
 }: PerformanceChartProps) {
   const [valueDisplay, setValueDisplay] = useState<ValueDisplay>("dollar");
   const [hoveredModel, setHoveredModel] = useState<string | null>(null);
+  const { resolvedTheme } = useTheme();
+
+  // Theme-aware colors for chart elements
+  const axisColor = useMemo(() => {
+    return resolvedTheme === "dark" ? "#a1a1aa" : "#71717a";
+  }, [resolvedTheme]);
+
+  const gridColor = useMemo(() => {
+    return resolvedTheme === "dark" ? "#3f3f46" : "#e4e4e7";
+  }, [resolvedTheme]);
 
   // Real-time current time for X-axis (updates every minute)
   const [now, setNow] = useState(() => Date.now());
@@ -449,7 +491,7 @@ export function PerformanceChart({
     });
   }, [data, valueDisplay, modelNames]);
 
-  // Calculate Y-axis domain: centered around 0 for P&L display
+  // Calculate Y-axis domain: centered around 0 for P&L display with nice tick values
   const yDomain = useMemo(() => {
     const excludeKeys = new Set(["timestamp", "_ts"]);
 
@@ -466,23 +508,22 @@ export function PerformanceChart({
       });
     });
 
+    const isPercent = valueDisplay === "percent";
+
     // Handle empty data case
     if (!isFinite(actualMax) || !isFinite(actualMin)) {
-      if (valueDisplay === "percent") {
-        return [-10, 10]; // -10% to +10%
-      }
-      return [-100, 100]; // -$100 to +$100
+      const defaultMax = isPercent ? 10 : 100;
+      return [-defaultMax, defaultMax];
     }
 
-    // Add 10% padding and ensure symmetric around 0
+    // Get the maximum absolute value and add 20% padding
     const absMax = Math.max(Math.abs(actualMin), Math.abs(actualMax));
     const paddedMax = absMax * 1.2;
 
-    // Ensure minimum range for visibility
-    const minRange = valueDisplay === "percent" ? 5 : 50;
-    const finalMax = Math.max(paddedMax, minRange);
+    // Round to a nice axis value for clean tick marks
+    const niceMax = getNiceAxisMax(paddedMax, isPercent);
 
-    return [-finalMax, finalMax];
+    return [-niceMax, niceMax];
   }, [chartData, valueDisplay]);
 
   // Calculate X-axis domain: first data point to now + 1 hour
@@ -524,7 +565,7 @@ export function PerformanceChart({
               data={chartData}
               margin={{ ...CHART_CONFIG.margin, right: 110 }}
             >
-              <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+              <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
               <XAxis
                 dataKey="_ts"
                 type="number"
@@ -534,9 +575,9 @@ export function PerformanceChart({
                   formatTime(new Date(ts).toISOString())
                 }
                 className="text-xs"
-                tick={{ fill: "hsl(var(--muted-foreground))" }}
-                tickLine={{ stroke: "hsl(var(--muted))" }}
-                axisLine={{ stroke: "hsl(var(--muted))" }}
+                tick={{ fill: axisColor }}
+                tickLine={{ stroke: gridColor }}
+                axisLine={{ stroke: gridColor }}
               />
               <YAxis
                 domain={yDomain}
@@ -552,9 +593,9 @@ export function PerformanceChart({
                   return `${sign}${value.toFixed(0)}%`;
                 }}
                 className="text-xs"
-                tick={{ fill: "hsl(var(--muted-foreground))" }}
-                tickLine={{ stroke: "hsl(var(--muted))" }}
-                axisLine={{ stroke: "hsl(var(--muted))" }}
+                tick={{ fill: axisColor }}
+                tickLine={{ stroke: gridColor }}
+                axisLine={{ stroke: gridColor }}
                 width={60}
                 allowDataOverflow={false}
               />

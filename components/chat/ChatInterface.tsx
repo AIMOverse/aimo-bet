@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useEffect, useRef } from "react";
-import { MessageSquare, Loader2, ChevronDown } from "lucide-react";
+import { useMemo, useEffect, useRef, useCallback } from "react";
+import { MessageSquare, Loader2, ChevronUp } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -11,25 +11,10 @@ import { MODELS } from "@/lib/ai/models";
 import type { ChatMessage as ChatMessageType } from "@/lib/supabase/types";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-
-// Map series to logo filename
-const SERIES_LOGO_MAP: Record<string, string> = {
-  openai: "openai.svg",
-  gpt: "openai.svg",
-  claude: "claude-color.svg",
-  gemini: "gemini-color.svg",
-  deepseek: "deepseek-color.svg",
-  qwen: "qwen-color.svg",
-  grok: "grok.svg",
-  kimi: "kimi-color.svg",
-  glm: "zai.svg",
-};
-
-function getLogoPathFromSeries(series?: string): string | undefined {
-  if (!series) return undefined;
-  const filename = SERIES_LOGO_MAP[series];
-  return filename ? `/model-series/${filename}` : undefined;
-}
+import {
+  getModelSeriesIcon,
+  type ModelSeriesIconResult,
+} from "@/components/icons/model-series";
 
 // Format time ago
 function formatTimeAgo(timestamp: number): string {
@@ -71,42 +56,51 @@ function MarkdownContent({ children }: { children: string }) {
           ol: ({ ...props }) => (
             <ol className="my-2 ml-4 list-decimal space-y-1" {...props} />
           ),
-          li: ({ ...props }) => (
-            <li className="text-sm" {...props} />
-          ),
+          li: ({ ...props }) => <li className="text-sm" {...props} />,
           a: ({ ...props }) => (
             <a className="text-blue-500 hover:underline" {...props} />
           ),
           strong: ({ ...props }) => (
             <strong className="font-semibold" {...props} />
           ),
-          em: ({ ...props }) => (
-            <em className="italic" {...props} />
-          ),
+          em: ({ ...props }) => <em className="italic" {...props} />,
           blockquote: ({ ...props }) => (
-            <blockquote className="border-l-2 border-muted-foreground pl-3 my-2 text-muted-foreground" {...props} />
+            <blockquote
+              className="border-l-2 border-muted-foreground pl-3 my-2 text-muted-foreground"
+              {...props}
+            />
           ),
           code: (props) => {
             const inline = !props.className;
             return inline ? (
-              <code className="px-1.5 py-0.5 rounded bg-muted text-xs font-mono" {...props} />
+              <code
+                className="px-1.5 py-0.5 rounded bg-muted text-xs font-mono"
+                {...props}
+              />
             ) : (
-              <code className="block px-3 py-2 rounded bg-muted text-xs font-mono overflow-x-auto my-2" {...props} />
+              <code
+                className="block px-3 py-2 rounded bg-muted text-xs font-mono overflow-x-auto my-2"
+                {...props}
+              />
             );
           },
           pre: ({ ...props }) => (
-            <pre className="rounded-lg bg-muted/50 p-3 overflow-x-auto my-2" {...props} />
+            <pre
+              className="rounded-lg bg-muted/50 p-3 overflow-x-auto my-2"
+              {...props}
+            />
           ),
           table: ({ ...props }) => (
             <div className="my-3 overflow-x-auto">
               <table className="min-w-full divide-y divide-border" {...props} />
             </div>
           ),
-          thead: ({ ...props }) => (
-            <thead className="bg-muted/30" {...props} />
-          ),
+          thead: ({ ...props }) => <thead className="bg-muted/30" {...props} />,
           th: ({ ...props }) => (
-            <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider" {...props} />
+            <th
+              className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider"
+              {...props}
+            />
           ),
           td: ({ ...props }) => (
             <td className="px-3 py-2 text-sm whitespace-nowrap" {...props} />
@@ -124,13 +118,13 @@ function MessageBubble({
   modelInfo,
 }: {
   message: ChatMessageType;
-  modelInfo?: { name: string; color: string; logoPath?: string };
+  modelInfo?: { name: string; color: string; icon: ModelSeriesIconResult };
 }) {
   const text = message.parts?.find((p) => p.type === "text")?.text ?? "";
   const createdAt = message.metadata?.createdAt ?? 0;
   const name = modelInfo?.name ?? "Model";
   const color = modelInfo?.color ?? "#6366f1";
-  const logoPath = modelInfo?.logoPath;
+  const icon = modelInfo?.icon;
   const initial = name.charAt(0).toUpperCase();
 
   return (
@@ -139,8 +133,12 @@ function MessageBubble({
         className="size-7 ring-[1.5px] ring-offset-0 bg-background shrink-0"
         style={{ ["--tw-ring-color" as string]: color }}
       >
-        {logoPath ? (
-          <AvatarImage src={logoPath} alt={`${name} logo`} className="p-0.5" />
+        {icon?.type === "component" ? (
+          <div className="flex items-center justify-center w-full h-full p-0.5">
+            <icon.Component className="size-5" />
+          </div>
+        ) : icon?.type === "image" ? (
+          <AvatarImage src={icon.src} alt={`${name} logo`} className="p-0.5" />
         ) : null}
         <AvatarFallback
           className="text-[10px] font-semibold text-foreground"
@@ -177,37 +175,111 @@ export function ChatInterface({
       sessionId,
       modelId: selectedModelId,
     });
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const prevScrollHeightRef = useRef<number>(0);
+  const prevMessagesLengthRef = useRef<number>(0);
+  const isInitialLoadRef = useRef<boolean>(true);
+  const isLoadingOlderRef = useRef<boolean>(false);
 
-  // Model info lookup map from catalog (includes logoPath derived from series)
+  // Reversed messages for display (oldest first, newest at bottom)
+  const displayMessages = useMemo(() => [...messages].reverse(), [messages]);
+
+  // Model info lookup map from catalog (includes icon derived from series)
   const modelInfoMap = useMemo(() => {
     const map = new Map<
       string,
-      { name: string; color: string; logoPath?: string }
+      { name: string; color: string; icon: ModelSeriesIconResult }
     >();
     for (const model of MODELS) {
       if (model.chartColor) {
         map.set(model.id, {
           name: model.name,
           color: model.chartColor,
-          logoPath: getLogoPathFromSeries(model.series),
+          icon: getModelSeriesIcon(model.series),
         });
       }
     }
     return map;
   }, []);
 
-  // Auto-scroll on new messages (only when at bottom)
+  // Get the scroll viewport element from ScrollArea
+  const getScrollViewport = useCallback(() => {
+    return scrollContainerRef.current?.querySelector(
+      "[data-radix-scroll-area-viewport]",
+    ) as HTMLDivElement | null;
+  }, []);
+
+  // Scroll to bottom helper
+  const scrollToBottom = useCallback(() => {
+    const viewport = getScrollViewport();
+    if (viewport) {
+      viewport.scrollTop = viewport.scrollHeight;
+    }
+  }, [getScrollViewport]);
+
+  // Check if user is near bottom
+  const isNearBottom = useCallback(() => {
+    const viewport = getScrollViewport();
+    if (!viewport) return true;
+    const { scrollTop, scrollHeight, clientHeight } = viewport;
+    return scrollHeight - scrollTop - clientHeight < 100;
+  }, [getScrollViewport]);
+
+  // Handle loading older messages - preserve scroll position
+  const handleLoadOlder = useCallback(async () => {
+    const viewport = getScrollViewport();
+    if (viewport) {
+      prevScrollHeightRef.current = viewport.scrollHeight;
+      isLoadingOlderRef.current = true;
+    }
+    await loadMore();
+  }, [loadMore, getScrollViewport]);
+
+  // Auto-scroll to bottom on initial load
   useEffect(() => {
-    if (scrollAreaRef.current) {
-      const { scrollTop, scrollHeight, clientHeight } = scrollAreaRef.current;
-      const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
-      if (isAtBottom) {
-        scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
+    if (!isLoading && messages.length > 0 && isInitialLoadRef.current) {
+      // Use setTimeout to ensure DOM has updated
+      setTimeout(() => {
+        scrollToBottom();
+        isInitialLoadRef.current = false;
+      }, 0);
+    }
+  }, [isLoading, messages.length, scrollToBottom]);
+
+  // Reset initial load flag when session changes
+  useEffect(() => {
+    isInitialLoadRef.current = true;
+  }, [sessionId, selectedModelId]);
+
+  // Handle scroll position after loading older messages OR auto-scroll on new messages
+  useEffect(() => {
+    const viewport = getScrollViewport();
+    if (!viewport) return;
+
+    if (isLoadingOlderRef.current && !isLoadingMore) {
+      // Finished loading older messages - restore scroll position
+      const newScrollHeight = viewport.scrollHeight;
+      const scrollDiff = newScrollHeight - prevScrollHeightRef.current;
+      viewport.scrollTop = scrollDiff;
+      isLoadingOlderRef.current = false;
+    } else if (
+      messages.length > prevMessagesLengthRef.current &&
+      !isInitialLoadRef.current
+    ) {
+      // New message arrived via realtime - scroll to bottom if near bottom
+      if (isNearBottom()) {
+        setTimeout(() => scrollToBottom(), 0);
       }
     }
-  }, [messages.length]);
+
+    prevMessagesLengthRef.current = messages.length;
+  }, [
+    messages.length,
+    isLoadingMore,
+    getScrollViewport,
+    isNearBottom,
+    scrollToBottom,
+  ]);
 
   if (!sessionId) {
     return (
@@ -225,8 +297,8 @@ export function ChatInterface({
   return (
     <Card className="h-full flex flex-col">
       <CardContent className="flex-1 min-h-0 pt-4">
-        <ScrollArea className="h-full pr-4" ref={scrollAreaRef}>
-          <div ref={scrollRef}>
+        <ScrollArea className="h-full pr-4" ref={scrollContainerRef}>
+          <div className="flex flex-col">
             {/* Loading spinner for initial load */}
             {isLoading && (
               <div className="flex justify-center py-8">
@@ -239,41 +311,44 @@ export function ChatInterface({
                 <MessageSquare className="h-12 w-12 text-destructive/50 mb-4" />
                 <p className="text-destructive">Failed to load messages</p>
               </div>
-            ) : messages.length === 0 && !isLoading ? (
+            ) : displayMessages.length === 0 && !isLoading ? (
               <div className="flex flex-col items-center justify-center py-8 text-center">
                 <MessageSquare className="h-12 w-12 text-muted-foreground/50 mb-4" />
                 <p className="text-muted-foreground">No messages yet</p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {messages.map((msg: ChatMessageType) => (
-                  <MessageBubble
-                    key={msg.id}
-                    message={msg}
-                    modelInfo={modelInfoMap.get(msg.metadata?.authorId ?? "")}
-                  />
-                ))}
-              </div>
-            )}
+              <>
+                {/* Load older button at top */}
+                {hasMore && !isLoading && (
+                  <div className="flex justify-center pb-3">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleLoadOlder}
+                      disabled={isLoadingMore}
+                      className="h-8 text-xs text-muted-foreground"
+                    >
+                      {isLoadingMore ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                      ) : (
+                        <ChevronUp className="h-3.5 w-3.5 mr-1" />
+                      )}
+                      Load older messages
+                    </Button>
+                  </div>
+                )}
 
-            {/* Load more button at bottom (loads older messages) */}
-            {hasMore && !isLoading && (
-              <div className="flex justify-center pt-3">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={loadMore}
-                  disabled={isLoadingMore}
-                  className="h-8 text-xs text-muted-foreground"
-                >
-                  {isLoadingMore ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
-                  ) : (
-                    <ChevronDown className="h-3.5 w-3.5 mr-1" />
-                  )}
-                  Load older messages
-                </Button>
-              </div>
+                {/* Messages - oldest first, newest at bottom */}
+                <div className="space-y-3">
+                  {displayMessages.map((msg: ChatMessageType) => (
+                    <MessageBubble
+                      key={msg.id}
+                      message={msg}
+                      modelInfo={modelInfoMap.get(msg.metadata?.authorId ?? "")}
+                    />
+                  ))}
+                </div>
+              </>
             )}
           </div>
         </ScrollArea>

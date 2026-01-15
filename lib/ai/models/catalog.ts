@@ -1,4 +1,8 @@
 import type { ModelDefinition } from "./types";
+import {
+  getModelSeriesIcon as getModelSeriesIconFromComponents,
+  type ModelSeriesIconResult,
+} from "@/components/icons/model-series";
 
 // ============================================================================
 // Model Catalog - Season 0
@@ -248,6 +252,7 @@ export function getModelSeries(modelName: string): string | undefined {
 /**
  * Get series logo path for a model
  * Returns the path to the series logo SVG, or undefined if no series is set
+ * @deprecated Use getModelSeriesIcon for theme-aware icons
  */
 export function getSeriesLogoPath(modelName: string): string | undefined {
   const series = getModelSeries(modelName);
@@ -269,6 +274,18 @@ export function getSeriesLogoPath(modelName: string): string | undefined {
   const filename = logoMap[series];
   return filename ? `/model-series/${filename}` : undefined;
 }
+
+/**
+ * Get series icon for a model (theme-aware)
+ * Returns either an inline React component (for monochrome icons that adapt to theme)
+ * or a static image path (for colored brand icons)
+ */
+export function getModelSeriesIcon(modelName: string): ModelSeriesIconResult {
+  const series = getModelSeries(modelName);
+  return getModelSeriesIconFromComponents(series);
+}
+
+export type { ModelSeriesIconResult };
 
 /**
  * Create a map of model name to series info (series id and logo path)
