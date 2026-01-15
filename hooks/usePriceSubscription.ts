@@ -241,7 +241,7 @@ export function usePriceSubscription(
 
     const socket = new PartySocket({
       host,
-      room: "polymarket-relay",
+      room: "polymarket_relay",
     });
 
     polymarketSocketRef.current = socket;
