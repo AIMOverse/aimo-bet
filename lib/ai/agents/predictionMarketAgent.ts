@@ -155,14 +155,15 @@ export class PredictionMarketAgent {
     }
 
     // Create ToolLoopAgent for this run
-    // - maxSteps: Limits LLM roundtrips (default 5, hard cap at 10)
-    // - maxOutputTokens: Limits verbose reasoning (saves inference cost)
+    // - maxSteps: Limits LLM roundtrips (default 5, hard cap at 100)
+    // - maxOutputTokens: Set to 4096 to satisfy Anthropic's required max_tokens field
+    //   while being high enough to not truncate GPT's output (which was the issue with 1024)
     const agent = new ToolLoopAgent({
       model,
       instructions: TRADING_SYSTEM_PROMPT,
       tools,
       stopWhen: stepCountIs(Math.min(this.config.maxSteps ?? 100, 100)),
-      maxOutputTokens: 1024,
+      maxOutputTokens: 4096,
     });
 
     // Build prompt based on context
@@ -273,7 +274,7 @@ export class PredictionMarketAgent {
    */
   private extractReasoning(
     finalText: string | undefined,
-    steps: Array<{ text?: string }>
+    steps: Array<{ text?: string; finishReason?: string }>
   ): string {
     // If we have final text, use it
     if (finalText && finalText.trim()) {
@@ -288,6 +289,15 @@ export class PredictionMarketAgent {
 
     if (stepTexts) {
       return stepTexts;
+    }
+
+    // Check if any step hit token limit - helps debug token limit issues
+    const lastStep = steps[steps.length - 1];
+    if (lastStep?.finishReason === "length") {
+      console.warn(
+        `[PredictionMarketAgent] Warning: Agent hit output token limit (finishReason: 'length'). ` +
+          `No text generated. Consider increasing maxOutputTokens or reducing tool usage.`
+      );
     }
 
     return "Agent completed without generating reasoning.";
