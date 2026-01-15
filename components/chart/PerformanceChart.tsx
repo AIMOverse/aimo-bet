@@ -427,8 +427,9 @@ export function PerformanceChart({
   }, []);
 
   // Convert values to P&L (profit/loss from starting capital)
+  // Append latest real-time values as the newest data point
   const chartData = useMemo(() => {
-    return data.map((point) => {
+    const historicalData = data.map((point) => {
       const converted: ChartDataPoint & { _ts: number } = {
         timestamp: point.timestamp,
         _ts: new Date(point.timestamp).getTime(),
@@ -445,7 +446,26 @@ export function PerformanceChart({
       });
       return converted;
     });
-  }, [data, valueDisplay, modelNames]);
+
+    // Add latest real-time values as the newest point
+    if (latestValues && latestValues.size > 0) {
+      const latestPoint: ChartDataPoint & { _ts: number } = {
+        timestamp: new Date(now).toISOString(),
+        _ts: now,
+      };
+      modelNames.forEach((name) => {
+        const value = latestValues.get(name) ?? DEFAULT_STARTING_CAPITAL;
+        const pnl = value - DEFAULT_STARTING_CAPITAL;
+        latestPoint[name] =
+          valueDisplay === "percent"
+            ? (pnl / DEFAULT_STARTING_CAPITAL) * 100
+            : pnl;
+      });
+      historicalData.push(latestPoint);
+    }
+
+    return historicalData;
+  }, [data, valueDisplay, modelNames, latestValues, now]);
 
   // Calculate Y-axis domain: centered around 0 for P&L display
   const yDomain = useMemo(() => {
