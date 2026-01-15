@@ -8,9 +8,6 @@ import PartySocket from "partysocket";
 // ============================================================================
 
 const DIRECTION_FLASH_DURATION = 1000; // 1 second
-const POLYMARKET_WS_URL =
-  "wss://ws-subscriptions-clob.polymarket.com/ws/market";
-const RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 30000]; // Exponential backoff
 
 // ============================================================================
 // Types
@@ -69,12 +66,8 @@ export function usePriceSubscription(
   // Refs
   // -------------------------------------------------------------------------
   const kalshiSocketRef = useRef<PartySocket | null>(null);
-  const polymarketSocketRef = useRef<WebSocket | null>(null);
+  const polymarketSocketRef = useRef<PartySocket | null>(null);
   const directionTimeouts = useRef<Map<string, NodeJS.Timeout>>(new Map());
-  const reconnectAttempts = useRef<{ kalshi: number; polymarket: number }>({
-    kalshi: 0,
-    polymarket: 0,
-  });
 
   // -------------------------------------------------------------------------
   // Separate tickers by platform
@@ -184,18 +177,17 @@ export function usePriceSubscription(
     kalshiSocketRef.current = socket;
 
     socket.onopen = () => {
-      console.log("[usePriceSubscription] Kalshi WebSocket connected");
+      console.log("[usePriceSubscription] Kalshi relay connected");
       setKalshiConnected(true);
-      reconnectAttempts.current.kalshi = 0;
     };
 
     socket.onclose = () => {
-      console.log("[usePriceSubscription] Kalshi WebSocket disconnected");
+      console.log("[usePriceSubscription] Kalshi relay disconnected");
       setKalshiConnected(false);
     };
 
     socket.onerror = (err) => {
-      console.error("[usePriceSubscription] Kalshi WebSocket error:", err);
+      console.error("[usePriceSubscription] Kalshi relay error:", err);
       setError(new Error("Kalshi WebSocket connection failed"));
     };
 
@@ -233,7 +225,7 @@ export function usePriceSubscription(
   }, [kalshiTickerSet, updatePrice]);
 
   // -------------------------------------------------------------------------
-  // Polymarket WebSocket (direct connection)
+  // Polymarket WebSocket (via PartyKit polymarket-relay)
   // -------------------------------------------------------------------------
   useEffect(() => {
     // Skip if no tickers to subscribe to
@@ -241,135 +233,79 @@ export function usePriceSubscription(
       return;
     }
 
-    let socket: WebSocket | null = null;
-    let reconnectTimeout: NodeJS.Timeout | null = null;
-    let isCleanedUp = false; // Flag to prevent reconnection after cleanup
+    const host = process.env.NEXT_PUBLIC_PARTYKIT_HOST;
+    if (!host) {
+      console.warn("[usePriceSubscription] NEXT_PUBLIC_PARTYKIT_HOST not set");
+      return;
+    }
 
-    const connect = () => {
-      // Don't connect if already cleaned up
-      if (isCleanedUp) return;
+    const socket = new PartySocket({
+      host,
+      room: "polymarket-relay",
+    });
 
-      // Close any existing socket before creating new one
-      if (socket && socket.readyState !== WebSocket.CLOSED) {
-        socket.close();
-      }
+    polymarketSocketRef.current = socket;
 
-      socket = new WebSocket(POLYMARKET_WS_URL);
-      polymarketSocketRef.current = socket;
+    socket.onopen = () => {
+      console.log("[usePriceSubscription] Polymarket relay connected");
+      setPolymarketConnected(true);
 
-      socket.onopen = () => {
-        // Don't process if cleaned up
-        if (isCleanedUp) return;
-
-        console.log("[usePriceSubscription] Polymarket WebSocket connected");
-        setPolymarketConnected(true);
-        reconnectAttempts.current.polymarket = 0;
-
-        // Subscribe to market channel with our token IDs
-        const subscribeMsg = {
-          type: "market",
-          assets_ids: Array.from(polymarketTickerSet),
-        };
-        socket?.send(JSON.stringify(subscribeMsg));
+      // Subscribe to our asset IDs
+      const subscribeMsg = {
+        type: "subscribe",
+        assets_ids: Array.from(polymarketTickerSet),
       };
-
-      socket.onclose = () => {
-        // Don't reconnect if intentionally cleaned up
-        if (isCleanedUp) return;
-
-        console.log("[usePriceSubscription] Polymarket WebSocket disconnected");
-        setPolymarketConnected(false);
-
-        // Reconnect with exponential backoff
-        const attempt = reconnectAttempts.current.polymarket;
-        const delay =
-          RECONNECT_DELAYS[Math.min(attempt, RECONNECT_DELAYS.length - 1)];
-        reconnectAttempts.current.polymarket = attempt + 1;
-
-        console.log(
-          `[usePriceSubscription] Polymarket reconnecting in ${delay}ms (attempt ${attempt + 1})`,
-        );
-        reconnectTimeout = setTimeout(connect, delay);
-      };
-
-      socket.onerror = (err) => {
-        // Don't log errors if cleaned up (expected during unmount)
-        if (isCleanedUp) return;
-
-        console.error(
-          "[usePriceSubscription] Polymarket WebSocket error:",
-          err,
-        );
-        setError(new Error("Polymarket WebSocket connection failed"));
-      };
-
-      socket.onmessage = (event: MessageEvent) => {
-        // Don't process messages if cleaned up
-        if (isCleanedUp) return;
-
-        try {
-          const msgs = JSON.parse(event.data as string);
-
-          // Polymarket sends arrays of messages
-          const msgArray = Array.isArray(msgs) ? msgs : [msgs];
-
-          for (const msg of msgArray) {
-            // Handle price_change events
-            if (msg.event_type === "price_change" && msg.asset_id) {
-              if (!polymarketTickerSet.has(msg.asset_id)) continue;
-
-              // Polymarket price is 0-1 for the token
-              const price = parseFloat(msg.price || "0");
-              // YES token price is the price, NO token price is 1 - price
-              updatePrice(msg.asset_id, price, 1 - price);
-            }
-
-            // Handle book events with best bid/ask
-            if (msg.event_type === "book" && msg.asset_id) {
-              if (!polymarketTickerSet.has(msg.asset_id)) continue;
-
-              const bestBid = parseFloat(msg.bids?.[0]?.price || "0");
-              const bestAsk = parseFloat(msg.asks?.[0]?.price || "1");
-              const midPrice = (bestBid + bestAsk) / 2;
-
-              updatePrice(msg.asset_id, midPrice, 1 - midPrice);
-            }
-          }
-        } catch (err) {
-          console.error(
-            "[usePriceSubscription] Failed to parse Polymarket message:",
-            err,
-          );
-        }
-      };
+      socket.send(JSON.stringify(subscribeMsg));
     };
 
-    connect();
+    socket.onclose = () => {
+      console.log("[usePriceSubscription] Polymarket relay disconnected");
+      setPolymarketConnected(false);
+    };
 
-    // Copy ref value for cleanup function
-    const timeouts = directionTimeouts.current;
+    socket.onerror = (err) => {
+      console.error("[usePriceSubscription] Polymarket relay error:", err);
+      setError(new Error("Polymarket WebSocket connection failed"));
+    };
+
+    socket.onmessage = (event: MessageEvent) => {
+      try {
+        const msg = JSON.parse(event.data as string);
+
+        // Process normalized price messages from relay
+        if (msg.channel === "prices" && msg.platform === "polymarket") {
+          if (!polymarketTickerSet.has(msg.asset_id)) return;
+
+          const yesPrice = parseFloat(msg.yes_price);
+          const noPrice = parseFloat(msg.no_price);
+
+          updatePrice(msg.asset_id, yesPrice, noPrice);
+        }
+      } catch (err) {
+        console.error(
+          "[usePriceSubscription] Failed to parse Polymarket message:",
+          err,
+        );
+      }
+    };
 
     return () => {
-      // Set cleanup flag first to prevent reconnection
-      isCleanedUp = true;
-
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      if (socket) {
-        // Only close if not already closing/closed
-        if (
-          socket.readyState === WebSocket.CONNECTING ||
-          socket.readyState === WebSocket.OPEN
-        ) {
-          socket.close();
-        }
-        polymarketSocketRef.current = null;
-      }
+      socket.close();
+      polymarketSocketRef.current = null;
       setPolymarketConnected(false);
-      // Clear all direction timeouts
+    };
+  }, [polymarketTickerSet, updatePrice]);
+
+  // -------------------------------------------------------------------------
+  // Cleanup direction timeouts on unmount
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    const timeouts = directionTimeouts.current;
+    return () => {
       timeouts.forEach((timeout) => clearTimeout(timeout));
       timeouts.clear();
     };
-  }, [polymarketTickerSet, updatePrice]);
+  }, []);
 
   // -------------------------------------------------------------------------
   // Return

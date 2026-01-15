@@ -1,5 +1,8 @@
 {
   "name": "aimo-bet-relay",
   "main": "party/dflow-relay.ts",
+  "parties": {
+    "polymarket-relay": "party/polymarket-relay.ts"
+  },
   "compatibilityDate": "2024-01-01"
 }
