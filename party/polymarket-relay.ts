@@ -19,8 +19,8 @@ interface BookMessage {
   market: string;
   timestamp: string; // Unix milliseconds as string
   hash: string;
-  buys: OrderSummary[]; // API uses buys/sells, not bids/asks
-  sells: OrderSummary[];
+  bids: OrderSummary[]; // Best bids (buy orders)
+  asks: OrderSummary[]; // Best asks (sell orders)
 }
 
 interface PriceChange {
@@ -114,6 +114,7 @@ export default class PolymarketRelay implements PartyKitServer {
   private polymarketWs: WebSocket | null = null;
   private subscribedAssets = new Set<string>();
   private clientSubscriptions = new Map<string, Set<string>>(); // connectionId -> asset_ids
+  private initialSubscriptionSent = false; // Track if initial subscription was sent
 
   constructor(readonly room: Room) {}
 
@@ -132,6 +133,7 @@ export default class PolymarketRelay implements PartyKitServer {
 
       ws.addEventListener("open", () => {
         console.log("[polymarket-relay] Connected to Polymarket");
+        this.initialSubscriptionSent = false; // Reset on new connection
         // Re-subscribe to all assets clients are interested in
         if (this.subscribedAssets.size > 0) {
           this.sendSubscription(Array.from(this.subscribedAssets));
@@ -139,15 +141,30 @@ export default class PolymarketRelay implements PartyKitServer {
       });
 
       ws.addEventListener("message", (event: MessageEvent) => {
+        const raw = event.data as string;
+
+        // Handle non-JSON acknowledgment responses from Polymarket
+        if (
+          raw === "NO NEW ASSETS" ||
+          raw === "SUBSCRIBED" ||
+          raw.startsWith("OK")
+        ) {
+          // Acknowledgment message, ignore
+          return;
+        }
+
         try {
-          const data = JSON.parse(event.data as string);
+          const data = JSON.parse(raw);
           // Polymarket can send arrays of messages
           const messages = Array.isArray(data) ? data : [data];
           for (const msg of messages) {
             this.handlePolymarketMessage(msg as PolymarketMessage);
           }
         } catch (error) {
-          console.error("[polymarket-relay] Failed to parse message:", error);
+          // Log unexpected non-JSON messages for debugging
+          console.warn(
+            `[polymarket-relay] Unexpected message format: ${raw.slice(0, 100)}`,
+          );
         }
       });
 
@@ -174,17 +191,44 @@ export default class PolymarketRelay implements PartyKitServer {
       return;
     }
 
-    const msg = {
-      type: "market",
-      assets_ids: assetIds,
-    };
+    if (assetIds.length === 0) {
+      return;
+    }
+
+    let msg: { assets_ids: string[]; type?: string; operation?: string };
+    const isInitial = !this.initialSubscriptionSent;
+
+    if (isInitial) {
+      // Initial subscription includes type
+      msg = {
+        assets_ids: assetIds,
+        type: "market",
+      };
+      this.initialSubscriptionSent = true;
+    } else {
+      // Dynamic subscription uses operation
+      msg = {
+        assets_ids: assetIds,
+        operation: "subscribe",
+      };
+    }
+
     this.polymarketWs.send(JSON.stringify(msg));
-    console.log(`[polymarket-relay] Subscribed to ${assetIds.length} assets`);
+    console.log(
+      `[polymarket-relay] ${isInitial ? "Initial subscription" : "Subscribed"} to ${assetIds.length} assets`,
+    );
   }
 
   // Handle incoming Polymarket messages
   private handlePolymarketMessage(msg: PolymarketMessage) {
     if (!msg.event_type) return;
+
+    // Debug: log the raw asset_id from Polymarket
+    if ("asset_id" in msg) {
+      console.log(
+        `[polymarket-relay] Received ${msg.event_type} for asset: ${msg.asset_id}`,
+      );
+    }
 
     switch (msg.event_type) {
       case "book": {
@@ -217,20 +261,24 @@ export default class PolymarketRelay implements PartyKitServer {
   private handleBookMessage(msg: BookMessage) {
     if (!this.subscribedAssets.has(msg.asset_id)) return;
 
-    // Extract best bid/ask from orderbook (buys/sells in API)
-    const bestBid = msg.buys?.[0]?.price || null;
-    const bestAsk = msg.sells?.[0]?.price || null;
+    // Extract best bid/ask from orderbook
+    const bestBid = msg.bids?.[0]?.price || null;
+    const bestAsk = msg.asks?.[0]?.price || null;
+
+    // Parse prices safely, treating empty strings as null
+    const bidValue = bestBid ? parseFloat(bestBid) : NaN;
+    const askValue = bestAsk ? parseFloat(bestAsk) : NaN;
 
     let yesPrice: number | null = null;
-    if (bestBid && bestAsk) {
-      yesPrice = (parseFloat(bestBid) + parseFloat(bestAsk)) / 2;
-    } else if (bestBid) {
-      yesPrice = parseFloat(bestBid);
-    } else if (bestAsk) {
-      yesPrice = parseFloat(bestAsk);
+    if (Number.isFinite(bidValue) && Number.isFinite(askValue)) {
+      yesPrice = (bidValue + askValue) / 2;
+    } else if (Number.isFinite(bidValue)) {
+      yesPrice = bidValue;
+    } else if (Number.isFinite(askValue)) {
+      yesPrice = askValue;
     }
 
-    if (yesPrice === null) return;
+    if (yesPrice === null || !Number.isFinite(yesPrice)) return;
 
     this.broadcast(
       msg.asset_id,
@@ -252,14 +300,19 @@ export default class PolymarketRelay implements PartyKitServer {
       const bestBid = change.best_bid || null;
       const bestAsk = change.best_ask || null;
 
+      // Parse prices safely, treating empty strings as NaN
+      const bidValue = bestBid ? parseFloat(bestBid) : NaN;
+      const askValue = bestAsk ? parseFloat(bestAsk) : NaN;
+      const priceValue = change.price ? parseFloat(change.price) : NaN;
+
       let yesPrice: number | null = null;
-      if (bestBid && bestAsk) {
-        yesPrice = (parseFloat(bestBid) + parseFloat(bestAsk)) / 2;
-      } else if (change.price) {
-        yesPrice = parseFloat(change.price);
+      if (Number.isFinite(bidValue) && Number.isFinite(askValue)) {
+        yesPrice = (bidValue + askValue) / 2;
+      } else if (Number.isFinite(priceValue)) {
+        yesPrice = priceValue;
       }
 
-      if (yesPrice === null) continue;
+      if (yesPrice === null || !Number.isFinite(yesPrice)) continue;
 
       this.broadcast(
         change.asset_id,
@@ -276,7 +329,9 @@ export default class PolymarketRelay implements PartyKitServer {
   private handleLastTradePriceMessage(msg: LastTradePriceMessage) {
     if (!this.subscribedAssets.has(msg.asset_id)) return;
 
-    const yesPrice = parseFloat(msg.price);
+    const yesPrice = msg.price ? parseFloat(msg.price) : NaN;
+
+    if (!Number.isFinite(yesPrice)) return;
 
     this.broadcast(
       msg.asset_id,
@@ -292,15 +347,19 @@ export default class PolymarketRelay implements PartyKitServer {
   private handleBestBidAskMessage(msg: BestBidAskMessage) {
     if (!this.subscribedAssets.has(msg.asset_id)) return;
 
-    const bestBid = msg.best_bid;
-    const bestAsk = msg.best_ask;
+    const bestBid = msg.best_bid || null;
+    const bestAsk = msg.best_ask || null;
+
+    // Parse prices safely
+    const bidValue = bestBid ? parseFloat(bestBid) : NaN;
+    const askValue = bestAsk ? parseFloat(bestAsk) : NaN;
 
     let yesPrice: number | null = null;
-    if (bestBid && bestAsk) {
-      yesPrice = (parseFloat(bestBid) + parseFloat(bestAsk)) / 2;
+    if (Number.isFinite(bidValue) && Number.isFinite(askValue)) {
+      yesPrice = (bidValue + askValue) / 2;
     }
 
-    if (yesPrice === null) return;
+    if (yesPrice === null || !Number.isFinite(yesPrice)) return;
 
     this.broadcast(
       msg.asset_id,
@@ -333,6 +392,9 @@ export default class PolymarketRelay implements PartyKitServer {
       timestamp: parseInt(timestamp, 10) || Date.now(),
     };
 
+    console.log(
+      `[polymarket-relay] Broadcasting price: ${assetId.slice(0, 8)}... yes=${normalized.yes_price} no=${normalized.no_price}`,
+    );
     this.room.broadcast(JSON.stringify(normalized));
   }
 
@@ -387,6 +449,13 @@ export default class PolymarketRelay implements PartyKitServer {
         this.updateSubscriptions();
         console.log(
           `[polymarket-relay] Client ${sender.id} subscribed to ${msg.assets_ids.length} assets`,
+        );
+        // Debug: log first few asset IDs
+        console.log(
+          `[polymarket-relay] Sample subscribed IDs: ${msg.assets_ids
+            .slice(0, 3)
+            .map((id: string) => id.slice(0, 20) + "...")
+            .join(", ")}`,
         );
       }
 

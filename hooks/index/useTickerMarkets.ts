@@ -79,10 +79,10 @@ interface KalshiMarket {
   title?: string;
   volume?: number;
   volume24h?: number;
-  yesBid?: number;
-  yesAsk?: number;
-  noBid?: number;
-  noAsk?: number;
+  yesBid?: string; // API returns strings like "0.2300"
+  yesAsk?: string;
+  noBid?: string;
+  noAsk?: string;
 }
 
 interface KalshiEvent {
@@ -183,9 +183,26 @@ async function fetchKalshiMarkets(category: Category): Promise<TickerMarket[]> {
   const markets: TickerMarket[] = [];
   for (const event of (eventsData.events as KalshiEvent[]) || []) {
     for (const market of event.markets || []) {
-      const yesBid = market.yesBid ?? 0;
-      const yesAsk = market.yesAsk ?? 0;
-      const yesPrice = ((yesBid + yesAsk) / 2) * 100; // Convert to cents
+      // Parse prices - API returns strings like "0.2300"
+      const yesBid = market.yesBid ? parseFloat(market.yesBid) : undefined;
+      const yesAsk = market.yesAsk ? parseFloat(market.yesAsk) : undefined;
+
+      // Calculate yes price (prices are in 0-1 range, convert to cents 0-100)
+      let yesPrice: number;
+      if (
+        yesBid !== undefined &&
+        yesAsk !== undefined &&
+        Number.isFinite(yesBid) &&
+        Number.isFinite(yesAsk)
+      ) {
+        yesPrice = ((yesBid + yesAsk) / 2) * 100;
+      } else if (yesAsk !== undefined && Number.isFinite(yesAsk)) {
+        yesPrice = yesAsk * 100;
+      } else if (yesBid !== undefined && Number.isFinite(yesBid)) {
+        yesPrice = yesBid * 100;
+      } else {
+        yesPrice = 50; // Default to 50% if no price data
+      }
       const noPrice = 100 - yesPrice;
 
       markets.push({
@@ -249,9 +266,26 @@ async function fetchPolymarketMarkets(
       if (!yesTokenId) continue;
 
       // Parse outcome prices (comes as string array like ["0.65", "0.35"])
-      const yesPriceRaw = parseFloat(market.outcomePrices?.[0] || "0.5");
-      const yesPrice = yesPriceRaw * 100; // Convert to cents
+      // The API may return this as a JSON string or an actual array
+      let outcomePrices = market.outcomePrices;
+      if (typeof outcomePrices === "string") {
+        try {
+          outcomePrices = JSON.parse(outcomePrices);
+        } catch {
+          outcomePrices = [];
+        }
+      }
+
+      const yesPriceRaw = parseFloat(outcomePrices?.[0] || "0.5");
+      // Handle NaN - default to 50 cents (50%)
+      const yesPrice = Number.isFinite(yesPriceRaw) ? yesPriceRaw * 100 : 50;
       const noPrice = 100 - yesPrice;
+
+      // Skip markets with extreme prices (less than 5% or more than 95%)
+      // These are usually long-shot bets that aren't interesting for display
+      if (yesPrice < 5 || yesPrice > 95) {
+        continue;
+      }
 
       markets.push({
         ticker: yesTokenId, // Use token ID for WebSocket subscription
@@ -272,29 +306,50 @@ async function fetchPolymarketMarkets(
 
 /**
  * Fetch all markets from specified platforms and categories
+ * Returns markets interleaved by platform (polymarket, kalshi, polymarket, ...)
  */
 async function fetchAllMarkets(
   categories: Category[],
   platforms: Platform[],
 ): Promise<TickerMarket[]> {
-  const fetchers: Promise<TickerMarket[]>[] = [];
+  const kalshiFetchers: Promise<TickerMarket[]>[] = [];
+  const polymarketFetchers: Promise<TickerMarket[]>[] = [];
 
   for (const category of categories) {
     if (platforms.includes("kalshi")) {
-      fetchers.push(fetchKalshiMarkets(category));
+      kalshiFetchers.push(fetchKalshiMarkets(category));
     }
     if (platforms.includes("polymarket")) {
-      fetchers.push(fetchPolymarketMarkets(category));
+      polymarketFetchers.push(fetchPolymarketMarkets(category));
     }
   }
 
-  const results = await Promise.all(fetchers);
-  const allMarkets = results.flat();
+  const [kalshiResults, polymarketResults] = await Promise.all([
+    Promise.all(kalshiFetchers),
+    Promise.all(polymarketFetchers),
+  ]);
 
-  // Sort by volume descending (trending first)
-  allMarkets.sort((a, b) => b.volume - a.volume);
+  // Flatten and sort each platform's markets by volume
+  const kalshiMarkets = kalshiResults
+    .flat()
+    .sort((a, b) => b.volume - a.volume);
+  const polymarketMarkets = polymarketResults
+    .flat()
+    .sort((a, b) => b.volume - a.volume);
 
-  return allMarkets;
+  // Interleave markets: polymarket, kalshi, polymarket, kalshi, ...
+  const interleaved: TickerMarket[] = [];
+  const maxLen = Math.max(kalshiMarkets.length, polymarketMarkets.length);
+  for (let i = 0; i < maxLen; i++) {
+    if (polymarketMarkets[i]) {
+      interleaved.push(polymarketMarkets[i]);
+    }
+    if (kalshiMarkets[i]) {
+      interleaved.push(kalshiMarkets[i]);
+    }
+  }
+
+  return interleaved;
 }
 
 // ============================================================================
@@ -360,10 +415,13 @@ export function useTickerMarkets(
       const livePrice = livePrices.get(market.ticker);
       if (!livePrice) return market;
 
+      const yesPrice = livePrice.yesPrice * 100; // Convert 0-1 to cents
+      const noPrice = livePrice.noPrice * 100;
+
       return {
         ...market,
-        yesPrice: livePrice.yesPrice * 100, // Convert 0-1 to cents
-        noPrice: livePrice.noPrice * 100,
+        yesPrice,
+        noPrice,
       };
     });
   }, [topMarkets, livePrices]);

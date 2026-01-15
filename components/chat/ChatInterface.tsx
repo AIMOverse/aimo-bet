@@ -134,18 +134,29 @@ function MessageBubble({
         style={{ ["--tw-ring-color" as string]: color }}
       >
         {icon?.type === "component" ? (
-          <div className="flex items-center justify-center w-full h-full p-0.5">
-            <icon.Component className="size-5" />
-          </div>
+          <icon.Component className="size-full p-1" />
         ) : icon?.type === "image" ? (
-          <AvatarImage src={icon.src} alt={`${name} logo`} className="p-0.5" />
-        ) : null}
-        <AvatarFallback
-          className="text-[10px] font-semibold text-foreground"
-          style={{ backgroundColor: `${color}20` }}
-        >
-          {initial}
-        </AvatarFallback>
+          <>
+            <AvatarImage
+              src={icon.src}
+              alt={`${name} logo`}
+              className="p-0.5"
+            />
+            <AvatarFallback
+              className="text-[10px] font-semibold text-foreground"
+              style={{ backgroundColor: `${color}20` }}
+            >
+              {initial}
+            </AvatarFallback>
+          </>
+        ) : (
+          <AvatarFallback
+            className="text-[10px] font-semibold text-foreground"
+            style={{ backgroundColor: `${color}20` }}
+          >
+            {initial}
+          </AvatarFallback>
+        )}
       </Avatar>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">

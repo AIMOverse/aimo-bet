@@ -241,7 +241,8 @@ export function usePriceSubscription(
 
     const socket = new PartySocket({
       host,
-      room: "polymarket_relay",
+      party: "polymarket_relay",
+      room: "default",
     });
 
     polymarketSocketRef.current = socket;
@@ -251,9 +252,19 @@ export function usePriceSubscription(
       setPolymarketConnected(true);
 
       // Subscribe to our asset IDs
+      const assetIds = Array.from(polymarketTickerSet);
+      console.log(
+        `[usePriceSubscription] Subscribing to ${assetIds.length} Polymarket assets`,
+      );
+      console.log(
+        `[usePriceSubscription] Sample IDs: ${assetIds
+          .slice(0, 3)
+          .map((id) => id.slice(0, 20) + "...")
+          .join(", ")}`,
+      );
       const subscribeMsg = {
         type: "subscribe",
-        assets_ids: Array.from(polymarketTickerSet),
+        assets_ids: assetIds,
       };
       socket.send(JSON.stringify(subscribeMsg));
     };
@@ -274,7 +285,11 @@ export function usePriceSubscription(
 
         // Process normalized price messages from relay
         if (msg.channel === "prices" && msg.platform === "polymarket") {
-          if (!polymarketTickerSet.has(msg.asset_id)) return;
+          const hasAsset = polymarketTickerSet.has(msg.asset_id);
+          console.log(
+            `[usePriceSubscription] Polymarket price: ${msg.asset_id.slice(0, 8)}... yes=${msg.yes_price} hasAsset=${hasAsset}`,
+          );
+          if (!hasAsset) return;
 
           const yesPrice = parseFloat(msg.yes_price);
           const noPrice = parseFloat(msg.no_price);

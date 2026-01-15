@@ -168,6 +168,24 @@ export function useTrades({
 // Helpers
 // ============================================================================
 
+/**
+ * Infer platform from available data since the database doesn't have a platform column.
+ * Priority:
+ * 1. tx_signature prefix (most reliable - "kalshi:" or "polymarket:")
+ * 2. market_ticker format (Polymarket token IDs are 50+ digit numbers)
+ */
+function inferPlatform(row: Record<string, unknown>): "kalshi" | "polymarket" {
+  const txSig = row.tx_signature as string | undefined;
+  if (txSig?.startsWith("polymarket:")) return "polymarket";
+  if (txSig?.startsWith("kalshi:")) return "kalshi";
+
+  // Fallback: Polymarket token IDs are very long numeric strings (50+ digits)
+  const ticker = row.market_ticker as string;
+  if (ticker && /^\d{50,}$/.test(ticker)) return "polymarket";
+
+  return "kalshi";
+}
+
 function mapTradeRow(row: Record<string, unknown>): AgentTrade {
   const agentSession = row.agent_sessions as {
     model_id: string;
@@ -179,7 +197,7 @@ function mapTradeRow(row: Record<string, unknown>): AgentTrade {
     id: row.id as string,
     marketTicker: row.market_ticker as string,
     marketTitle: (row.market_title as string) ?? undefined,
-    platform: (row.platform as "kalshi" | "polymarket") ?? "kalshi",
+    platform: inferPlatform(row),
     side: row.side as "yes" | "no",
     action: row.action as "buy" | "sell" | "redeem",
     quantity: row.quantity as number,

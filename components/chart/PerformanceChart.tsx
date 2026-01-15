@@ -222,22 +222,29 @@ function LineEndLabel({
           }}
         >
           {icon?.type === "component" ? (
-            <div className="flex items-center justify-center w-full h-full p-0.5">
-              <icon.Component className="size-3.5" />
-            </div>
+            <icon.Component className="size-full p-0.5" />
           ) : icon?.type === "image" ? (
-            <AvatarImage
-              src={icon.src}
-              alt={`${modelName} logo`}
-              className="p-0.5"
-            />
-          ) : null}
-          <AvatarFallback
-            className="text-[10px] font-semibold text-foreground bg-muted"
-            style={{ backgroundColor: `${color}20` }}
-          >
-            {initial}
-          </AvatarFallback>
+            <>
+              <AvatarImage
+                src={icon.src}
+                alt={`${modelName} logo`}
+                className="p-0.5"
+              />
+              <AvatarFallback
+                className="text-[10px] font-semibold text-foreground bg-muted"
+                style={{ backgroundColor: `${color}20` }}
+              >
+                {initial}
+              </AvatarFallback>
+            </>
+          ) : (
+            <AvatarFallback
+              className="text-[10px] font-semibold text-foreground bg-muted"
+              style={{ backgroundColor: `${color}20` }}
+            >
+              {initial}
+            </AvatarFallback>
+          )}
         </Avatar>
         {/* P&L value */}
         <span
