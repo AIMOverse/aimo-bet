@@ -3,7 +3,7 @@
   "crons": [
     {
       "path": "/api/agents/cron",
-      "schedule": "* */2 * * *"
+      "schedule": "* */6 * * *"
     },
     {
       "path": "/api/agents/balances",
