@@ -113,7 +113,7 @@ function CustomTooltip({
                 <span
                   className={cn(
                     "font-medium",
-                    isPositive ? "text-green-500" : "text-red-500",
+                    isPositive ? "text-green-500" : "text-red-500"
                   )}
                 >
                   {valueDisplay === "dollar"
@@ -181,8 +181,8 @@ function LineEndLabel({
 
   const logoPath = getSeriesLogoPath(modelName);
   const initial = modelName.charAt(0).toUpperCase();
-  const logoSize = 32; // Increased height for two lines
-  const labelWidth = 120; // Width for logo + value + token info
+  const logoSize = 20; // Single row height
+  const labelWidth = 180; // Width for logo + P&L + token info horizontally
 
   // Calculate P&L values
   const pnl = latestValue - DEFAULT_STARTING_CAPITAL;
@@ -213,7 +213,7 @@ function LineEndLabel({
           className={cn(
             "size-5 ring-[1.5px] ring-offset-0 bg-background shrink-0",
             isHovered && "ring-2",
-            isDead && "grayscale opacity-60",
+            isDead && "grayscale opacity-60"
           )}
           style={{
             ["--tw-ring-color" as string]: isDead ? DEAD_MODEL_COLOR : color,
@@ -233,58 +233,56 @@ function LineEndLabel({
             {initial}
           </AvatarFallback>
         </Avatar>
-        <div className="flex flex-col">
-          {/* P&L value */}
-          <span
-            className={cn(
-              "text-[11px] font-semibold whitespace-nowrap tabular-nums leading-tight",
-              isDead && "text-muted-foreground",
-              !isDead && (isPositive ? "text-green-500" : "text-red-500"),
-            )}
-          >
-            {valueDisplay === "dollar" ? (
-              <>
-                {isPositive ? "+" : "-"}
-                <AnimateNumber
-                  format={{
-                    style: "currency",
-                    currency: "USD",
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  }}
-                  locales="en-US"
-                  transition={{
-                    layout: { duration: 0.3 },
-                    y: { type: "spring", visualDuration: 0.4, bounce: 0.2 },
-                  }}
-                >
-                  {Math.abs(pnl)}
-                </AnimateNumber>
-              </>
-            ) : (
-              <>
-                {isPositive ? "+" : ""}
-                <AnimateNumber
-                  format={{
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  }}
-                  suffix="%"
-                  transition={{
-                    layout: { duration: 0.3 },
-                    y: { type: "spring", visualDuration: 0.4, bounce: 0.2 },
-                  }}
-                >
-                  {percentChange}
-                </AnimateNumber>
-              </>
-            )}
-          </span>
-          {/* Token usage info */}
-          <span className="text-[9px] text-muted-foreground whitespace-nowrap leading-tight">
-            {formatTokens(totalTokens)} / ${costPerMillion.toFixed(2)}
-          </span>
-        </div>
+        {/* P&L value */}
+        <span
+          className={cn(
+            "text-[11px] font-semibold whitespace-nowrap tabular-nums",
+            isDead && "text-muted-foreground",
+            !isDead && (isPositive ? "text-green-500" : "text-red-500")
+          )}
+        >
+          {valueDisplay === "dollar" ? (
+            <>
+              {isPositive ? "+" : "-"}
+              <AnimateNumber
+                format={{
+                  style: "currency",
+                  currency: "USD",
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                }}
+                locales="en-US"
+                transition={{
+                  layout: { duration: 0.3 },
+                  y: { type: "spring", visualDuration: 0.4, bounce: 0.2 },
+                }}
+              >
+                {Math.abs(pnl)}
+              </AnimateNumber>
+            </>
+          ) : (
+            <>
+              {isPositive ? "+" : ""}
+              <AnimateNumber
+                format={{
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                }}
+                suffix="%"
+                transition={{
+                  layout: { duration: 0.3 },
+                  y: { type: "spring", visualDuration: 0.4, bounce: 0.2 },
+                }}
+              >
+                {percentChange}
+              </AnimateNumber>
+            </>
+          )}
+        </span>
+        {/* Token usage info */}
+        <span className="text-[9px] text-muted-foreground whitespace-nowrap">
+          {formatTokens(totalTokens)} / ${costPerMillion.toFixed(2)}
+        </span>
       </div>
     </foreignObject>
   );
@@ -317,7 +315,7 @@ function CustomLegend({
     const value = latestValues?.get(entry.value) || DEFAULT_STARTING_CAPITAL;
     const tokens = tokenUsage?.get(entry.value) || 0;
     const leaderboardEntry = leaderboard?.find(
-      (e) => e.model.name === entry.value,
+      (e) => e.model.name === entry.value
     );
     return {
       name: entry.value,
@@ -350,7 +348,7 @@ function CustomLegend({
               "flex items-center gap-1 px-1 rounded transition-opacity cursor-default text-xs",
               "hover:bg-muted/50",
               isDimmed && "opacity-30",
-              isDead && "opacity-60",
+              isDead && "opacity-60"
             )}
             onMouseEnter={() => onModelHover(model.name)}
             onMouseLeave={() => onModelHover(null)}
@@ -372,8 +370,8 @@ function CustomLegend({
                 isDead
                   ? "text-muted-foreground"
                   : isPositive
-                    ? "text-green-500"
-                    : "text-red-500",
+                  ? "text-green-500"
+                  : "text-red-500"
               )}
             >
               {changePercent >= 0 ? "+" : ""}
