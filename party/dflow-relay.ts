@@ -14,6 +14,13 @@ const DFLOW_WS_URL = "wss://prediction-markets-api.dflow.net/api/v1/ws";
 const SWING_THRESHOLD = 0.1; // 10% price change
 const VOLUME_SPIKE_MULTIPLIER = 10; // 10x average volume
 
+// Position flip detection thresholds (hysteresis)
+const FLIP_UPPER_THRESHOLD = 0.52; // Above this = YES-favored
+const FLIP_LOWER_THRESHOLD = 0.48; // Below this = NO-favored
+const FLIP_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour cooldown per market
+
+type PositionState = "yes_favored" | "no_favored" | "neutral";
+
 interface PriceMessage {
   channel: "prices";
   type: "ticker";
@@ -58,10 +65,26 @@ interface Signal {
   timestamp: number;
 }
 
+interface PositionFlipSignal {
+  type: "position_flip";
+  ticker: string;
+  platform: "dflow" | "polymarket";
+  data: {
+    previousPosition: "yes_favored" | "no_favored";
+    newPosition: "yes_favored" | "no_favored";
+    previousPrice: number;
+    currentPrice: number;
+    flipDirection: "yes_to_no" | "no_to_yes";
+  };
+  timestamp: number;
+}
+
 export default class DflowRelay implements PartyKitServer {
   private dflowWs: WebSocket | null = null;
   private priceCache = new Map<string, number>();
   private tradeVolumes = new Map<string, number[]>(); // Rolling window
+  private positionStates = new Map<string, PositionState>();
+  private flipCooldowns = new Map<string, number>(); // ticker -> last flip timestamp
 
   constructor(readonly room: Room) {}
 
@@ -155,26 +178,93 @@ export default class DflowRelay implements PartyKitServer {
     }
   }
 
+  // Helper to determine position state from price
+  private getPositionState(price: number): PositionState {
+    if (price > FLIP_UPPER_THRESHOLD) return "yes_favored";
+    if (price < FLIP_LOWER_THRESHOLD) return "no_favored";
+    return "neutral";
+  }
+
+  // Detect position flip (price crossing 50% threshold with hysteresis)
+  private detectPositionFlip(msg: PriceMessage): PositionFlipSignal | null {
+    const yesBid = msg.yes_bid ? parseFloat(msg.yes_bid) : null;
+    const yesAsk = msg.yes_ask ? parseFloat(msg.yes_ask) : null;
+
+    if (yesBid === null || yesAsk === null) return null;
+
+    const currentPrice = (yesBid + yesAsk) / 2;
+    const currentState = this.getPositionState(currentPrice);
+    const previousState = this.positionStates.get(msg.market_ticker);
+
+    // Update state
+    this.positionStates.set(msg.market_ticker, currentState);
+
+    // Check for flip (ignoring neutral zone)
+    if (
+      previousState &&
+      currentState !== "neutral" &&
+      previousState !== "neutral" &&
+      previousState !== currentState
+    ) {
+      // Check cooldown
+      const lastFlip = this.flipCooldowns.get(msg.market_ticker) || 0;
+      if (Date.now() - lastFlip < FLIP_COOLDOWN_MS) {
+        return null; // Still in cooldown
+      }
+
+      // Record flip time
+      this.flipCooldowns.set(msg.market_ticker, Date.now());
+
+      const previousPrice = this.priceCache.get(msg.market_ticker) || currentPrice;
+
+      console.log(
+        `[dflow-relay] Position flip detected: ${msg.market_ticker} ` +
+          `${previousState} -> ${currentState} (${previousPrice.toFixed(3)} -> ${currentPrice.toFixed(3)})`,
+      );
+
+      return {
+        type: "position_flip",
+        ticker: msg.market_ticker,
+        platform: "dflow",
+        data: {
+          previousPosition: previousState,
+          newPosition: currentState,
+          previousPrice,
+          currentPrice,
+          flipDirection: currentState === "no_favored" ? "yes_to_no" : "no_to_yes",
+        },
+        timestamp: Date.now(),
+      };
+    }
+
+    return null;
+  }
+
   // Handle incoming dflow messages
   private handleDflowMessage(msg: DflowMessage) {
-    // DISABLED: Agent triggering temporarily disabled
-    // let signal: Signal | null = null;
-    //
-    // switch (msg.channel) {
-    //   case "prices":
-    //     signal = this.detectPriceSwing(msg);
-    //     break;
-    //   case "trades":
-    //     signal = this.detectVolumeSpike(msg);
-    //     break;
-    //   case "orderbook":
-    //     signal = this.detectOrderbookImbalance(msg);
-    //     break;
-    // }
-    //
-    // if (signal) {
-    //   await this.triggerAgents(signal);
-    // }
+    let signal: Signal | null = null;
+
+    switch (msg.channel) {
+      case "prices":
+        // Check for position flip first (higher priority)
+        const flipSignal = this.detectPositionFlip(msg);
+        if (flipSignal) {
+          this.triggerAgentsWithFlip(flipSignal);
+        }
+        // Then check for price swing
+        signal = this.detectPriceSwing(msg);
+        break;
+      case "trades":
+        signal = this.detectVolumeSpike(msg);
+        break;
+      case "orderbook":
+        signal = this.detectOrderbookImbalance(msg);
+        break;
+    }
+
+    if (signal) {
+      this.triggerAgents(signal);
+    }
 
     // Broadcast to connected frontend clients
     this.room.broadcast(JSON.stringify(msg));
@@ -363,6 +453,53 @@ export default class DflowRelay implements PartyKitServer {
       }
     } catch (error) {
       console.error("[dflow-relay] Error triggering agents:", error);
+    }
+  }
+
+  /**
+   * Trigger agents via Vercel API for position flip signals.
+   */
+  private async triggerAgentsWithFlip(signal: PositionFlipSignal) {
+    const vercelUrl = this.room.env.VERCEL_URL as string | undefined;
+    const webhookSecret = this.room.env.WEBHOOK_SECRET as string | undefined;
+
+    if (!vercelUrl || !webhookSecret) {
+      console.warn("[dflow-relay] Missing VERCEL_URL or WEBHOOK_SECRET");
+      return;
+    }
+
+    try {
+      const response = await fetch(`${vercelUrl}/api/agents/trigger`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${webhookSecret}`,
+        },
+        body: JSON.stringify({
+          signal,
+          triggerType: "market",
+          filterByPosition: true,
+        }),
+      });
+
+      if (!response.ok) {
+        console.error(
+          `[dflow-relay] Failed to trigger agents for flip: ${response.status}`,
+        );
+      } else {
+        const result = (await response.json()) as {
+          spawned: number;
+          failed: number;
+          message?: string;
+        };
+        if (result.spawned > 0) {
+          console.log(
+            `[dflow-relay] Position flip triggered ${result.spawned} agent(s) for ${signal.ticker}`,
+          );
+        }
+      }
+    } catch (error) {
+      console.error("[dflow-relay] Error triggering agents for flip:", error);
     }
   }
 

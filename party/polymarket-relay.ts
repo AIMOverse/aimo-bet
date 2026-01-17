@@ -4,6 +4,27 @@ const POLYMARKET_WS_URL =
   "wss://ws-subscriptions-clob.polymarket.com/ws/market";
 const RECONNECT_DELAY = 5000;
 
+// Position flip detection thresholds (hysteresis)
+const FLIP_UPPER_THRESHOLD = 0.52; // Above this = YES-favored
+const FLIP_LOWER_THRESHOLD = 0.48; // Below this = NO-favored
+const FLIP_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour cooldown per market
+
+type PositionState = "yes_favored" | "no_favored" | "neutral";
+
+interface PositionFlipSignal {
+  type: "position_flip";
+  ticker: string;
+  platform: "dflow" | "polymarket";
+  data: {
+    previousPosition: "yes_favored" | "no_favored";
+    newPosition: "yes_favored" | "no_favored";
+    previousPrice: number;
+    currentPrice: number;
+    flipDirection: "yes_to_no" | "no_to_yes";
+  };
+  timestamp: number;
+}
+
 // ============================================================================
 // Polymarket WebSocket Message Types
 // ============================================================================
@@ -115,6 +136,9 @@ export default class PolymarketRelay implements PartyKitServer {
   private subscribedAssets = new Set<string>();
   private clientSubscriptions = new Map<string, Set<string>>(); // connectionId -> asset_ids
   private initialSubscriptionSent = false; // Track if initial subscription was sent
+  private priceCache = new Map<string, number>(); // asset_id -> last known price
+  private positionStates = new Map<string, PositionState>();
+  private flipCooldowns = new Map<string, number>(); // asset_id -> last flip timestamp
 
   constructor(readonly room: Room) {}
 
@@ -380,6 +404,9 @@ export default class PolymarketRelay implements PartyKitServer {
     bestAsk: string | null,
     timestamp: string,
   ) {
+    // Check for position flip before broadcasting
+    this.checkPositionFlip(assetId, yesPrice);
+
     const normalized: NormalizedPriceMessage = {
       channel: "prices",
       platform: "polymarket",
@@ -396,6 +423,118 @@ export default class PolymarketRelay implements PartyKitServer {
       `[polymarket-relay] Broadcasting price: ${assetId.slice(0, 8)}... yes=${normalized.yes_price} no=${normalized.no_price}`,
     );
     this.room.broadcast(JSON.stringify(normalized));
+  }
+
+  // Helper to determine position state from price
+  private getPositionState(price: number): PositionState {
+    if (price > FLIP_UPPER_THRESHOLD) return "yes_favored";
+    if (price < FLIP_LOWER_THRESHOLD) return "no_favored";
+    return "neutral";
+  }
+
+  // Detect position flip (price crossing 50% threshold with hysteresis)
+  private detectPositionFlip(
+    assetId: string,
+    currentPrice: number,
+  ): PositionFlipSignal | null {
+    const currentState = this.getPositionState(currentPrice);
+    const previousState = this.positionStates.get(assetId);
+    const previousPrice = this.priceCache.get(assetId);
+
+    // Update state and cache
+    this.positionStates.set(assetId, currentState);
+    this.priceCache.set(assetId, currentPrice);
+
+    // Check for flip (ignoring neutral zone)
+    if (
+      previousState &&
+      currentState !== "neutral" &&
+      previousState !== "neutral" &&
+      previousState !== currentState
+    ) {
+      // Check cooldown
+      const lastFlip = this.flipCooldowns.get(assetId) || 0;
+      if (Date.now() - lastFlip < FLIP_COOLDOWN_MS) {
+        return null; // Still in cooldown
+      }
+
+      // Record flip time
+      this.flipCooldowns.set(assetId, Date.now());
+
+      console.log(
+        `[polymarket-relay] Position flip detected: ${assetId.slice(0, 8)}... ` +
+          `${previousState} -> ${currentState} (${(previousPrice || currentPrice).toFixed(3)} -> ${currentPrice.toFixed(3)})`,
+      );
+
+      return {
+        type: "position_flip",
+        ticker: assetId,
+        platform: "polymarket",
+        data: {
+          previousPosition: previousState,
+          newPosition: currentState,
+          previousPrice: previousPrice || currentPrice,
+          currentPrice,
+          flipDirection: currentState === "no_favored" ? "yes_to_no" : "no_to_yes",
+        },
+        timestamp: Date.now(),
+      };
+    }
+
+    return null;
+  }
+
+  // Trigger agents via Vercel API for position flip signals
+  private async triggerAgents(signal: PositionFlipSignal) {
+    const vercelUrl = this.room.env.VERCEL_URL as string | undefined;
+    const webhookSecret = this.room.env.WEBHOOK_SECRET as string | undefined;
+
+    if (!vercelUrl || !webhookSecret) {
+      console.warn("[polymarket-relay] Missing VERCEL_URL or WEBHOOK_SECRET");
+      return;
+    }
+
+    try {
+      const response = await fetch(`${vercelUrl}/api/agents/trigger`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${webhookSecret}`,
+        },
+        body: JSON.stringify({
+          signal,
+          triggerType: "market",
+          filterByPosition: true,
+        }),
+      });
+
+      if (!response.ok) {
+        console.error(
+          `[polymarket-relay] Failed to trigger agents: ${response.status}`,
+        );
+      } else {
+        const result = (await response.json()) as {
+          spawned: number;
+          failed: number;
+          message?: string;
+        };
+        if (result.spawned > 0) {
+          console.log(
+            `[polymarket-relay] Position flip triggered ${result.spawned} agent(s) for ${signal.ticker.slice(0, 8)}...`,
+          );
+        }
+      }
+    } catch (error) {
+      console.error("[polymarket-relay] Error triggering agents:", error);
+    }
+  }
+
+  // Check for position flip and trigger agents if detected
+  private checkPositionFlip(assetId: string, yesPrice: number) {
+    const flipSignal = this.detectPositionFlip(assetId, yesPrice);
+    if (flipSignal) {
+      this.triggerAgents(flipSignal);
+    }
   }
 
   // Update subscriptions based on connected clients

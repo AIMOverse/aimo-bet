@@ -28,9 +28,16 @@ export type TriggerType = "market" | "cron" | "manual" | "research_complete";
  * Used for triggering agents and filtering by position
  * Note: Signals are NOT passed to the LLM prompt (for KV cache optimization)
  */
+export type MarketSignalType =
+  | "price_swing"
+  | "volume_spike"
+  | "orderbook_imbalance"
+  | "position_flip";
+
 export interface MarketSignal {
-  type: "price_swing" | "volume_spike" | "orderbook_imbalance";
+  type: MarketSignalType;
   ticker: string;
+  platform?: "dflow" | "polymarket";
   data: Record<string, unknown>;
   timestamp: number;
 }
@@ -115,6 +122,20 @@ export async function POST(req: NextRequest) {
         modelId || "all"
       }, signal=${signal?.type || "none"}, filterByPosition=${filterByPosition}`,
     );
+
+    // Log position flip signals distinctly
+    if (signal?.type === "position_flip") {
+      const flipData = signal.data as {
+        flipDirection?: string;
+        previousPrice?: number;
+        currentPrice?: number;
+      };
+      console.log(
+        `[agents/trigger] Position flip: ${signal.ticker} ${flipData.flipDirection || "unknown"} ` +
+          `(${flipData.previousPrice?.toFixed(3) || "?"} -> ${flipData.currentPrice?.toFixed(3) || "?"}) ` +
+          `platform=${signal.platform || "unknown"}`,
+      );
+    }
 
     // Get models to trigger
     const allModels = getModelsWithWallets();
