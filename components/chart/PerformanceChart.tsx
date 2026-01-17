@@ -18,7 +18,7 @@ import type { ChartDataPoint, LeaderboardEntry } from "@/lib/supabase/types";
 import { MODELS } from "@/lib/ai/models";
 import { getModelSeriesIcon } from "@/lib/ai/models/catalog";
 import { DEFAULT_STARTING_CAPITAL, CHART_CONFIG } from "@/lib/config";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useEffect, useState } from "react";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -165,6 +165,17 @@ function LineEndLabel({
   valueDisplay,
   isMobile = false,
 }: LineEndLabelProps) {
+  // Stagger delay based on model name for ambient glow effect
+  // Must be before early return to satisfy React hooks rules
+  const staggerDelay = useMemo(() => {
+    let hash = 0;
+    for (let i = 0; i < modelName.length; i++) {
+      hash = (hash << 5) - hash + modelName.charCodeAt(i);
+      hash |= 0;
+    }
+    return Math.abs(hash % 5) * 0.6; // 0-3 second stagger
+  }, [modelName]);
+
   // Only render at the last data point
   const xNum = typeof x === "string" ? parseFloat(x) : x;
   const yNum = typeof y === "string" ? parseFloat(y) : y;
@@ -199,42 +210,54 @@ function LineEndLabel({
         onMouseEnter={() => onHover(modelName)}
         onMouseLeave={() => onHover(null)}
       >
-        <Avatar
-          className={cn(
-            "ring-[1.5px] ring-offset-0 bg-background shrink-0",
-            isMobile ? "size-4" : "size-5",
-            isHovered && "ring-2",
-            isDead && "grayscale opacity-60",
+        <div className="relative shrink-0">
+          {/* Subtle ambient glow ring - hidden for dead models */}
+          {!isDead && (
+            <div
+              className="absolute inset-0 rounded-full animate-glow-pulse"
+              style={{
+                background: `radial-gradient(circle, ${color}25 0%, transparent 70%)`,
+                animationDelay: `${staggerDelay}s`,
+              }}
+            />
           )}
-          style={{
-            ["--tw-ring-color" as string]: isDead ? DEAD_MODEL_COLOR : color,
-          }}
-        >
-          {icon?.type === "component" ? (
-            <icon.Component className="size-full p-0.5" />
-          ) : icon?.type === "image" ? (
-            <>
-              <AvatarImage
-                src={icon.src}
-                alt={`${modelName} logo`}
-                className="p-0.5"
-              />
+          <Avatar
+            className={cn(
+              "ring-[1.5px] ring-offset-0 bg-background",
+              isMobile ? "size-4" : "size-5",
+              isHovered && "ring-2",
+              isDead && "grayscale opacity-60",
+            )}
+            style={{
+              ["--tw-ring-color" as string]: isDead ? DEAD_MODEL_COLOR : color,
+            }}
+          >
+            {icon?.type === "component" ? (
+              <icon.Component className="size-full p-0.5" />
+            ) : icon?.type === "image" ? (
+              <>
+                <AvatarImage
+                  src={icon.src}
+                  alt={`${modelName} logo`}
+                  className="p-0.5"
+                />
+                <AvatarFallback
+                  className="text-[10px] font-semibold text-foreground bg-muted"
+                  style={{ backgroundColor: `${color}20` }}
+                >
+                  {initial}
+                </AvatarFallback>
+              </>
+            ) : (
               <AvatarFallback
                 className="text-[10px] font-semibold text-foreground bg-muted"
                 style={{ backgroundColor: `${color}20` }}
               >
                 {initial}
               </AvatarFallback>
-            </>
-          ) : (
-            <AvatarFallback
-              className="text-[10px] font-semibold text-foreground bg-muted"
-              style={{ backgroundColor: `${color}20` }}
-            >
-              {initial}
-            </AvatarFallback>
-          )}
-        </Avatar>
+            )}
+          </Avatar>
+        </div>
         {/* P&L value - hidden on mobile */}
         {!isMobile && (
           <span
@@ -346,7 +369,10 @@ function LegendItem({
         }}
       />
       <span
-        className={cn("font-medium shrink-0", isDead && "text-muted-foreground")}
+        className={cn(
+          "font-medium shrink-0",
+          isDead && "text-muted-foreground",
+        )}
       >
         {model.name}
       </span>
