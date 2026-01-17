@@ -67,7 +67,7 @@ export default function Home() {
   };
 
   return (
-    <div className="flex flex-col h-screen">
+    <div className="flex flex-col min-h-screen lg:h-screen">
       {/* Header */}
       <AppHeader />
 
@@ -76,23 +76,21 @@ export default function Home() {
         <MarketTicker {...tickerMarkets} />
       </div>
 
-      {/* Main Content: Left (Chart) + Right (Tabs + Content) */}
-      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-        {/* Left Panel - Chart with integrated Legend */}
-        <div className="flex flex-col border-r min-h-0 overflow-auto lg:flex-1">
-          <div className="flex-1 flex flex-col gap-4">
-            <PerformanceChart
-              data={chartData}
-              latestValues={latestValues}
-              pnlValues={pnlValues}
-              tokenUsage={tokenUsage}
-              deadModels={deadModels}
-            />
-          </div>
+      {/* Main Content: Vertical on mobile (scrollable), Horizontal on desktop */}
+      <div className="flex flex-col lg:flex-1 lg:flex-row lg:overflow-hidden">
+        {/* Chart Panel - full width on mobile, flex-1 on desktop */}
+        <div className="flex flex-col lg:border-r lg:min-h-0 lg:overflow-auto lg:flex-1">
+          <PerformanceChart
+            data={chartData}
+            latestValues={latestValues}
+            pnlValues={pnlValues}
+            tokenUsage={tokenUsage}
+            deadModels={deadModels}
+          />
         </div>
 
-        {/* Right Panel - Tabs at top + Content */}
-        <div className="flex flex-col min-h-0 lg:w-[420px] lg:shrink-0">
+        {/* Tabs Panel - below chart on mobile, right side on desktop */}
+        <div className="flex flex-col h-[60vh] lg:h-auto lg:w-[420px] lg:shrink-0">
           <AppTabs
             activeTab={activeTab}
             onTabChange={setActiveTab}

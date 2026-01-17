@@ -22,7 +22,7 @@ import { useEffect, useMemo, useState } from "react";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { AnimateNumber } from "motion-plus/react";
+import { AnimateNumber, Ticker } from "motion-plus/react";
 import { useTheme } from "next-themes";
 
 interface PerformanceChartProps {
@@ -146,6 +146,7 @@ interface LineEndLabelProps {
   pnl: number;
   totalTokens: number;
   valueDisplay: ValueDisplay;
+  isMobile?: boolean;
 }
 
 function LineEndLabel({
@@ -162,6 +163,7 @@ function LineEndLabel({
   pnl,
   totalTokens,
   valueDisplay,
+  isMobile = false,
 }: LineEndLabelProps) {
   // Only render at the last data point
   const xNum = typeof x === "string" ? parseFloat(x) : x;
@@ -173,8 +175,8 @@ function LineEndLabel({
 
   const icon = getModelSeriesIcon(modelName);
   const initial = modelName.charAt(0).toUpperCase();
-  const logoSize = 20; // Single row height
-  const labelWidth = 180; // Width for logo + P&L + token info horizontally
+  const logoSize = isMobile ? 16 : 20; // Smaller on mobile
+  const labelWidth = isMobile ? 24 : 180; // Just avatar width on mobile
 
   // Calculate percent change from P&L
   const percentChange = (pnl / DEFAULT_STARTING_CAPITAL) * 100;
@@ -199,7 +201,8 @@ function LineEndLabel({
       >
         <Avatar
           className={cn(
-            "size-5 ring-[1.5px] ring-offset-0 bg-background shrink-0",
+            "ring-[1.5px] ring-offset-0 bg-background shrink-0",
+            isMobile ? "size-4" : "size-5",
             isHovered && "ring-2",
             isDead && "grayscale opacity-60",
           )}
@@ -232,52 +235,54 @@ function LineEndLabel({
             </AvatarFallback>
           )}
         </Avatar>
-        {/* P&L value */}
-        <span
-          className={cn(
-            "text-[11px] font-semibold whitespace-nowrap tabular-nums",
-            isDead && "text-muted-foreground",
-            !isDead && (isPositive ? "text-green-500" : "text-red-500"),
-          )}
-        >
-          {valueDisplay === "dollar" ? (
-            <>
-              {isPositive ? "+" : "-"}
-              <AnimateNumber
-                format={{
-                  style: "currency",
-                  currency: "USD",
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                }}
-                locales="en-US"
-                transition={{
-                  layout: { duration: 0.3 },
-                  y: { type: "spring", visualDuration: 0.4, bounce: 0.2 },
-                }}
-              >
-                {Math.abs(pnl)}
-              </AnimateNumber>
-            </>
-          ) : (
-            <>
-              {isPositive ? "+" : ""}
-              <AnimateNumber
-                format={{
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                }}
-                suffix="%"
-                transition={{
-                  layout: { duration: 0.3 },
-                  y: { type: "spring", visualDuration: 0.4, bounce: 0.2 },
-                }}
-              >
-                {percentChange}
-              </AnimateNumber>
-            </>
-          )}
-        </span>
+        {/* P&L value - hidden on mobile */}
+        {!isMobile && (
+          <span
+            className={cn(
+              "text-[11px] font-semibold whitespace-nowrap tabular-nums",
+              isDead && "text-muted-foreground",
+              !isDead && (isPositive ? "text-green-500" : "text-red-500"),
+            )}
+          >
+            {valueDisplay === "dollar" ? (
+              <>
+                {isPositive ? "+" : "-"}
+                <AnimateNumber
+                  format={{
+                    style: "currency",
+                    currency: "USD",
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  }}
+                  locales="en-US"
+                  transition={{
+                    layout: { duration: 0.3 },
+                    y: { type: "spring", visualDuration: 0.4, bounce: 0.2 },
+                  }}
+                >
+                  {Math.abs(pnl)}
+                </AnimateNumber>
+              </>
+            ) : (
+              <>
+                {isPositive ? "+" : ""}
+                <AnimateNumber
+                  format={{
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  }}
+                  suffix="%"
+                  transition={{
+                    layout: { duration: 0.3 },
+                    y: { type: "spring", visualDuration: 0.4, bounce: 0.2 },
+                  }}
+                >
+                  {percentChange}
+                </AnimateNumber>
+              </>
+            )}
+          </span>
+        )}
       </div>
     </foreignObject>
   );
@@ -293,6 +298,77 @@ interface CustomLegendProps {
   hoveredModel: string | null;
   onModelHover: (modelName: string | null) => void;
   deadModels?: Set<string>;
+  isMobile?: boolean;
+}
+
+// Single legend item component (used by both mobile ticker and desktop legend)
+function LegendItem({
+  model,
+  hoveredModel,
+  onModelHover,
+  deadModels,
+  compact = false,
+}: {
+  model: {
+    name: string;
+    color: string;
+    value: number;
+    pnl: number;
+  };
+  hoveredModel: string | null;
+  onModelHover: (modelName: string | null) => void;
+  deadModels?: Set<string>;
+  compact?: boolean;
+}) {
+  const isHovered = hoveredModel === model.name;
+  const isDimmed = hoveredModel !== null && !isHovered;
+  const isDead = deadModels?.has(model.name) ?? false;
+  const capitalBurnedPercent =
+    ((DEFAULT_STARTING_CAPITAL - model.value) / DEFAULT_STARTING_CAPITAL) * 100;
+  const isBurning = capitalBurnedPercent > 0;
+
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-1 px-2 rounded transition-opacity cursor-default text-xs shrink-0",
+        "hover:bg-muted/50",
+        isDimmed && "opacity-30",
+        isDead && "opacity-60",
+        compact && "py-1",
+      )}
+      onMouseEnter={() => onModelHover(model.name)}
+      onMouseLeave={() => onModelHover(null)}
+    >
+      <div
+        className="w-2 h-2 rounded-full shrink-0"
+        style={{
+          backgroundColor: isDead ? DEAD_MODEL_COLOR : model.color,
+        }}
+      />
+      <span
+        className={cn("font-medium shrink-0", isDead && "text-muted-foreground")}
+      >
+        {model.name}
+      </span>
+      <span className="text-muted-foreground shrink-0">
+        {formatCurrency(model.value)}
+      </span>
+      <span
+        className={cn(
+          "font-medium shrink-0",
+          isDead
+            ? "text-muted-foreground"
+            : isBurning
+              ? "text-red-500"
+              : "text-green-500",
+        )}
+      >
+        ({isBurning ? "" : "-"}
+        {Math.abs(capitalBurnedPercent).toFixed(1)}%)
+      </span>
+      <CapitalBurnedProgress currentValue={model.value} />
+    </div>
+  );
 }
 
 function CustomLegend({
@@ -304,13 +380,13 @@ function CustomLegend({
   hoveredModel,
   onModelHover,
   deadModels,
+  isMobile = false,
 }: CustomLegendProps) {
   if (!payload || payload.length === 0) return null;
 
   // Build model data with rankings and token usage
   const modelsWithData = payload.map((entry, index) => {
     const value = latestValues?.get(entry.value) || DEFAULT_STARTING_CAPITAL;
-    // Use total_pnl if available, otherwise calculate from current_value
     const pnl = pnlValues?.get(entry.value) ?? value - DEFAULT_STARTING_CAPITAL;
     const tokens = tokenUsage?.get(entry.value) || 0;
     const leaderboardEntry = leaderboard?.find(
@@ -330,64 +406,38 @@ function CustomLegend({
   // Sort by rank
   const sortedModels = [...modelsWithData].sort((a, b) => a.rank - b.rank);
 
+  // Mobile: horizontal scrolling ticker
+  if (isMobile) {
+    const tickerItems = sortedModels.map((model) => (
+      <LegendItem
+        key={model.name}
+        model={model}
+        hoveredModel={hoveredModel}
+        onModelHover={onModelHover}
+        deadModels={deadModels}
+        compact
+      />
+    ));
+
+    return (
+      <div className="pt-2 -mx-4">
+        <Ticker items={tickerItems} hoverFactor={0} />
+      </div>
+    );
+  }
+
+  // Desktop: wrapped flex layout
   return (
     <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 pt-2">
-      {sortedModels.map((model) => {
-        const isHovered = hoveredModel === model.name;
-        const isDimmed = hoveredModel !== null && !isHovered;
-        const isDead = deadModels?.has(model.name) ?? false;
-        // Capital burned: positive means lost money, negative means gained
-        const capitalBurnedPercent =
-          ((DEFAULT_STARTING_CAPITAL - model.value) /
-            DEFAULT_STARTING_CAPITAL) *
-          100;
-        const isBurning = capitalBurnedPercent > 0;
-
-        return (
-          <div
-            key={model.name}
-            className={cn(
-              "flex items-center gap-1 px-1 rounded transition-opacity cursor-default text-xs",
-              "hover:bg-muted/50",
-              isDimmed && "opacity-30",
-              isDead && "opacity-60",
-            )}
-            onMouseEnter={() => onModelHover(model.name)}
-            onMouseLeave={() => onModelHover(null)}
-          >
-            <div
-              className="w-2 h-2 rounded-full shrink-0"
-              style={{
-                backgroundColor: isDead ? DEAD_MODEL_COLOR : model.color,
-              }}
-            />
-            <span
-              className={cn("font-medium", isDead && "text-muted-foreground")}
-            >
-              {model.name}
-            </span>
-            {/* Current value */}
-            <span className="text-muted-foreground">
-              {formatCurrency(model.value)}
-            </span>
-            {/* Capital burned percentage */}
-            <span
-              className={cn(
-                "font-medium",
-                isDead
-                  ? "text-muted-foreground"
-                  : isBurning
-                    ? "text-red-500"
-                    : "text-green-500",
-              )}
-            >
-              ({isBurning ? "" : "-"}
-              {Math.abs(capitalBurnedPercent).toFixed(1)}%)
-            </span>
-            <CapitalBurnedProgress currentValue={model.value} />
-          </div>
-        );
-      })}
+      {sortedModels.map((model) => (
+        <LegendItem
+          key={model.name}
+          model={model}
+          hoveredModel={hoveredModel}
+          onModelHover={onModelHover}
+          deadModels={deadModels}
+        />
+      ))}
     </div>
   );
 }
@@ -495,6 +545,16 @@ export function PerformanceChart({
   const [valueDisplay, setValueDisplay] = useState<ValueDisplay>("dollar");
   const [hoveredModel, setHoveredModel] = useState<string | null>(null);
   const { resolvedTheme } = useTheme();
+
+  // Responsive right margin for line-end labels (smaller on mobile)
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 1024);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   // Theme-aware colors for chart elements
   const axisColor = useMemo(() => {
@@ -659,11 +719,12 @@ export function PerformanceChart({
         </div>
       </CardHeader>
       <CardContent>
-        <div style={{ height: CHART_CONFIG.height }}>
+        {/* Responsive height: ~300px on mobile, 500px on desktop */}
+        <div className="h-[300px] lg:h-[500px]">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
               data={chartData}
-              margin={{ ...CHART_CONFIG.margin, right: 110 }}
+              margin={{ ...CHART_CONFIG.margin, right: isMobile ? 30 : 110 }}
             >
               <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
               <XAxis
@@ -727,6 +788,7 @@ export function PerformanceChart({
                     activeDot={{ r: 4 }}
                     isAnimationActive={false}
                   >
+                    {/* Line-end labels: avatar only on mobile, avatar + P&L on desktop */}
                     <LabelList
                       dataKey={name}
                       content={(props) => {
@@ -755,6 +817,7 @@ export function PerformanceChart({
                             pnl={pnlDollars}
                             totalTokens={tokenUsage?.get(name) ?? 0}
                             valueDisplay={valueDisplay}
+                            isMobile={isMobile}
                           />
                         );
                       }}
@@ -772,6 +835,7 @@ export function PerformanceChart({
                     hoveredModel={hoveredModel}
                     onModelHover={setHoveredModel}
                     deadModels={deadModels}
+                    isMobile={isMobile}
                   />
                 }
                 verticalAlign="bottom"
