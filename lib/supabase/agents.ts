@@ -472,6 +472,65 @@ export async function getAgentHeldTickers(
 }
 
 /**
+ * Get all unique market tickers that any agent holds a position in.
+ * Optionally filter by platform (inferred from ticker format).
+ *
+ * @param sessionId - Current trading session ID
+ * @param platform - Optional: "polymarket" or "dflow" to filter
+ * @returns Array of unique market tickers
+ */
+export async function getAllAgentMarkets(
+  sessionId: string,
+  platform?: "polymarket" | "dflow",
+): Promise<string[]> {
+  const client = createServerClient();
+  if (!client) return [];
+
+  // Get all agent sessions for this trading session
+  const { data: sessions, error: sessionsError } = await client
+    .from("agent_sessions")
+    .select("id")
+    .eq("session_id", sessionId);
+
+  if (sessionsError || !sessions || sessions.length === 0) {
+    console.error("[agents] Failed to fetch agent sessions:", sessionsError);
+    return [];
+  }
+
+  const sessionIds = sessions.map((s: { id: string }) => s.id);
+
+  // Get all positions with quantity > 0
+  const { data: positions, error: positionsError } = await client
+    .from("agent_positions")
+    .select("market_ticker")
+    .in("agent_session_id", sessionIds)
+    .gt("quantity", 0);
+
+  if (positionsError || !positions) {
+    console.error("[agents] Failed to fetch agent positions:", positionsError);
+    return [];
+  }
+
+  // Get unique tickers
+  let uniqueTickers = [
+    ...new Set(
+      positions.map((p: { market_ticker: string }) => p.market_ticker),
+    ),
+  ];
+
+  // Filter by platform if specified
+  if (platform) {
+    uniqueTickers = uniqueTickers.filter((ticker) => {
+      // Polymarket tickers are very long numeric strings (50+ digits)
+      const isPolymarket = /^\d{50,}$/.test(ticker);
+      return platform === "polymarket" ? isPolymarket : !isPolymarket;
+    });
+  }
+
+  return uniqueTickers;
+}
+
+/**
  * Get all agents (by modelId) that hold a position in a specific market ticker.
  */
 export async function getAgentsHoldingTicker(

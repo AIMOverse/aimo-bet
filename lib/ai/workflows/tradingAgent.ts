@@ -108,11 +108,17 @@ export async function tradingAgentWorkflow(
     // (decision + trades + positions + session value)
     await recordResultsStep(agentSession, result);
 
-    // Step 5: Update balances for ALL agents (durable)
+    // Step 5: Notify relays of new positions
+    // This ensures the relay subscribes to markets the agent just traded
+    if (result.trades.length > 0) {
+      await notifyRelaysStep(result.trades);
+    }
+
+    // Step 6: Update balances for ALL agents (durable)
     // This ensures leaderboard reflects current on-chain state
     await updateAllBalancesStep(session);
 
-    // Step 6: Check and trigger cross-chain rebalancing (non-blocking)
+    // Step 7: Check and trigger cross-chain rebalancing (non-blocking)
     await checkAndRebalanceStep(input.modelId);
 
     console.log(
@@ -302,6 +308,118 @@ async function updateAllBalancesStep(session: TradingSession): Promise<void> {
     fetchBalance
   );
   console.log(`[tradingAgent] Updated ${updated.length} agent balances`);
+}
+
+/**
+ * Infer platform from ticker format.
+ * Polymarket tickers are very long numeric strings (50+ digits).
+ * dflow tickers are human-readable with dashes.
+ */
+function inferPlatform(ticker: string): "polymarket" | "dflow" {
+  if (/^\d{50,}$/.test(ticker)) {
+    return "polymarket";
+  }
+  return "dflow";
+}
+
+/**
+ * Notify the appropriate relay of new market subscriptions.
+ * Routes to polymarket-relay or dflow-relay based on platform inferred from ticker.
+ * Durable: Relay notifications should complete to ensure market tracking.
+ */
+async function notifyRelaysStep(
+  trades: TradingResult["trades"]
+): Promise<void> {
+  "use step";
+
+  const partyKitHost = process.env.NEXT_PUBLIC_PARTYKIT_HOST;
+  const webhookSecret = process.env.WEBHOOK_SECRET;
+
+  if (!partyKitHost || !webhookSecret) {
+    console.warn(
+      "[tradingAgent] Missing NEXT_PUBLIC_PARTYKIT_HOST or WEBHOOK_SECRET, skipping relay notification"
+    );
+    return;
+  }
+
+  // Group trades by platform (inferred from ticker format)
+  const polymarketMarkets = [
+    ...new Set(
+      trades
+        .filter((t) => inferPlatform(t.marketTicker) === "polymarket")
+        .map((t) => t.marketTicker)
+    ),
+  ];
+
+  const dflowMarkets = [
+    ...new Set(
+      trades
+        .filter((t) => inferPlatform(t.marketTicker) === "dflow")
+        .map((t) => t.marketTicker)
+    ),
+  ];
+
+  // Notify polymarket-relay
+  if (polymarketMarkets.length > 0) {
+    try {
+      const response = await fetch(
+        `${partyKitHost}/parties/polymarket-relay/main`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${webhookSecret}`,
+          },
+          body: JSON.stringify({
+            type: "subscribe_markets",
+            markets: polymarketMarkets,
+          }),
+        }
+      );
+
+      if (response.ok) {
+        const result = (await response.json()) as { subscribed: number };
+        if (result.subscribed > 0) {
+          console.log(
+            `[tradingAgent] Notified polymarket-relay of ${result.subscribed} new markets`
+          );
+        }
+      }
+    } catch (error) {
+      console.error("[tradingAgent] Error notifying polymarket-relay:", error);
+    }
+  }
+
+  // Notify dflow-relay
+  if (dflowMarkets.length > 0) {
+    try {
+      const response = await fetch(
+        `${partyKitHost}/parties/dflow-relay/main`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${webhookSecret}`,
+          },
+          body: JSON.stringify({
+            type: "subscribe_markets",
+            markets: dflowMarkets,
+          }),
+        }
+      );
+
+      if (response.ok) {
+        const result = (await response.json()) as { subscribed: number };
+        if (result.subscribed > 0) {
+          console.log(
+            `[tradingAgent] Notified dflow-relay of ${result.subscribed} new markets`
+          );
+        }
+      }
+    } catch (error) {
+      console.error("[tradingAgent] Error notifying dflow-relay:", error);
+    }
+  }
 }
 
 /**

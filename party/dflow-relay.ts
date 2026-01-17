@@ -1,4 +1,9 @@
-import type { Room, PartyKitServer, Connection } from "partykit/server";
+import type {
+  Room,
+  PartyKitServer,
+  Connection,
+  Request as PartyRequest,
+} from "partykit/server";
 
 // Cloudflare Workers WebSocket with accept() method for server-side connections
 interface CFWebSocket extends WebSocket {
@@ -11,8 +16,7 @@ interface CFWebSocketResponse extends Response {
 }
 
 const DFLOW_WS_URL = "wss://prediction-markets-api.dflow.net/api/v1/ws";
-const SWING_THRESHOLD = 0.1; // 10% price change
-const VOLUME_SPIKE_MULTIPLIER = 10; // 10x average volume
+const RECONNECT_DELAY = 5000;
 
 // Position flip detection thresholds (hysteresis)
 const FLIP_UPPER_THRESHOLD = 0.52; // Above this = YES-favored
@@ -31,40 +35,6 @@ interface PriceMessage {
   no_ask: string | null;
 }
 
-interface TradeMessage {
-  channel: "trades";
-  type: "trade";
-  market_ticker: string;
-  trade_id: string;
-  price: number;
-  count: number;
-  yes_price: number;
-  no_price: number;
-  yes_price_dollars: string;
-  no_price_dollars: string;
-  taker_side: "yes" | "no";
-  created_time: number;
-}
-
-interface OrderbookMessage {
-  channel: "orderbook";
-  type: "orderbook";
-  market_ticker: string;
-  yes_bids: Record<string, number>;
-  yes_asks: Record<string, number>;
-  no_bids: Record<string, number>;
-  no_asks: Record<string, number>;
-}
-
-type DflowMessage = PriceMessage | TradeMessage | OrderbookMessage;
-
-interface Signal {
-  type: "price_swing" | "volume_spike" | "orderbook_imbalance";
-  ticker: string;
-  data: Record<string, unknown>;
-  timestamp: number;
-}
-
 interface PositionFlipSignal {
   type: "position_flip";
   ticker: string;
@@ -79,18 +49,33 @@ interface PositionFlipSignal {
   timestamp: number;
 }
 
+// Client subscription message
+interface ClientSubscribeMessage {
+  type: "subscribe" | "unsubscribe";
+  tickers: string[];
+}
+
 export default class DflowRelay implements PartyKitServer {
   private dflowWs: WebSocket | null = null;
+
+  // Price tracking (for flip detection)
   private priceCache = new Map<string, number>();
-  private tradeVolumes = new Map<string, number[]>(); // Rolling window
   private positionStates = new Map<string, PositionState>();
   private flipCooldowns = new Map<string, number>(); // ticker -> last flip timestamp
+
+  // Subscription tracking (mirrors polymarket-relay pattern)
+  private subscribedTickers = new Set<string>();
+  private clientSubscriptions = new Map<string, Set<string>>(); // connId -> tickers
+  private agentMarkets = new Set<string>();
+  private agentMarketRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly AGENT_MARKET_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 min backup
 
   constructor(readonly room: Room) {}
 
   // Called when the room is created
   async onStart() {
     console.log("[dflow-relay] Starting relay server");
+    await this.refreshAgentMarkets();
     this.connectToDflow();
   }
 
@@ -120,7 +105,7 @@ export default class DflowRelay implements PartyKitServer {
           "[dflow-relay] Failed to establish WebSocket connection, status:",
           response.status,
         );
-        setTimeout(() => this.connectToDflow(), 5000);
+        setTimeout(() => this.connectToDflow(), RECONNECT_DELAY);
         return;
       }
 
@@ -130,34 +115,16 @@ export default class DflowRelay implements PartyKitServer {
 
       console.log("[dflow-relay] Connected to dflow");
 
-      // Subscribe to all channels immediately after accept()
-      // (Cloudflare WebSockets are already "open" after accept())
-      this.dflowWs.send(
-        JSON.stringify({
-          type: "subscribe",
-          channel: "prices",
-          all: true,
-        }),
-      );
-      this.dflowWs.send(
-        JSON.stringify({
-          type: "subscribe",
-          channel: "trades",
-          all: true,
-        }),
-      );
-      this.dflowWs.send(
-        JSON.stringify({
-          type: "subscribe",
-          channel: "orderbook",
-          all: true,
-        }),
-      );
+      // Subscribe to current markets (if any)
+      this.subscribeToCurrentMarkets();
+
+      // Start periodic refresh
+      this.startAgentMarketRefreshInterval();
 
       // Set up event handlers
       this.dflowWs.addEventListener("message", (event: MessageEvent) => {
         try {
-          const msg = JSON.parse(event.data as string) as DflowMessage;
+          const msg = JSON.parse(event.data as string) as PriceMessage;
           this.handleDflowMessage(msg);
         } catch (error) {
           console.error("[dflow-relay] Failed to parse message:", error);
@@ -165,8 +132,11 @@ export default class DflowRelay implements PartyKitServer {
       });
 
       this.dflowWs.addEventListener("close", () => {
-        console.log("[dflow-relay] Connection closed, reconnecting in 1s...");
-        setTimeout(() => this.connectToDflow(), 1000);
+        console.log(
+          "[dflow-relay] Connection closed, reconnecting in 5s...",
+        );
+        this.dflowWs = null;
+        setTimeout(() => this.connectToDflow(), RECONNECT_DELAY);
       });
 
       this.dflowWs.addEventListener("error", (error: Event) => {
@@ -174,8 +144,54 @@ export default class DflowRelay implements PartyKitServer {
       });
     } catch (error) {
       console.error("[dflow-relay] Failed to connect:", error);
-      setTimeout(() => this.connectToDflow(), 5000);
+      setTimeout(() => this.connectToDflow(), RECONNECT_DELAY);
     }
+  }
+
+  /**
+   * Subscribe to all currently tracked markets (union of client + agent markets).
+   */
+  private subscribeToCurrentMarkets() {
+    const allTickers = new Set<string>();
+
+    for (const tickers of this.clientSubscriptions.values()) {
+      for (const ticker of tickers) {
+        allTickers.add(ticker);
+      }
+    }
+    for (const ticker of this.agentMarkets) {
+      allTickers.add(ticker);
+    }
+
+    if (allTickers.size > 0 && this.dflowWs?.readyState === WebSocket.OPEN) {
+      this.sendSubscription(Array.from(allTickers));
+    }
+
+    this.subscribedTickers = allTickers;
+  }
+
+  /**
+   * Send subscription request to dflow for specific tickers.
+   */
+  private sendSubscription(tickers: string[]) {
+    if (!this.dflowWs || this.dflowWs.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    if (tickers.length === 0) {
+      return;
+    }
+
+    // dflow uses "tickers" array for selective subscription
+    this.dflowWs.send(
+      JSON.stringify({
+        type: "subscribe",
+        channel: "prices",
+        tickers: tickers,
+      }),
+    );
+
+    console.log(`[dflow-relay] Subscribed to ${tickers.length} markets`);
   }
 
   // Helper to determine position state from price
@@ -215,7 +231,8 @@ export default class DflowRelay implements PartyKitServer {
       // Record flip time
       this.flipCooldowns.set(msg.market_ticker, Date.now());
 
-      const previousPrice = this.priceCache.get(msg.market_ticker) || currentPrice;
+      const previousPrice =
+        this.priceCache.get(msg.market_ticker) || currentPrice;
 
       console.log(
         `[dflow-relay] Position flip detected: ${msg.market_ticker} ` +
@@ -231,229 +248,32 @@ export default class DflowRelay implements PartyKitServer {
           newPosition: currentState,
           previousPrice,
           currentPrice,
-          flipDirection: currentState === "no_favored" ? "yes_to_no" : "no_to_yes",
+          flipDirection:
+            currentState === "no_favored" ? "yes_to_no" : "no_to_yes",
         },
         timestamp: Date.now(),
       };
     }
 
+    // Update price cache
+    this.priceCache.set(msg.market_ticker, currentPrice);
+
     return null;
   }
 
-  // Handle incoming dflow messages
-  private handleDflowMessage(msg: DflowMessage) {
-    let signal: Signal | null = null;
+  // Handle incoming dflow messages (prices only)
+  private handleDflowMessage(msg: PriceMessage) {
+    // Only handle price messages
+    if (msg.channel !== "prices") return;
 
-    switch (msg.channel) {
-      case "prices":
-        // Check for position flip first (higher priority)
-        const flipSignal = this.detectPositionFlip(msg);
-        if (flipSignal) {
-          this.triggerAgentsWithFlip(flipSignal);
-        }
-        // Then check for price swing
-        signal = this.detectPriceSwing(msg);
-        break;
-      case "trades":
-        signal = this.detectVolumeSpike(msg);
-        break;
-      case "orderbook":
-        signal = this.detectOrderbookImbalance(msg);
-        break;
-    }
-
-    if (signal) {
-      this.triggerAgents(signal);
+    // Check for position flip
+    const flipSignal = this.detectPositionFlip(msg);
+    if (flipSignal) {
+      this.triggerAgentsWithFlip(flipSignal);
     }
 
     // Broadcast to connected frontend clients
     this.room.broadcast(JSON.stringify(msg));
-  }
-
-  // Detect price swings > threshold
-  private detectPriceSwing(msg: PriceMessage): Signal | null {
-    const yesBid = msg.yes_bid ? parseFloat(msg.yes_bid) : null;
-    const yesAsk = msg.yes_ask ? parseFloat(msg.yes_ask) : null;
-
-    if (yesBid === null || yesAsk === null) return null;
-
-    const mid = (yesBid + yesAsk) / 2;
-    const prev = this.priceCache.get(msg.market_ticker);
-    this.priceCache.set(msg.market_ticker, mid);
-
-    if (prev && prev > 0) {
-      const change = Math.abs(mid - prev) / prev;
-
-      if (change >= SWING_THRESHOLD) {
-        console.log(
-          `[dflow-relay] Price swing detected: ${msg.market_ticker} ${(
-            change * 100
-          ).toFixed(2)}%`,
-        );
-        return {
-          type: "price_swing",
-          ticker: msg.market_ticker,
-          data: {
-            previousPrice: prev,
-            currentPrice: mid,
-            changePercent: change,
-          },
-          timestamp: Date.now(),
-        };
-      }
-    }
-
-    return null;
-  }
-
-  // Detect volume spikes
-  private detectVolumeSpike(msg: TradeMessage): Signal | null {
-    const ticker = msg.market_ticker;
-    const volumes = this.tradeVolumes.get(ticker) || [];
-
-    // Add current trade volume
-    volumes.push(msg.count);
-
-    // Keep last 100 trades for average
-    if (volumes.length > 100) {
-      volumes.shift();
-    }
-    this.tradeVolumes.set(ticker, volumes);
-
-    // Need at least 10 trades to calculate average
-    if (volumes.length < 10) return null;
-
-    const avgVolume =
-      volumes.slice(0, -1).reduce((a, b) => a + b, 0) / (volumes.length - 1);
-
-    if (msg.count >= avgVolume * VOLUME_SPIKE_MULTIPLIER) {
-      console.log(
-        `[dflow-relay] Volume spike detected: ${ticker} ${
-          msg.count
-        } vs avg ${avgVolume.toFixed(0)}`,
-      );
-      return {
-        type: "volume_spike",
-        ticker: msg.market_ticker,
-        data: {
-          tradeId: msg.trade_id,
-          volume: msg.count,
-          averageVolume: avgVolume,
-          multiplier: msg.count / avgVolume,
-          takerSide: msg.taker_side,
-        },
-        timestamp: Date.now(),
-      };
-    }
-
-    return null;
-  }
-
-  // Detect orderbook imbalances
-  private detectOrderbookImbalance(msg: OrderbookMessage): Signal | null {
-    // Safely handle potentially missing fields with defaults
-    const yesBidDepth = Object.values(msg.yes_bids || {}).reduce(
-      (a, b) => a + b,
-      0,
-    );
-    const yesAskDepth = Object.values(msg.yes_asks || {}).reduce(
-      (a, b) => a + b,
-      0,
-    );
-    const noBidDepth = Object.values(msg.no_bids || {}).reduce(
-      (a, b) => a + b,
-      0,
-    );
-    const noAskDepth = Object.values(msg.no_asks || {}).reduce(
-      (a, b) => a + b,
-      0,
-    );
-
-    // Total depth on each side (YES vs NO)
-    const yesTotalDepth = yesBidDepth + yesAskDepth;
-    const noTotalDepth = noBidDepth + noAskDepth;
-
-    if (yesTotalDepth === 0 || noTotalDepth === 0) return null;
-
-    const ratio = yesTotalDepth / noTotalDepth;
-
-    // Significant imbalance: 3:1 or 1:3
-    if (ratio >= 3 || ratio <= 0.33) {
-      console.log(
-        `[dflow-relay] Orderbook imbalance: ${
-          msg.market_ticker
-        } ratio ${ratio.toFixed(2)}`,
-      );
-      return {
-        type: "orderbook_imbalance",
-        ticker: msg.market_ticker,
-        data: {
-          yesBidDepth,
-          yesAskDepth,
-          yesTotalDepth,
-          noBidDepth,
-          noAskDepth,
-          noTotalDepth,
-          ratio,
-          direction: ratio >= 3 ? "yes_heavy" : "no_heavy",
-        },
-        timestamp: Date.now(),
-      };
-    }
-
-    return null;
-  }
-
-  /**
-   * Trigger agents via Vercel API with position filtering.
-   * The trigger endpoint handles filtering to only agents holding the ticker.
-   */
-  private async triggerAgents(signal: Signal) {
-    const vercelUrl = this.room.env.VERCEL_URL as string | undefined;
-    const webhookSecret = this.room.env.WEBHOOK_SECRET as string | undefined;
-
-    if (!vercelUrl || !webhookSecret) {
-      console.warn("[dflow-relay] Missing VERCEL_URL or WEBHOOK_SECRET");
-      return;
-    }
-
-    try {
-      const response = await fetch(`${vercelUrl}/api/agents/trigger`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${webhookSecret}`,
-        },
-        body: JSON.stringify({
-          signal,
-          triggerType: "market",
-          filterByPosition: true, // Only trigger agents holding this ticker
-        }),
-      });
-
-      if (!response.ok) {
-        console.error(
-          `[dflow-relay] Failed to trigger agents: ${response.status}`,
-        );
-      } else {
-        const result = (await response.json()) as {
-          spawned: number;
-          failed: number;
-          message?: string;
-        };
-        if (result.spawned > 0) {
-          console.log(
-            `[dflow-relay] Triggered ${result.spawned} agent(s) for ${signal.ticker}`,
-          );
-        } else {
-          console.log(
-            `[dflow-relay] ${result.message || "No agents triggered"}`,
-          );
-        }
-      }
-    } catch (error) {
-      console.error("[dflow-relay] Error triggering agents:", error);
-    }
   }
 
   /**
@@ -503,12 +323,191 @@ export default class DflowRelay implements PartyKitServer {
     }
   }
 
-  // Handle frontend client connections (optional)
+  /**
+   * Fetch all dflow markets any agent holds and subscribe to them.
+   */
+  private async refreshAgentMarkets() {
+    const vercelUrl = this.room.env.VERCEL_URL as string | undefined;
+    const webhookSecret = this.room.env.WEBHOOK_SECRET as string | undefined;
+
+    if (!vercelUrl || !webhookSecret) {
+      console.warn("[dflow-relay] Missing VERCEL_URL or WEBHOOK_SECRET");
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${vercelUrl}/api/agents/markets?platform=dflow`,
+        {
+          headers: { Authorization: `Bearer ${webhookSecret}` },
+        },
+      );
+
+      if (!response.ok) {
+        console.error(
+          `[dflow-relay] Failed to fetch agent markets: ${response.status}`,
+        );
+        return;
+      }
+
+      const { markets } = (await response.json()) as { markets: string[] };
+
+      const newMarkets = markets.filter((m) => !this.agentMarkets.has(m));
+
+      this.agentMarkets = new Set(markets);
+
+      if (newMarkets.length > 0 && this.dflowWs?.readyState === WebSocket.OPEN) {
+        this.sendSubscription(newMarkets);
+        console.log(
+          `[dflow-relay] Subscribed to ${newMarkets.length} agent-held markets`,
+        );
+      }
+
+      console.log(`[dflow-relay] Tracking ${markets.length} agent-held markets`);
+    } catch (error) {
+      console.error("[dflow-relay] Error refreshing agent markets:", error);
+    }
+  }
+
+  /**
+   * Start periodic refresh of agent markets as a backup.
+   */
+  private startAgentMarketRefreshInterval() {
+    if (this.agentMarketRefreshTimer) {
+      clearInterval(this.agentMarketRefreshTimer);
+    }
+
+    this.agentMarketRefreshTimer = setInterval(() => {
+      this.refreshAgentMarkets();
+    }, this.AGENT_MARKET_REFRESH_INTERVAL);
+  }
+
+  /**
+   * Update subscriptions based on all tracked sources (clients + agents).
+   */
+  private updateSubscriptions() {
+    const allTickers = new Set<string>();
+
+    for (const tickers of this.clientSubscriptions.values()) {
+      for (const ticker of tickers) {
+        allTickers.add(ticker);
+      }
+    }
+
+    for (const ticker of this.agentMarkets) {
+      allTickers.add(ticker);
+    }
+
+    const newTickers = Array.from(allTickers).filter(
+      (t) => !this.subscribedTickers.has(t),
+    );
+
+    this.subscribedTickers = allTickers;
+
+    if (newTickers.length > 0) {
+      this.sendSubscription(newTickers);
+    }
+  }
+
+  /**
+   * Handle HTTP requests for real-time market subscription updates.
+   * Called by trading workflow when agent opens a new position.
+   */
+  async onRequest(req: PartyRequest): Promise<Response> {
+    if (req.method !== "POST") {
+      return new Response("Method not allowed", { status: 405 });
+    }
+
+    const authHeader = req.headers.get("authorization");
+    const webhookSecret = this.room.env.WEBHOOK_SECRET as string | undefined;
+
+    if (!webhookSecret || authHeader !== `Bearer ${webhookSecret}`) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+
+    try {
+      const body = (await req.json()) as {
+        type: string;
+        markets?: string[];
+      };
+
+      if (body.type === "subscribe_markets" && Array.isArray(body.markets)) {
+        const newMarkets = body.markets.filter((m) => !this.agentMarkets.has(m));
+
+        if (newMarkets.length > 0) {
+          for (const market of newMarkets) {
+            this.agentMarkets.add(market);
+          }
+
+          if (this.dflowWs?.readyState === WebSocket.OPEN) {
+            this.sendSubscription(newMarkets);
+            console.log(
+              `[dflow-relay] Real-time subscribed to ${newMarkets.length} new markets`,
+            );
+          }
+        }
+
+        return new Response(
+          JSON.stringify({ success: true, subscribed: newMarkets.length }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      return new Response("Invalid request type", { status: 400 });
+    } catch (error) {
+      console.error("[dflow-relay] HTTP handler error:", error);
+      return new Response("Internal error", { status: 500 });
+    }
+  }
+
+  // Handle frontend client connections
   onConnect(conn: Connection) {
     console.log(`[dflow-relay] Client connected: ${conn.id}`);
+    this.clientSubscriptions.set(conn.id, new Set());
+  }
+
+  // Handle client messages (subscription requests from frontend)
+  onMessage(
+    message: string | ArrayBuffer | ArrayBufferView,
+    sender: Connection,
+  ) {
+    try {
+      const messageStr =
+        typeof message === "string"
+          ? message
+          : new TextDecoder().decode(message);
+      const msg = JSON.parse(messageStr) as ClientSubscribeMessage;
+
+      if (msg.type === "subscribe" && Array.isArray(msg.tickers)) {
+        const clientTickers =
+          this.clientSubscriptions.get(sender.id) || new Set();
+        for (const ticker of msg.tickers) {
+          clientTickers.add(ticker);
+        }
+        this.clientSubscriptions.set(sender.id, clientTickers);
+        this.updateSubscriptions();
+        console.log(
+          `[dflow-relay] Client ${sender.id} subscribed to ${msg.tickers.length} markets`,
+        );
+      }
+
+      if (msg.type === "unsubscribe" && Array.isArray(msg.tickers)) {
+        const clientTickers = this.clientSubscriptions.get(sender.id);
+        if (clientTickers) {
+          for (const ticker of msg.tickers) {
+            clientTickers.delete(ticker);
+          }
+          this.updateSubscriptions();
+        }
+      }
+    } catch (error) {
+      console.error("[dflow-relay] Failed to parse client message:", error);
+    }
   }
 
   onClose(conn: Connection) {
     console.log(`[dflow-relay] Client disconnected: ${conn.id}`);
+    this.clientSubscriptions.delete(conn.id);
+    this.updateSubscriptions();
   }
 }

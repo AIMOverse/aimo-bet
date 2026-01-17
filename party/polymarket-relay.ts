@@ -1,4 +1,9 @@
-import type { Room, PartyKitServer, Connection } from "partykit/server";
+import type {
+  Room,
+  PartyKitServer,
+  Connection,
+  Request as PartyRequest,
+} from "partykit/server";
 
 const POLYMARKET_WS_URL =
   "wss://ws-subscriptions-clob.polymarket.com/ws/market";
@@ -140,10 +145,16 @@ export default class PolymarketRelay implements PartyKitServer {
   private positionStates = new Map<string, PositionState>();
   private flipCooldowns = new Map<string, number>(); // asset_id -> last flip timestamp
 
+  // Agent market tracking
+  private agentMarkets = new Set<string>();
+  private agentMarketRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly AGENT_MARKET_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 min backup
+
   constructor(readonly room: Room) {}
 
   async onStart() {
     console.log("[polymarket-relay] Starting relay server");
+    await this.refreshAgentMarkets(); // Fetch agent markets on startup
     this.connectToPolymarket();
   }
 
@@ -158,10 +169,19 @@ export default class PolymarketRelay implements PartyKitServer {
       ws.addEventListener("open", () => {
         console.log("[polymarket-relay] Connected to Polymarket");
         this.initialSubscriptionSent = false; // Reset on new connection
-        // Re-subscribe to all assets clients are interested in
+
+        // Re-subscribe to client markets
         if (this.subscribedAssets.size > 0) {
           this.sendSubscription(Array.from(this.subscribedAssets));
         }
+
+        // Subscribe to agent markets
+        if (this.agentMarkets.size > 0) {
+          this.sendSubscription(Array.from(this.agentMarkets));
+        }
+
+        // Start periodic refresh as backup
+        this.startAgentMarketRefreshInterval();
       });
 
       ws.addEventListener("message", (event: MessageEvent) => {
@@ -537,13 +557,138 @@ export default class PolymarketRelay implements PartyKitServer {
     }
   }
 
-  // Update subscriptions based on connected clients
+  /**
+   * Fetch all Polymarket markets any agent holds and subscribe to them.
+   */
+  private async refreshAgentMarkets() {
+    const vercelUrl = this.room.env.VERCEL_URL as string | undefined;
+    const webhookSecret = this.room.env.WEBHOOK_SECRET as string | undefined;
+
+    if (!vercelUrl || !webhookSecret) {
+      console.warn("[polymarket-relay] Missing VERCEL_URL or WEBHOOK_SECRET");
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${vercelUrl}/api/agents/markets?platform=polymarket`,
+        {
+          headers: { Authorization: `Bearer ${webhookSecret}` },
+        },
+      );
+
+      if (!response.ok) {
+        console.error(
+          `[polymarket-relay] Failed to fetch agent markets: ${response.status}`,
+        );
+        return;
+      }
+
+      const { markets } = (await response.json()) as { markets: string[] };
+
+      // Find new markets to subscribe to
+      const newMarkets = markets.filter((m) => !this.agentMarkets.has(m));
+
+      // Update tracked set
+      this.agentMarkets = new Set(markets);
+
+      // Subscribe to new markets if connected
+      if (
+        newMarkets.length > 0 &&
+        this.polymarketWs?.readyState === WebSocket.OPEN
+      ) {
+        this.sendSubscription(newMarkets);
+        console.log(
+          `[polymarket-relay] Subscribed to ${newMarkets.length} agent-held markets`,
+        );
+      }
+
+      console.log(
+        `[polymarket-relay] Tracking ${markets.length} agent-held markets`,
+      );
+    } catch (error) {
+      console.error("[polymarket-relay] Error refreshing agent markets:", error);
+    }
+  }
+
+  /**
+   * Start periodic refresh of agent markets as a backup.
+   */
+  private startAgentMarketRefreshInterval() {
+    if (this.agentMarketRefreshTimer) {
+      clearInterval(this.agentMarketRefreshTimer);
+    }
+
+    this.agentMarketRefreshTimer = setInterval(() => {
+      this.refreshAgentMarkets();
+    }, this.AGENT_MARKET_REFRESH_INTERVAL);
+  }
+
+  /**
+   * Handle HTTP requests for real-time market subscription updates.
+   * Called by trading workflow when agent opens a new position.
+   */
+  async onRequest(req: PartyRequest): Promise<Response> {
+    if (req.method !== "POST") {
+      return new Response("Method not allowed", { status: 405 });
+    }
+
+    const authHeader = req.headers.get("authorization");
+    const webhookSecret = this.room.env.WEBHOOK_SECRET as string | undefined;
+
+    if (!webhookSecret || authHeader !== `Bearer ${webhookSecret}`) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+
+    try {
+      const body = (await req.json()) as {
+        type: string;
+        markets?: string[];
+      };
+
+      if (body.type === "subscribe_markets" && Array.isArray(body.markets)) {
+        const newMarkets = body.markets.filter((m) => !this.agentMarkets.has(m));
+
+        if (newMarkets.length > 0) {
+          for (const market of newMarkets) {
+            this.agentMarkets.add(market);
+          }
+
+          if (this.polymarketWs?.readyState === WebSocket.OPEN) {
+            this.sendSubscription(newMarkets);
+            console.log(
+              `[polymarket-relay] Real-time subscribed to ${newMarkets.length} new markets`,
+            );
+          }
+        }
+
+        return new Response(
+          JSON.stringify({ success: true, subscribed: newMarkets.length }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      return new Response("Invalid request type", { status: 400 });
+    } catch (error) {
+      console.error("[polymarket-relay] HTTP handler error:", error);
+      return new Response("Internal error", { status: 500 });
+    }
+  }
+
+  // Update subscriptions based on connected clients and agent markets
   private updateSubscriptions() {
     const allAssets = new Set<string>();
+
+    // Add client-subscribed assets
     for (const assets of this.clientSubscriptions.values()) {
       for (const asset of assets) {
         allAssets.add(asset);
       }
+    }
+
+    // Add agent-held markets
+    for (const market of this.agentMarkets) {
+      allAssets.add(market);
     }
 
     // Find new assets to subscribe to
