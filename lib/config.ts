@@ -84,6 +84,17 @@ export const PARALLEL_TASK_WEBHOOK_URL = `${WEBHOOK_BASE_URL}/api/parallel/task/
 export const PARALLEL_MONITOR_WEBHOOK_URL = `${WEBHOOK_BASE_URL}/api/parallel/monitor/webhook`;
 
 // =============================================================================
+// Token Usage Display Configuration
+// =============================================================================
+
+/**
+ * Dollar budget per model for token usage display.
+ * When spent reaches this amount, the progress bar shows 0% remaining.
+ * Matches DEFAULT_STARTING_CAPITAL since that's each model's allocation.
+ */
+export const TOKEN_BUDGET_DOLLARS = 1000;
+
+// =============================================================================
 // Trading Configuration
 // =============================================================================
 

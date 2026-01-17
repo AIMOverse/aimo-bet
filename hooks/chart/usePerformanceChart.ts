@@ -20,6 +20,7 @@ interface UsePerformanceChartOptions {
 interface UsePerformanceChartReturn {
   chartData: ChartDataPoint[];
   latestValues: Map<string, number>;
+  pnlValues: Map<string, number>;
   tokenUsage: Map<string, number>;
   deadModels: Set<string>;
   loading: boolean;
@@ -31,6 +32,7 @@ interface AgentSessionRow {
   model_name: string;
   starting_capital: number;
   current_value: number;
+  total_pnl: number;
   total_tokens: number;
 }
 
@@ -57,6 +59,7 @@ export function usePerformanceChart({
   const [latestValues, setLatestValues] = useState<Map<string, number>>(
     new Map(),
   );
+  const [pnlValues, setPnlValues] = useState<Map<string, number>>(new Map());
   const [tokenUsage, setTokenUsage] = useState<Map<string, number>>(new Map());
   const [deadModels, setDeadModels] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -176,7 +179,7 @@ export function usePerformanceChart({
         const { data: sessionsData, error: sessionsError } = await client
           .from("agent_sessions")
           .select(
-            "id, model_name, starting_capital, current_value, total_tokens",
+            "id, model_name, starting_capital, current_value, total_pnl, total_tokens",
           )
           .eq("session_id", sessionId);
 
@@ -187,6 +190,7 @@ export function usePerformanceChart({
         // Build sessions map
         const sessionsMap = new Map<string, AgentSessionRow>();
         const latestValuesMap = new Map<string, number>();
+        const pnlValuesMap = new Map<string, number>();
         const tokenUsageMap = new Map<string, number>();
         const deadModelsSet = new Set<string>();
 
@@ -194,6 +198,9 @@ export function usePerformanceChart({
           const session = row as AgentSessionRow;
           sessionsMap.set(session.id, session);
           latestValuesMap.set(session.model_name, session.current_value);
+          // Calculate P&L from current_value - starting_capital (more reliable than total_pnl)
+          const calculatedPnl = session.current_value - session.starting_capital;
+          pnlValuesMap.set(session.model_name, calculatedPnl);
           tokenUsageMap.set(session.model_name, session.total_tokens ?? 0);
 
           if (session.current_value <= 0) {
@@ -203,6 +210,7 @@ export function usePerformanceChart({
 
         agentSessionsRef.current = sessionsMap;
         setLatestValues(latestValuesMap);
+        setPnlValues(pnlValuesMap);
         setTokenUsage(tokenUsageMap);
         setDeadModels(deadModelsSet);
 
@@ -394,12 +402,23 @@ export function usePerformanceChart({
 
             const modelName = payload.new.model_name as string;
             const currentValue = payload.new.current_value as number;
+            const startingCapital = payload.new.starting_capital as number;
             const totalTokens = (payload.new.total_tokens as number) ?? 0;
+
+            // Calculate P&L from current_value - starting_capital
+            const calculatedPnl = currentValue - startingCapital;
 
             // Update latest values
             setLatestValues((prev) => {
               const updated = new Map(prev);
               updated.set(modelName, currentValue);
+              return updated;
+            });
+
+            // Update P&L values
+            setPnlValues((prev) => {
+              const updated = new Map(prev);
+              updated.set(modelName, calculatedPnl);
               return updated;
             });
 
@@ -428,6 +447,7 @@ export function usePerformanceChart({
               agentSessionsRef.current.set(id, {
                 ...existing,
                 current_value: currentValue,
+                total_pnl: calculatedPnl,
                 total_tokens: totalTokens,
               });
             }
@@ -456,11 +476,16 @@ export function usePerformanceChart({
               return;
             }
 
+            const startingCapital = payload.new.starting_capital as number;
+            const currentValue = payload.new.current_value as number;
+            const calculatedPnl = currentValue - startingCapital;
+
             const newSession: AgentSessionRow = {
               id: payload.new.id as string,
               model_name: payload.new.model_name as string,
-              starting_capital: payload.new.starting_capital as number,
-              current_value: payload.new.current_value as number,
+              starting_capital: startingCapital,
+              current_value: currentValue,
+              total_pnl: calculatedPnl,
               total_tokens: (payload.new.total_tokens as number) ?? 0,
             };
 
@@ -471,6 +496,13 @@ export function usePerformanceChart({
             setLatestValues((prev) => {
               const updated = new Map(prev);
               updated.set(newSession.model_name, newSession.current_value);
+              return updated;
+            });
+
+            // Add to P&L values (calculated from current_value - starting_capital)
+            setPnlValues((prev) => {
+              const updated = new Map(prev);
+              updated.set(newSession.model_name, calculatedPnl);
               return updated;
             });
 
@@ -523,5 +555,5 @@ export function usePerformanceChart({
     };
   }, [sessionId, hoursBack, since, transformToChartData]);
 
-  return { chartData, latestValues, tokenUsage, deadModels, loading, error };
+  return { chartData, latestValues, pnlValues, tokenUsage, deadModels, loading, error };
 }

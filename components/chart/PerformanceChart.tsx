@@ -16,11 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { ChartDataPoint, LeaderboardEntry } from "@/lib/supabase/types";
 import { MODELS } from "@/lib/ai/models";
-import {
-  getModelSeriesIcon,
-  getModelCostPerMillion,
-  type ModelSeriesIconResult,
-} from "@/lib/ai/models/catalog";
+import { getModelSeriesIcon } from "@/lib/ai/models/catalog";
 import { DEFAULT_STARTING_CAPITAL, CHART_CONFIG } from "@/lib/config";
 import { useEffect, useMemo, useState } from "react";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
@@ -33,6 +29,7 @@ interface PerformanceChartProps {
   data: ChartDataPoint[];
   title?: string;
   latestValues?: Map<string, number>;
+  pnlValues?: Map<string, number>;
   tokenUsage?: Map<string, number>;
   leaderboard?: LeaderboardEntry[];
   deadModels?: Set<string>;
@@ -72,13 +69,6 @@ function formatPercent(value: number, startingCapital: number): string {
 function formatPnL(pnl: number): string {
   const sign = pnl >= 0 ? "+" : "";
   return `${sign}${formatCurrency(pnl)}`;
-}
-
-// Format token count (e.g., 1234567 -> "1.2M")
-function formatTokens(tokens: number): string {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(0)}K`;
-  return tokens.toString();
 }
 
 // Custom tooltip component - shows P&L values
@@ -153,7 +143,7 @@ interface LineEndLabelProps {
   isDimmed: boolean;
   isDead: boolean;
   onHover: (name: string | null) => void;
-  latestValue: number;
+  pnl: number;
   totalTokens: number;
   valueDisplay: ValueDisplay;
 }
@@ -169,7 +159,7 @@ function LineEndLabel({
   isDimmed,
   isDead,
   onHover,
-  latestValue,
+  pnl,
   totalTokens,
   valueDisplay,
 }: LineEndLabelProps) {
@@ -186,13 +176,9 @@ function LineEndLabel({
   const logoSize = 20; // Single row height
   const labelWidth = 180; // Width for logo + P&L + token info horizontally
 
-  // Calculate P&L values
-  const pnl = latestValue - DEFAULT_STARTING_CAPITAL;
+  // Calculate percent change from P&L
   const percentChange = (pnl / DEFAULT_STARTING_CAPITAL) * 100;
   const isPositive = pnl >= 0;
-
-  // Get cost per million tokens for this model
-  const costPerMillion = getModelCostPerMillion(modelName);
 
   return (
     <foreignObject
@@ -292,10 +278,6 @@ function LineEndLabel({
             </>
           )}
         </span>
-        {/* Token usage info */}
-        <span className="text-[9px] text-muted-foreground whitespace-nowrap">
-          {formatTokens(totalTokens)} / ${costPerMillion.toFixed(2)}
-        </span>
       </div>
     </foreignObject>
   );
@@ -305,6 +287,7 @@ function LineEndLabel({
 interface CustomLegendProps {
   payload?: Array<{ value: string; color: string; dataKey: string }>;
   latestValues?: Map<string, number>;
+  pnlValues?: Map<string, number>;
   tokenUsage?: Map<string, number>;
   leaderboard?: LeaderboardEntry[];
   hoveredModel: string | null;
@@ -315,6 +298,7 @@ interface CustomLegendProps {
 function CustomLegend({
   payload,
   latestValues,
+  pnlValues,
   tokenUsage,
   leaderboard,
   hoveredModel,
@@ -326,6 +310,8 @@ function CustomLegend({
   // Build model data with rankings and token usage
   const modelsWithData = payload.map((entry, index) => {
     const value = latestValues?.get(entry.value) || DEFAULT_STARTING_CAPITAL;
+    // Use total_pnl if available, otherwise calculate from current_value
+    const pnl = pnlValues?.get(entry.value) ?? value - DEFAULT_STARTING_CAPITAL;
     const tokens = tokenUsage?.get(entry.value) || 0;
     const leaderboardEntry = leaderboard?.find(
       (e) => e.model.name === entry.value,
@@ -334,6 +320,7 @@ function CustomLegend({
       name: entry.value,
       color: entry.color,
       value,
+      pnl,
       tokens,
       rank: leaderboardEntry?.rank || index + 1,
       change: leaderboardEntry?.change || 0,
@@ -346,13 +333,15 @@ function CustomLegend({
   return (
     <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 pt-2">
       {sortedModels.map((model) => {
-        const pnl = model.value - DEFAULT_STARTING_CAPITAL;
-        const isPositive = pnl >= 0;
         const isHovered = hoveredModel === model.name;
         const isDimmed = hoveredModel !== null && !isHovered;
         const isDead = deadModels?.has(model.name) ?? false;
-        const changePercent = (pnl / DEFAULT_STARTING_CAPITAL) * 100;
-        const costPerMillion = getModelCostPerMillion(model.name);
+        // Capital burned: positive means lost money, negative means gained
+        const capitalBurnedPercent =
+          ((DEFAULT_STARTING_CAPITAL - model.value) /
+            DEFAULT_STARTING_CAPITAL) *
+          100;
+        const isBurning = capitalBurnedPercent > 0;
 
         return (
           <div
@@ -377,22 +366,25 @@ function CustomLegend({
             >
               {model.name}
             </span>
+            {/* Current value */}
+            <span className="text-muted-foreground">
+              {formatCurrency(model.value)}
+            </span>
+            {/* Capital burned percentage */}
             <span
               className={cn(
                 "font-medium",
                 isDead
                   ? "text-muted-foreground"
-                  : isPositive
-                    ? "text-green-500"
-                    : "text-red-500",
+                  : isBurning
+                    ? "text-red-500"
+                    : "text-green-500",
               )}
             >
-              {changePercent >= 0 ? "+" : ""}
-              {changePercent.toFixed(1)}%
+              ({isBurning ? "" : "-"}
+              {Math.abs(capitalBurnedPercent).toFixed(1)}%)
             </span>
-            <span className="text-muted-foreground text-[10px]">
-              ({formatTokens(model.tokens)} / ${costPerMillion.toFixed(2)})
-            </span>
+            <CapitalBurnedProgress currentValue={model.value} />
           </div>
         );
       })}
@@ -400,36 +392,102 @@ function CustomLegend({
   );
 }
 
-// Nice number rounding for Y-axis ticks (symmetric around 0)
-function getNiceAxisMax(value: number, isPercent: boolean): number {
-  if (value <= 0) {
-    return isPercent ? 10 : 100; // Minimum range
+/**
+ * Calculate data-driven axis bounds that:
+ * 1. Always include zero (for P&L context)
+ * 2. Use nice intervals based on actual data range
+ * 3. Add minimal padding for breathing room
+ */
+function getDataDrivenAxisBounds(
+  dataMin: number,
+  dataMax: number,
+  isPercent: boolean,
+): { min: number; max: number } {
+  // Always include zero in the range
+  const rangeMin = Math.min(dataMin, 0);
+  const rangeMax = Math.max(dataMax, 0);
+  const range = rangeMax - rangeMin;
+
+  // Handle empty/minimal data
+  if (range < (isPercent ? 1 : 10)) {
+    const defaultPadding = isPercent ? 10 : 100;
+    return {
+      min: Math.min(rangeMin, -defaultPadding),
+      max: Math.max(rangeMax, defaultPadding),
+    };
   }
 
-  // Define nice tick values for dollar and percent modes
-  const niceValues = isPercent
-    ? [5, 10, 15, 20, 25, 50, 75, 100, 150, 200, 250, 500]
-    : [
-        50, 100, 150, 200, 250, 500, 750, 1000, 1500, 2000, 2500, 5000, 7500,
-        10000,
-      ];
+  // Calculate nice interval targeting ~5-7 tick marks
+  const rawInterval = range / 5;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawInterval)));
+  const normalized = rawInterval / magnitude;
 
-  // Find the smallest nice value that fits the data with padding
-  for (const nice of niceValues) {
-    if (nice >= value) {
-      return nice;
-    }
-  }
+  // Round to nearest nice multiplier
+  let niceMultiplier: number;
+  if (normalized <= 1) niceMultiplier = 1;
+  else if (normalized <= 2) niceMultiplier = 2;
+  else if (normalized <= 2.5) niceMultiplier = 2.5;
+  else if (normalized <= 5) niceMultiplier = 5;
+  else niceMultiplier = 10;
 
-  // For very large values, round up to nearest significant figure
-  const magnitude = Math.pow(10, Math.floor(Math.log10(value)));
-  return Math.ceil(value / magnitude) * magnitude;
+  const interval = niceMultiplier * magnitude;
+
+  // Extend to nice boundaries
+  const niceMin = Math.floor(rangeMin / interval) * interval;
+  const niceMax = Math.ceil(rangeMax / interval) * interval;
+
+  // Add half-interval padding
+  const padding = interval * 0.5;
+
+  return {
+    min: niceMin - padding,
+    max: niceMax + padding,
+  };
+}
+
+// CapitalBurnedProgress component for displaying capital burned as a progress bar
+interface CapitalBurnedProgressProps {
+  currentValue: number;
+  startingCapital?: number;
+}
+
+function CapitalBurnedProgress({
+  currentValue,
+  startingCapital = DEFAULT_STARTING_CAPITAL,
+}: CapitalBurnedProgressProps) {
+  // Calculate capital burned percentage (0% = no loss, 100% = all capital gone)
+  const burnedPercent = Math.max(
+    0,
+    Math.min(100, ((startingCapital - currentValue) / startingCapital) * 100),
+  );
+  const remainingPercent = 100 - burnedPercent;
+
+  // Color based on remaining capital
+  const getColor = () => {
+    if (remainingPercent > 50) return "bg-green-500";
+    if (remainingPercent > 25) return "bg-yellow-500";
+    if (remainingPercent > 0) return "bg-red-500";
+    return "bg-muted-foreground"; // Depleted
+  };
+
+  // For legend: wider bar showing remaining capital
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="w-12 h-1.5 bg-muted rounded-full overflow-hidden">
+        <div
+          className={cn("h-full rounded-full transition-all", getColor())}
+          style={{ width: `${remainingPercent}%` }}
+        />
+      </div>
+    </div>
+  );
 }
 
 export function PerformanceChart({
   data,
   title = "P&L Over Time",
   latestValues,
+  pnlValues,
   tokenUsage,
   leaderboard,
   deadModels,
@@ -517,11 +575,10 @@ export function PerformanceChart({
     return historicalData;
   }, [data, valueDisplay, modelNames, latestValues, now]);
 
-  // Calculate Y-axis domain: centered around 0 for P&L display with nice tick values
-  const yDomain = useMemo(() => {
+  // Calculate Y-axis domain: data-driven bounds that always include zero
+  const yDomain = useMemo((): [number, number] => {
     const excludeKeys = new Set(["timestamp", "_ts"]);
 
-    // Find min and max P&L values from data
     let actualMin = Infinity;
     let actualMax = -Infinity;
 
@@ -536,31 +593,48 @@ export function PerformanceChart({
 
     const isPercent = valueDisplay === "percent";
 
-    // Handle empty data case
+    // Handle empty data
     if (!isFinite(actualMax) || !isFinite(actualMin)) {
       const defaultMax = isPercent ? 10 : 100;
       return [-defaultMax, defaultMax];
     }
 
-    // Get the maximum absolute value and add 20% padding
-    const absMax = Math.max(Math.abs(actualMin), Math.abs(actualMax));
-    const paddedMax = absMax * 1.2;
-
-    // Round to a nice axis value for clean tick marks
-    const niceMax = getNiceAxisMax(paddedMax, isPercent);
-
-    return [-niceMax, niceMax];
+    const bounds = getDataDrivenAxisBounds(actualMin, actualMax, isPercent);
+    return [bounds.min, bounds.max];
   }, [chartData, valueDisplay]);
 
-  // Calculate X-axis domain: first data point to now + 1 hour
+  // Calculate X-axis domain: smart buffer based on data span
   const xDomain = useMemo((): [number, number] => {
-    const oneHourLater = now + 60 * 60 * 1000;
+    // Constants
+    const MIN_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
+    const MAX_BUFFER_MS = 30 * 60 * 1000; // 30 minutes
+    const MIN_SPAN_MS = 30 * 60 * 1000; // 30 minutes minimum width
 
-    // Start from first data point, or "now" if no data
-    const firstTimestamp =
-      chartData.length > 0 ? (chartData[0]._ts as number) : now;
+    if (chartData.length === 0) {
+      // Fallback: show 30-minute window from now
+      return [now, now + MIN_SPAN_MS];
+    }
 
-    return [firstTimestamp, oneHourLater];
+    const firstTs = chartData[0]._ts as number;
+    const lastTs = chartData[chartData.length - 1]._ts as number;
+    const dataSpan = lastTs - firstTs;
+
+    // Dynamic buffer: 10% of span, clamped
+    const buffer = Math.max(
+      MIN_BUFFER_MS,
+      Math.min(MAX_BUFFER_MS, dataSpan * 0.1),
+    );
+
+    // Calculate end time
+    let endTs = lastTs + buffer;
+
+    // Enforce minimum span
+    const totalSpan = endTs - firstTs;
+    if (totalSpan < MIN_SPAN_MS) {
+      endTs = firstTs + MIN_SPAN_MS;
+    }
+
+    return [firstTs, endTs];
   }, [chartData, now]);
 
   return (
@@ -655,23 +729,35 @@ export function PerformanceChart({
                   >
                     <LabelList
                       dataKey={name}
-                      content={(props) => (
-                        <LineEndLabel
-                          {...props}
-                          dataLength={chartData.length}
-                          modelName={name}
-                          color={lineColor}
-                          isHovered={isHovered}
-                          isDimmed={isDimmed}
-                          isDead={isDead}
-                          onHover={setHoveredModel}
-                          latestValue={
-                            latestValues?.get(name) ?? DEFAULT_STARTING_CAPITAL
-                          }
-                          totalTokens={tokenUsage?.get(name) ?? 0}
-                          valueDisplay={valueDisplay}
-                        />
-                      )}
+                      content={(props) => {
+                        // Get P&L from the last chart data point to match the line's visual position
+                        const lastChartPoint = chartData[chartData.length - 1];
+                        const chartPnl = lastChartPoint
+                          ? ((lastChartPoint[name] as number) ?? 0)
+                          : 0;
+                        // In percent mode, chartData already has percent values; in dollar mode, it has dollar P&L
+                        // We need dollar P&L for the label, so convert back if in percent mode
+                        const pnlDollars =
+                          valueDisplay === "percent"
+                            ? (chartPnl / 100) * DEFAULT_STARTING_CAPITAL
+                            : chartPnl;
+
+                        return (
+                          <LineEndLabel
+                            {...props}
+                            dataLength={chartData.length}
+                            modelName={name}
+                            color={lineColor}
+                            isHovered={isHovered}
+                            isDimmed={isDimmed}
+                            isDead={isDead}
+                            onHover={setHoveredModel}
+                            pnl={pnlDollars}
+                            totalTokens={tokenUsage?.get(name) ?? 0}
+                            valueDisplay={valueDisplay}
+                          />
+                        );
+                      }}
                     />
                   </Line>
                 );
@@ -680,6 +766,7 @@ export function PerformanceChart({
                 content={
                   <CustomLegend
                     latestValues={latestValues}
+                    pnlValues={pnlValues}
                     tokenUsage={tokenUsage}
                     leaderboard={leaderboard}
                     hoveredModel={hoveredModel}

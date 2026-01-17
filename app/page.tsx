@@ -29,6 +29,7 @@ export default function Home() {
   const {
     chartData,
     latestValues,
+    pnlValues,
     tokenUsage,
     deadModels,
     loading: performanceLoading,
@@ -83,6 +84,7 @@ export default function Home() {
             <PerformanceChart
               data={chartData}
               latestValues={latestValues}
+              pnlValues={pnlValues}
               tokenUsage={tokenUsage}
               deadModels={deadModels}
             />
