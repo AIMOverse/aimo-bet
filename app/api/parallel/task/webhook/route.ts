@@ -1,13 +1,59 @@
 // ============================================================================
 // Parallel AI Task Webhook Handler
 // Receives Task API completion webhooks and triggers agent workflows
+// Follows Standard Webhooks spec: https://github.com/standard-webhooks/standard-webhooks
 // ============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { createHmac } from "crypto";
+import { createHmac, timingSafeEqual } from "crypto";
 import { storeResearchResult } from "@/lib/supabase/research";
 import { PARALLEL_WEBHOOK_SECRET } from "@/lib/config";
 import type { WebhookPayload } from "@/lib/parallel/types";
+
+// ============================================================================
+// Standard Webhooks Signature Verification
+// ============================================================================
+
+/**
+ * Compute HMAC-SHA256 signature per Standard Webhooks spec
+ * Payload format: "{webhook-id}.{webhook-timestamp}.{body}"
+ */
+function computeSignature(
+  secret: string,
+  webhookId: string,
+  webhookTimestamp: string,
+  body: string,
+): string {
+  const payload = `${webhookId}.${webhookTimestamp}.${body}`;
+  const digest = createHmac("sha256", secret).update(payload).digest();
+  return digest.toString("base64");
+}
+
+/**
+ * Verify webhook signature against header
+ * Header format: "v1,<base64 signature>" (space-delimited if multiple)
+ */
+function isValidSignature(
+  webhookSignatureHeader: string,
+  expectedSignature: string,
+): boolean {
+  const signatures = webhookSignatureHeader.split(" ");
+
+  for (const part of signatures) {
+    const [version, sig] = part.split(",", 2);
+    if (version === "v1" && sig) {
+      try {
+        if (timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSignature))) {
+          return true;
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  return false;
+}
 
 // ============================================================================
 // Webhook Handler
@@ -17,28 +63,48 @@ import type { WebhookPayload } from "@/lib/parallel/types";
  * POST /api/parallel/task/webhook
  *
  * Receives webhook callbacks from Parallel Task API when research completes.
- * 1. Verifies HMAC signature
- * 2. Stores result in Supabase
- * 3. Triggers agent workflow with research payload
+ * Uses Standard Webhooks signature verification.
+ *
+ * Headers:
+ * - webhook-id: Unique identifier for the webhook event
+ * - webhook-timestamp: Unix timestamp in seconds
+ * - webhook-signature: "v1,<base64 signature>"
  */
 export async function POST(req: NextRequest) {
-  // 1. Verify signature
-  const signature = req.headers.get("x-parallel-signature");
+  // 1. Extract Standard Webhooks headers
+  const webhookId = req.headers.get("webhook-id");
+  const webhookTimestamp = req.headers.get("webhook-timestamp");
+  const webhookSignature = req.headers.get("webhook-signature");
   const body = await req.text();
 
   if (!PARALLEL_WEBHOOK_SECRET) {
-    console.error("[parallel/task/webhook] PARALLEL_WEBHOOK_SECRET not configured");
+    console.error(
+      "[parallel/task/webhook] PARALLEL_WEBHOOK_SECRET not configured",
+    );
     return NextResponse.json(
       { error: "Webhook secret not configured" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 
-  const expectedSignature = createHmac("sha256", PARALLEL_WEBHOOK_SECRET)
-    .update(body)
-    .digest("hex");
+  // 2. Verify all required headers are present
+  if (!webhookId || !webhookTimestamp || !webhookSignature) {
+    console.error("[parallel/task/webhook] Missing required webhook headers");
+    return NextResponse.json(
+      { error: "Missing webhook headers" },
+      { status: 400 },
+    );
+  }
 
-  if (signature !== expectedSignature) {
+  // 3. Verify signature
+  const expectedSignature = computeSignature(
+    PARALLEL_WEBHOOK_SECRET,
+    webhookId,
+    webhookTimestamp,
+    body,
+  );
+
+  if (!isValidSignature(webhookSignature, expectedSignature)) {
     console.error("[parallel/task/webhook] Invalid signature");
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
@@ -53,7 +119,7 @@ export async function POST(req: NextRequest) {
   }
 
   console.log(
-    `[parallel/task/webhook] Received: run_id=${payload.run_id}, status=${payload.status}`
+    `[parallel/task/webhook] Received: run_id=${payload.run_id}, status=${payload.status}`,
   );
 
   // 3. Store result in Supabase (for audit/retrieval)
@@ -70,7 +136,7 @@ export async function POST(req: NextRequest) {
 
   if (!webhookSecret || !vercelUrl) {
     console.error(
-      "[parallel/task/webhook] Missing WEBHOOK_SECRET or VERCEL_URL for agent trigger"
+      "[parallel/task/webhook] Missing WEBHOOK_SECRET or VERCEL_URL for agent trigger",
     );
     return NextResponse.json({ received: true, triggered: false });
   }
@@ -94,7 +160,7 @@ export async function POST(req: NextRequest) {
 
     if (!triggerResponse.ok) {
       console.error(
-        `[parallel/task/webhook] Failed to trigger agent: ${triggerResponse.status}`
+        `[parallel/task/webhook] Failed to trigger agent: ${triggerResponse.status}`,
       );
     } else {
       console.log("[parallel/task/webhook] Agent triggered successfully");

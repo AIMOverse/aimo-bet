@@ -1,10 +1,11 @@
 // ============================================================================
 // Parallel AI Monitor Webhook Handler
 // Receives Monitor API event webhooks and triggers agent workflows
+// Follows Standard Webhooks spec: https://github.com/standard-webhooks/standard-webhooks
 // ============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { createHmac } from "crypto";
+import { createHmac, timingSafeEqual } from "crypto";
 import { PARALLEL_WEBHOOK_SECRET } from "@/lib/config";
 import { getMonitorEventGroup } from "@/lib/parallel/client";
 import type {
@@ -42,6 +43,53 @@ export interface NewsEventPayload {
 }
 
 // ============================================================================
+// Standard Webhooks Signature Verification
+// ============================================================================
+
+/**
+ * Compute HMAC-SHA256 signature per Standard Webhooks spec
+ * Payload format: "{webhook-id}.{webhook-timestamp}.{body}"
+ */
+function computeSignature(
+  secret: string,
+  webhookId: string,
+  webhookTimestamp: string,
+  body: string,
+): string {
+  const payload = `${webhookId}.${webhookTimestamp}.${body}`;
+  const digest = createHmac("sha256", secret).update(payload).digest();
+  return digest.toString("base64"); // Standard Base64 with padding
+}
+
+/**
+ * Verify webhook signature against header
+ * Header format: "v1,<base64 signature>" (space-delimited if multiple)
+ */
+function isValidSignature(
+  webhookSignatureHeader: string,
+  expectedSignature: string,
+): boolean {
+  // Header may contain multiple space-delimited entries; each is "v1,<sig>"
+  const signatures = webhookSignatureHeader.split(" ");
+
+  for (const part of signatures) {
+    const [version, sig] = part.split(",", 2);
+    if (version === "v1" && sig) {
+      try {
+        if (timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSignature))) {
+          return true;
+        }
+      } catch {
+        // Buffer length mismatch, continue to next signature
+        continue;
+      }
+    }
+  }
+
+  return false;
+}
+
+// ============================================================================
 // Webhook Handler
 // ============================================================================
 
@@ -49,9 +97,12 @@ export interface NewsEventPayload {
  * POST /api/parallel/monitor/webhook
  *
  * Receives webhook callbacks from Parallel Monitor API when events are detected.
- * 1. Verifies HMAC signature
- * 2. Fetches full event details from Parallel API
- * 3. Triggers agent workflow with news event payload
+ * Uses Standard Webhooks signature verification.
+ *
+ * Headers:
+ * - webhook-id: Unique identifier for the webhook event
+ * - webhook-timestamp: Unix timestamp in seconds
+ * - webhook-signature: "v1,<base64 signature>"
  *
  * Event types:
  * - monitor.event.detected: New material changes detected (triggers agent)
@@ -59,23 +110,42 @@ export interface NewsEventPayload {
  * - monitor.execution.failed: Run failed (logged only)
  */
 export async function POST(req: NextRequest) {
-  // 1. Verify signature
-  const signature = req.headers.get("x-parallel-signature");
+  // 1. Extract Standard Webhooks headers
+  const webhookId = req.headers.get("webhook-id");
+  const webhookTimestamp = req.headers.get("webhook-timestamp");
+  const webhookSignature = req.headers.get("webhook-signature");
   const body = await req.text();
 
   if (!PARALLEL_WEBHOOK_SECRET) {
-    console.error("[parallel/monitor/webhook] PARALLEL_WEBHOOK_SECRET not configured");
+    console.error(
+      "[parallel/monitor/webhook] PARALLEL_WEBHOOK_SECRET not configured",
+    );
     return NextResponse.json(
       { error: "Webhook secret not configured" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 
-  const expectedSignature = createHmac("sha256", PARALLEL_WEBHOOK_SECRET)
-    .update(body)
-    .digest("hex");
+  // 2. Verify all required headers are present
+  if (!webhookId || !webhookTimestamp || !webhookSignature) {
+    console.error(
+      "[parallel/monitor/webhook] Missing required webhook headers",
+    );
+    return NextResponse.json(
+      { error: "Missing webhook headers" },
+      { status: 400 },
+    );
+  }
 
-  if (signature !== expectedSignature) {
+  // 3. Verify signature
+  const expectedSignature = computeSignature(
+    PARALLEL_WEBHOOK_SECRET,
+    webhookId,
+    webhookTimestamp,
+    body,
+  );
+
+  if (!isValidSignature(webhookSignature, expectedSignature)) {
     console.error("[parallel/monitor/webhook] Invalid signature");
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
@@ -90,7 +160,7 @@ export async function POST(req: NextRequest) {
   }
 
   console.log(
-    `[parallel/monitor/webhook] Received: type=${payload.type}, monitor_id=${payload.data.monitor_id}`
+    `[parallel/monitor/webhook] Received: type=${payload.type}, monitor_id=${payload.data.monitor_id}`,
   );
 
   // 3. Handle based on event type
@@ -100,19 +170,19 @@ export async function POST(req: NextRequest) {
 
     case "monitor.execution.completed":
       console.log(
-        `[parallel/monitor/webhook] Monitor ${payload.data.monitor_id} completed with no events`
+        `[parallel/monitor/webhook] Monitor ${payload.data.monitor_id} completed with no events`,
       );
       return NextResponse.json({ received: true, action: "none" });
 
     case "monitor.execution.failed":
       console.error(
-        `[parallel/monitor/webhook] Monitor ${payload.data.monitor_id} failed: ${payload.data.error}`
+        `[parallel/monitor/webhook] Monitor ${payload.data.monitor_id} failed: ${payload.data.error}`,
       );
       return NextResponse.json({ received: true, action: "none" });
 
     default:
       console.warn(
-        `[parallel/monitor/webhook] Unknown event type: ${payload.type}`
+        `[parallel/monitor/webhook] Unknown event type: ${payload.type}`,
       );
       return NextResponse.json({ received: true, action: "none" });
   }
@@ -123,15 +193,17 @@ export async function POST(req: NextRequest) {
  * Fetches full event details and triggers agent workflow
  */
 async function handleEventDetected(
-  payload: MonitorWebhookPayload
+  payload: MonitorWebhookPayload,
 ): Promise<NextResponse> {
   const { monitor_id, event, metadata } = payload.data;
 
   if (!event?.event_group_id) {
-    console.error("[parallel/monitor/webhook] Missing event_group_id in payload");
+    console.error(
+      "[parallel/monitor/webhook] Missing event_group_id in payload",
+    );
     return NextResponse.json(
       { error: "Missing event_group_id" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -140,13 +212,16 @@ async function handleEventDetected(
   try {
     eventGroup = await getMonitorEventGroup(monitor_id, event.event_group_id);
     console.log(
-      `[parallel/monitor/webhook] Fetched ${eventGroup.events.length} events for group ${event.event_group_id}`
+      `[parallel/monitor/webhook] Fetched ${eventGroup.events.length} events for group ${event.event_group_id}`,
     );
   } catch (error) {
-    console.error("[parallel/monitor/webhook] Failed to fetch event group:", error);
+    console.error(
+      "[parallel/monitor/webhook] Failed to fetch event group:",
+      error,
+    );
     return NextResponse.json(
       { error: "Failed to fetch event details" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 
@@ -176,7 +251,7 @@ async function handleEventDetected(
 
   if (!webhookSecret || !vercelUrl) {
     console.error(
-      "[parallel/monitor/webhook] Missing WEBHOOK_SECRET or VERCEL_URL for agent trigger"
+      "[parallel/monitor/webhook] Missing WEBHOOK_SECRET or VERCEL_URL for agent trigger",
     );
     return NextResponse.json({ received: true, triggered: false });
   }
@@ -201,14 +276,14 @@ async function handleEventDetected(
     if (!triggerResponse.ok) {
       const errorText = await triggerResponse.text();
       console.error(
-        `[parallel/monitor/webhook] Failed to trigger agent: ${triggerResponse.status} - ${errorText}`
+        `[parallel/monitor/webhook] Failed to trigger agent: ${triggerResponse.status} - ${errorText}`,
       );
       return NextResponse.json({ received: true, triggered: false });
     }
 
     const triggerResult = await triggerResponse.json();
     console.log(
-      `[parallel/monitor/webhook] Agent triggered: spawned=${triggerResult.spawned}, failed=${triggerResult.failed}`
+      `[parallel/monitor/webhook] Agent triggered: spawned=${triggerResult.spawned}, failed=${triggerResult.failed}`,
     );
 
     return NextResponse.json({
