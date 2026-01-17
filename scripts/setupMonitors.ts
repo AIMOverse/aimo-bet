@@ -41,16 +41,16 @@ async function listExistingMonitors() {
   console.log("Fetching existing monitors...\n");
 
   try {
-    const response = await listMonitors();
+    const monitors = await listMonitors();
 
-    if (response.monitors.length === 0) {
+    if (monitors.length === 0) {
       console.log("No monitors found.");
       return;
     }
 
-    console.log(`Found ${response.monitors.length} monitor(s):\n`);
+    console.log(`Found ${monitors.length} monitor(s):\n`);
 
-    for (const monitor of response.monitors) {
+    for (const monitor of monitors) {
       console.log(`  ID: ${monitor.monitor_id}`);
       console.log(`  Query: ${monitor.query.slice(0, 80)}...`);
       console.log(`  Cadence: ${monitor.cadence}`);
@@ -74,16 +74,16 @@ async function deleteAllMonitors() {
   console.log("Fetching existing monitors to delete...\n");
 
   try {
-    const response = await listMonitors();
+    const monitors = await listMonitors();
 
-    if (response.monitors.length === 0) {
+    if (monitors.length === 0) {
       console.log("No monitors to delete.");
       return;
     }
 
-    console.log(`Deleting ${response.monitors.length} monitor(s)...\n`);
+    console.log(`Deleting ${monitors.length} monitor(s)...\n`);
 
-    for (const monitor of response.monitors) {
+    for (const monitor of monitors) {
       console.log(`  Deleting ${monitor.monitor_id}...`);
       await deleteMonitor(monitor.monitor_id);
       console.log(`  Deleted.`);

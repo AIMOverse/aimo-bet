@@ -13,6 +13,7 @@ export {
   listMonitors,
   deleteMonitor,
   getMonitorEventGroup,
+  simulateMonitorEvent,
 } from "./client";
 
 // Types

@@ -9,5 +9,12 @@
       "path": "/api/agents/balances",
       "schedule": "*/30 * * * *"
     }
-  ]
+  ],
+  "bypassProtection": {
+    "paths": [
+      "/api/parallel/monitor/webhook",
+      "/api/parallel/task/webhook",
+      "/api/agents/trigger"
+    ]
+  }
 }

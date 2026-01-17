@@ -211,8 +211,9 @@ export async function getMonitor(monitorId: string): Promise<MonitorDetails> {
 
 /**
  * List all monitors
+ * Note: API returns array directly, not wrapped in { monitors: [...] }
  */
-export async function listMonitors(): Promise<MonitorListResponse> {
+export async function listMonitors(): Promise<MonitorDetails[]> {
   if (!PARALLEL_API_KEY) {
     throw new Error("PARALLEL_API_KEY is not configured");
   }
@@ -281,4 +282,47 @@ export async function getMonitorEventGroup(
   }
 
   return response.json();
+}
+
+/**
+ * Simulate a monitor event for testing webhook integration
+ * Sends a test event to the configured webhook URL
+ *
+ * @param monitorId - The monitor ID to simulate an event for
+ * @param eventType - The type of event to simulate (default: monitor.event.detected)
+ * @returns void (204 No Content on success)
+ */
+export async function simulateMonitorEvent(
+  monitorId: string,
+  eventType:
+    | "monitor.event.detected"
+    | "monitor.execution.completed"
+    | "monitor.execution.failed" = "monitor.event.detected",
+): Promise<void> {
+  if (!PARALLEL_API_KEY) {
+    throw new Error("PARALLEL_API_KEY is not configured");
+  }
+
+  const response = await fetch(
+    `${PARALLEL_API_URL}/v1alpha/monitors/${monitorId}/simulate_event?event_type=${eventType}`,
+    {
+      method: "POST",
+      headers: {
+        "x-api-key": PARALLEL_API_KEY,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    const error = await response.text();
+    if (response.status === 400) {
+      throw new Error(
+        `Webhook not configured for monitor ${monitorId}: ${error}`,
+      );
+    }
+    if (response.status === 404) {
+      throw new Error(`Monitor not found: ${monitorId}`);
+    }
+    throw new Error(`Simulate event failed: ${response.status} - ${error}`);
+  }
 }
