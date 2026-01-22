@@ -97,6 +97,8 @@ interface TriggerResponse {
  *
  * Note: Market signals are used for triggering/filtering only.
  * The LLM receives a static prompt for KV cache optimization.
+ *
+ * Season Guard: Will not trigger agents if session status is "completed".
  */
 export async function POST(req: NextRequest) {
   // Verify webhook secret (internal use only)
@@ -108,6 +110,25 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    // Check if season is still active
+    const session = await getGlobalSession();
+    if (session.status === "completed" || session.status === "paused") {
+      const reason =
+        session.status === "completed"
+          ? "Season has ended"
+          : "Season is paused";
+      console.log(`[agents/trigger] ${reason}, rejecting trigger request`);
+      return NextResponse.json({
+        success: false,
+        triggerType: "manual",
+        spawned: 0,
+        failed: 0,
+        workflows: [],
+        errors: [],
+        message: `${reason}. No new agent workflows will be triggered.`,
+      } satisfies TriggerResponse);
+    }
+
     const body = (await req.json()) as TriggerRequest;
     const {
       modelId,
