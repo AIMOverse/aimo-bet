@@ -6,6 +6,7 @@ import {
   type TradingInput,
 } from "@/lib/ai/workflows/tradingAgent";
 import { activeWorkflowsMap } from "@/app/api/agents/status/route";
+import { getGlobalSession } from "@/lib/supabase/db";
 
 // ============================================================================
 // Cron Job Endpoint for Agent Workflows
@@ -32,6 +33,8 @@ interface SpawnedWorkflow {
  *
  * Vercel cron job endpoint - triggers all agents periodically.
  * Spawns workflows directly (no fetch to /api/agents/trigger).
+ *
+ * Season Guard: Will not trigger agents if session status is "completed".
  */
 export async function GET(req: NextRequest) {
   // Verify cron secret (Vercel sends this for cron jobs)
@@ -43,9 +46,27 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  console.log("[agents/cron] Cron job triggered, spawning workflows");
+  console.log("[agents/cron] Cron job triggered");
 
   try {
+    // Check if season is still active
+    const session = await getGlobalSession();
+    if (session.status === "completed" || session.status === "paused") {
+      const reason =
+        session.status === "completed"
+          ? "Season has ended"
+          : "Season is paused";
+      console.log(`[agents/cron] ${reason}, skipping cron trigger`);
+      return NextResponse.json({
+        success: true,
+        message: `${reason}. Cron job skipped.`,
+        spawned: 0,
+        failed: 0,
+        workflows: [],
+      });
+    }
+
+    console.log("[agents/cron] Season active, spawning workflows");
     // Get models to trigger
     const allModels = getModelsWithWallets();
 
@@ -78,14 +99,14 @@ export async function GET(req: NextRequest) {
         });
 
         console.log(
-          `[agents/cron] Spawned workflow for ${model.id}: ${run.runId}`
+          `[agents/cron] Spawned workflow for ${model.id}: ${run.runId}`,
         );
 
         return {
           modelId: model.id,
           runId: run.runId,
         };
-      })
+      }),
     );
 
     // Collect results
@@ -106,13 +127,13 @@ export async function GET(req: NextRequest) {
         });
         console.error(
           `[agents/cron] Failed to spawn workflow for ${model.id}:`,
-          result.reason
+          result.reason,
         );
       }
     });
 
     console.log(
-      `[agents/cron] Spawned ${workflows.length} workflows, ${errors.length} failed`
+      `[agents/cron] Spawned ${workflows.length} workflows, ${errors.length} failed`,
     );
 
     return NextResponse.json({
@@ -130,7 +151,7 @@ export async function GET(req: NextRequest) {
         error: "Internal server error",
         details: error instanceof Error ? error.message : "Unknown error",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

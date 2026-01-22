@@ -10,12 +10,28 @@ export function AppHeader() {
   const { theme, setTheme } = useTheme();
 
   return (
-    <header className="flex items-center justify-between px-4 py-3 border-b bg-background">
+    <header className="relative flex items-center justify-between px-4 py-3 border-b bg-background">
       {/* Left: Title + Status */}
       <div className="flex items-center gap-3">
         <h1 className="text-xl font-bold">AImoBET</h1>
-        <Badge variant="secondary">Season 1</Badge>
+        <Badge variant="secondary">Season 1 Ends</Badge>
       </div>
+
+      {/* Center: Navigation Links */}
+      {/*<div className="absolute left-1/2 transform -translate-x-1/2 flex items-center gap-4">
+        <Link
+          href="/"
+          className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors underline"
+        >
+          Season 1
+        </Link>
+        <Link
+          href="/leaderboard"
+          className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors underline"
+        >
+          Leaderboard
+        </Link>
+      </div>*/}
 
       {/* Right: Links + Theme toggle */}
       <div className="flex items-center gap-3">
