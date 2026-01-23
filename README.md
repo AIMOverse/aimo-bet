@@ -62,54 +62,32 @@ We welcome contributions from the community! See [Contributing](#contributing) b
 
 ### Agent Execution Flow
 
-Agents are **stateless** - they don't maintain long-running processes. Each trigger starts a fresh workflow.
+Agents are **stateless** - each trigger starts a fresh durable workflow.
 
-**Four trigger modes:**
-- **Cron (every 30 min)** - Market discovery + portfolio review for all agents
-- **Position signals (real-time)** - Triggers agents holding positions in affected markets
-- **News events (real-time)** - Breaking news from Parallel AI monitors
-- **Research completion** - Deep research task results via webhook
+**Trigger modes:**
+- **Cron (6 hours)** - Market discovery + portfolio review
+- **Market flip (real-time)** - Price crosses 50% threshold on held positions
+- **News (real-time)** - Breaking news from Parallel AI monitors
+- **Research webhook** - Deep research task completion
 
 ```
-┌──────────────────────┐
-│   Trigger Sources    │
-├──────────────────────┤     POST /api/agents/trigger
-│ • PartyKit           │─────────────────────────────────┐
-│   (10% swings,       │                                 │
-│    10x volume)       │                                 │
-│ • Cron (30 min)      │                                 │
-│ • Parallel Monitors  │                                 │
-│   (breaking news)    │                                 │
-│ • Research webhooks  │                                 │
-│ • Manual             │                                 ▼
-└──────────────────────┘                     ┌───────────────────────┐
-                                             │ tradingAgentWorkflow  │
-                                             │  1. get session       │
-                                             │  2. get agent session │
-                                             │  3. run LLM agent ────┼──┐
-                                             │  4. record results    │  │
-                                             │  5. update balances   │  │
-                                             │  6. check rebalancing │  │
-                                             └───────────────────────┘  │
-                                                                        │
-                                ┌────────────────────────────────────────┘
-                                ▼
-                    ┌───────────────────────┐
-                    │ PredictionMarketAgent │
-                    │                       │
-                    │  Tools:               │
-                    │  • getBalance         │──▶ RPC (USDC)
-                    │  • getPositions       │──▶ dflow/Polymarket
-                    │  • discoverMarkets    │──▶ Multi-exchange
-                    │  • webSearch          │──▶ Parallel Search
-                    │  • deepResearch       │──▶ Parallel Tasks
-                    │  • placeMarketOrder   │──▶ Solana/Polygon tx
-                    │  • placeLimitOrder    │──▶ Solana/Polygon tx
-                    │  • cancelLimitOrder   │──▶ Solana/Polygon tx
-                    └───────────────────────┘
-
-Portfolio Value = USDC Balance (Solana + Polygon) + Σ(Position × Current Price)
+Triggers                    Workflow                      Agent (ToolLoopAgent)
+────────                    ────────                      ─────
+• Cron                      tradingAgentWorkflow          PredictionMarketAgent
+• Market flip    ─────────▶ ├─ getSession                 ├─ getBalance (RPC)
+• News                      ├─ getAgentSession            ├─ getPositions (API)
+• Research                  ├─ runAgentStep ────────────▶ ├─ discoverMarkets
+                            ├─ recordResults (Supabase)   ├─ explainMarket
+                            ├─ notifyRelays (PartyKit)    ├─ webSearch
+                            ├─ updateBalances             ├─ deepResearch
+                            └─ checkRebalance             ├─ placeMarketOrder
+                                                          ├─ placeLimitOrder
+                                                          └─ cancelLimitOrder
 ```
+
+- **Durable workflow**: Steps persist and recover from crashes
+- **Non-durable agent**: Tools fire once (no retry) to prevent duplicate orders
+- **KV cache friendly**: Static system prompt, balance fetched via tool
 
 ### Multi-Exchange Support
 
